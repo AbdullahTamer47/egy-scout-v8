@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  --bg-canvas: #090d16;
+  --bg-surface: #111827;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --accent-emerald: #10b981;
+}
+
+body {
+  background: var(--bg-canvas);
+  color: #f1f5f9;
+  font-family: var(--font-cairo), var(--font-inter), system-ui, -apple-system, sans-serif;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.studio-panel {
+  background: rgba(17, 24, 39, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+}
+
+.studio-hairline {
+  border-color: rgba(255, 255, 255, 0.08);
+}

@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+@layer base {
+  html,
+  body {
+    font-family: "Cairo", "Tajawal", "Segoe UI", Tahoma, Arial, sans-serif;
+    background-color: #050911;
+    background-image:
+      radial-gradient(ellipse 80% 45% at 50% -10%, rgba(16, 185, 129, 0.11), transparent 65%),
+      radial-gradient(ellipse 60% 40% at 10% 10%, rgba(34, 211, 238, 0.06), transparent 60%);
+    color: #f1f5f9;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sleek dark broadcast scrollbars */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #070c16;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}

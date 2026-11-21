@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EGY-SCOUT V8 — Phase 0 Fast Annotator</title>
+  <style>
+    :root {
+      --bg: #0b1120;
+      --panel: #111827;
+      --border: #1f2937;
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+      --accent: #10b981;
+      --team-a: #3b82f6;
+      --team-b: #ef4444;
+      --ref: #facc15;
+      --aref: #f97316;
+      --gk: #06b6d4;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      background: var(--bg); color: var(--text); display: flex; flex-direction: column; height: 100vh;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+    }
+    .brand { font-weight: 700; color: var(--accent); font-size: 16px; }
+    .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    select, button, input {
+      background: #1f2937; color: var(--text); border: 1px solid #374151;
+      border-radius: 6px; padding: 6px 10px; font-size: 13px; cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); color: #052e16; font-weight: 700; border: none; }
+    button.danger { background: #7f1d1d; border-color: #ef4444; }
+    .progress-wrap { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+    .progress-bar { width: 140px; height: 8px; background: #1f2937; border-radius: 99px; overflow: hidden; }
+    .progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width .2s; }
+
+    main { display: flex; flex: 1; min-height: 0; }
+    .canvas-area {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 12px; overflow: hidden; position: relative;
+    }
+    canvas {
+      max-width: 100%; max-height: 100%; border: 1px solid var(--border);
+      border-radius: 8px; cursor: crosshair; background: #000;
+    }
+    aside {
+      width: 340px; background: var(--panel); border-right: 1px solid var(--border);
+      padding: 12px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto;
+    }
+    .card {
+      background: #0f172a; border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+    }
+    .card h3 { margin: 0 0 8px; font-size: 13px; color: var(--accent); }
+    .btn-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+    .btn-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .chip.active { outline: 2px solid #fff; font-weight: 700; }
+    .person-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+    .person-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 6px 8px; border-radius: 6px; background: #1e293b; font-size: 12px; cursor: pointer;
+    }
+    .person-item.selected { outline: 2px solid var(--accent); background: #064e3b; }
+    .kbd {
+      display: inline-block; padding: 1px 5px; font-size: 11px; border-radius: 4px;
+      background: #374151; color: #e5e7eb; font-family: monospace; margin-left: 4px;
+    }
+    .shortcuts { font-size: 11px; color: var(--muted); line-height: 1.7; }
+    .status-toast {
+      position: absolute; bottom: 18px; left: 18px; background: #065f46; color: #ecfdf5;
+      padding: 6px 12px; border-radius: 6px; font-size: 12px; opacity: 0; transition: opacity .2s;
+    }
+    .status-toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">EGY-SCOUT V8 • أداة التعليم السريعة (المرحلة 0)</div>
+    <div class="controls">
+      <select id="matchSelect"></select>
+      <button id="prevFrameBtn">◀ السابق</button>
+      <span id="frameInfo" style="font-size:13px;min-width:130px;text-align:center;">—</span>
+      <button id="nextFrameBtn">التالي ▶</button>
+      <button id="completeFrameBtn" class="primary">✓ إنهاء الفريم (C)</button>
+      <button id="saveBtn">💾 حفظ (S)</button>
+    </div>
+    <div class="progress-wrap">
+      <span id="globalProgressText">0 / 300</span>
+      <div class="progress-bar"><div id="globalProgressFill" class="progress-fill"></div></div>
+    </div>
+  </header>
+
+  <main>
+    <aside>
+      <div class="card">
+        <h3>الشخص المحدد</h3>
+        <div id="selectedMeta" style="font-size:12px;color:var(--muted);margin-bottom:8px;">اختر شخصاً من الصورة أو القائمة</div>
+        <div style="font-size:12px;margin-bottom:4px;">الدور (Role):</div>
+        <div class="btn-grid" id="roleBtns">
+          <button class="chip" data-role="player"><span class="kbd">1</span> لاعب</button>
+          <button class="chip" data-role="goalkeeper"><span class="kbd">2</span> حارس</button>
+          <button class="chip" data-role="referee"><span class="kbd">3</span> حكم</button>
+          <button class="chip" data-role="assistant_referee"><span class="kbd">4</span> مساعد حكم</button>
+        </div>
+        <div style="font-size:12px;margin:8px 0 4px;">الفريق (Team):</div>
+        <div class="btn-grid-3" id="teamBtns">
+          <button class="chip" data-team="team_a"><span class="kbd">A</span> فريق أ</button>
+          <button class="chip" data-team="team_b"><span class="kbd">B</span> فريق ب</button>
+          <button class="chip" data-team="none"><span class="kbd">N</span> بدون</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px;align-items:center;">
+          <label for="jerseyInput" style="font-size:12px;">رقم القميص <span class="kbd">J</span>:</label>
+          <input id="jerseyInput" type="number" min="1" max="99" placeholder="اختياري" style="width:85px;" />
+          <button id="propagateBtn" title="تعميم على نفس track_id في كل الفريمات">تعميم المسار (T)</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px;">
+          <button id="drawModeBtn">➕ رسم صندوق جديد</button>
+          <button id="deleteBoxBtn" class="danger">🗑 حذف (Del)</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>الأشخاص في هذا الفريم (<span id="personCount">0</span>)</h3>
+        <div id="personList" class="person-list"></div>
+      </div>
+
+      <div class="card shortcuts">
+        <h3>اختصارات الكيبورد السريعة</h3>
+        <div><span class="kbd">1-4</span> الدور &nbsp;|&nbsp; <span class="kbd">A/B/N</span> الفريق &nbsp;|&nbsp; <span class="kbd">J</span> رقم القميص</div>
+        <div><span class="kbd">Space/Tab</span> الشخص التالي &nbsp;|&nbsp; <span class="kbd">←/→</span> الفريم</div>
+        <div><span class="kbd">T</span> تعميم على كل فريمات المسار &nbsp;|&nbsp; <span class="kbd">C</span> إنهاء الفريم</div>
+        <div><span class="kbd">S</span> حفظ &nbsp;|&nbsp; <span class="kbd">Del</span> حذف صندوق &nbsp;|&nbsp; سحب بالماوس لإضافة صندوق</div>
+      </div>
+    </aside>
+
+    <div class="canvas-area">
+      <canvas id="canvas"></canvas>
+      <div id="toast" class="status-toast">تم الحفظ</div>
+    </div>
+  </main>
+
+  <script>
+    const ROLE_COLORS = {
+      player_team_a: '#3b82f6',
+      player_team_b: '#ef4444',
+      player_none: '#9ca3af',
+      goalkeeper: '#06b6d4',
+      referee: '#facc15',
+      assistant_referee: '#f97316',
+    };
+
+    let matchData = null;
+    let frameIdx = 0;
+    let selectedPersonIdx = 0;
+    let currentImg = new Image();
+    let drawMode = false;
+    let dragStart = null;
+    let dragCur = null;
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const matchSelect = document.getElementById('matchSelect');
+    const jerseyInput = document.getElementById('jerseyInput');
+
+    function toast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 1600);
+    }
+
+    function boxColor(p) {
+      if (p.role === 'referee') return ROLE_COLORS.referee;
+      if (p.role === 'assistant_referee') return ROLE_COLORS.assistant_referee;
+      if (p.role === 'goalkeeper') return ROLE_COLORS.goalkeeper;
+      return ROLE_COLORS[`player_${p.team}`] || ROLE_COLORS.player_none;
+    }
+
+    async function loadMatchList() {
+      const res = await fetch('/api/matches');
+      const data = await res.json();
+      document.getElementById('globalProgressText').textContent =
+        `${data.completed_frames} / ${data.target_frames} (مجهز: ${data.total_frames})`;
+      const pct = Math.min(100, Math.round((data.completed_frames / Math.max(1, data.target_frames)) * 100));
+      document.getElementById('globalProgressFill').style.width = `${pct}%`;
+
+      matchSelect.innerHTML = '';
+      for (const m of data.matches) {
+        const opt = document.createElement('option');
+        opt.value = m.match_id;
+        opt.textContent = `${m.match_id} (${m.completed_frames}/${m.total_frames})`;
+        matchSelect.appendChild(opt);
+      }
+      if (data.matches.length > 0 && !matchData) {
+        await loadMatch(data.matches[0].match_id);
+      }
+    }
+
+    async function loadMatch(matchId) {
+      const res = await fetch(`/api/matches/${encodeURIComponent(matchId)}`);
+      matchData = await res.json();
+      frameIdx = 0;
+      selectedPersonIdx = 0;
+      renderFrame();
+    }
+
+    function curFrame() {
+      return matchData && matchData.frames[frameIdx] ? matchData.frames[frameIdx] : null;
+    }
+
+    function curPerson() {
+      const f = curFrame();
+      if (!f || !f.persons.length) return null;
+      selectedPersonIdx = Math.max(0, Math.min(selectedPersonIdx, f.persons.length - 1));
+      return f.persons[selectedPersonIdx];
+    }
+
+    function renderFrame() {
+      const f = curFrame();
+      if (!f) return;
+      document.getElementById('frameInfo').textContent =
+        `فريم ${f.frame_id} (${frameIdx + 1}/${matchData.frames.length}) ${f.completed ? '✅' : ''}`;
+      currentImg = new Image();
+      currentImg.onload = () => {
+        canvas.width = currentImg.naturalWidth;
+        canvas.height = currentImg.naturalHeight;
+        drawCanvas();
+      };
+      currentImg.src = `/api/matches/${encodeURIComponent(matchData.match_id)}/frame/${f.frame_id}/image`;
+      renderSidebar();
+    }
+
+    function drawCanvas() {
+      const f = curFrame();
+      if (!f || !currentImg.complete) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(currentImg, 0, 0);
+
+      f.persons.forEach((p, idx) => {
+        const [x1, y1, x2, y2] = p.bbox;
+        const isSel = idx === selectedPersonIdx;
+        const color = boxColor(p);
+        ctx.save();
+        ctx.strokeStyle = isSel ? '#ffffff' : color;
+        ctx.lineWidth = isSel ? 3.5 : 2;
+        if (!p.verified) ctx.setLineDash([6, 4]);
+        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+        ctx.setLineDash([]);
+
+        const tag = `#${p.track_id ?? p.ann_id} ${p.role[0].toUpperCase()}${p.team !== 'none' ? '/' + p.team.slice(-1).toUpperCase() : ''}${p.jersey_number ? ' #' + p.jersey_number : ''}`;
+        ctx.font = 'bold 13px monospace';
+        const tw = ctx.measureText(tag).width + 8;
+        ctx.fillStyle = color;
+        ctx.fillRect(x1, Math.max(0, y1 - 18), tw, 18);
+        ctx.fillStyle = '#000';
+        ctx.fillText(tag, x1 + 4, Math.max(13, y1 - 4));
+        ctx.restore();
+      });
+
+      if (dragStart && dragCur) {
+        ctx.save();
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(dragStart.x, dragStart.y, dragCur.x - dragStart.x, dragCur.y - dragStart.y);
+        ctx.restore();
+      }
+    }
+
+    function renderSidebar() {
+      const f = curFrame();
+      if (!f) return;
+      document.getElementById('personCount').textContent = f.persons.length;
+      const list = document.getElementById('personList');
+      list.innerHTML = '';
+      f.persons.forEach((p, idx) => {
+        const div = document.createElement('div');
+        div.className = 'person-item' + (idx === selectedPersonIdx ? ' selected' : '');
+        div.innerHTML = `<span>${p.verified ? '✅' : '○'} T${p.track_id ?? '-'} • ${p.role} (${p.team})${p.jersey_number ? ' #' + p.jersey_number : ''}</span>
+                         <span style="width:10px;height:10px;border-radius:50%;background:${boxColor(p)}"></span>`;
+        div.onclick = () => { selectedPersonIdx = idx; renderSidebar(); drawCanvas(); };
+        list.appendChild(div);
+      });
+
+      const p = curPerson();
+      document.querySelectorAll('#roleBtns button').forEach(b => b.classList.toggle('active', p && b.dataset.role === p.role));
+      document.querySelectorAll('#teamBtns button').forEach(b => b.classList.toggle('active', p && b.dataset.team === p.team));
+      if (p) {
+        jerseyInput.value = p.jersey_number ?? '';
+        document.getElementById('selectedMeta').textContent =
+          `Track: ${p.track_id ?? 'جديد'} | إحداثي: (${p.x_m ?? '?'}م, ${p.y_m ?? '?'}م)`;
+      } else {
+        jerseyInput.value = '';
+        document.getElementById('selectedMeta').textContent = 'لا يوجد أشخاص في هذا الفريم';
+      }
+    }
+
+    function updateSelected(patch) {
+      const p = curPerson();
+      if (!p) return;
+      Object.assign(p, patch, { verified: true });
+      if (p.role === 'referee' || p.role === 'assistant_referee') {
+        p.team = 'none';
+      }
+      renderSidebar();
+      drawCanvas();
+    }
+
+    async function saveMatch(silent = false) {
+      if (!matchData) return;
+      await fetch(`/api/matches/${encodeURIComponent(matchData.match_id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(matchData),
+      });
+      await loadMatchList();
+      if (!silent) toast('تم حفظ التعديلات');
+    }
+
+    async function propagateCurrentTrack() {
+      const p = curPerson();
+      if (!p || p.track_id === null || p.track_id === undefined) {
+        toast('هذا الصندوق ليس له track_id');
+        return;
+      }
+      await saveMatch(true);
+      const res = await fetch(`/api/matches/${encodeURIComponent(matchData.match_id)}/propagate_track`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          track_id: p.track_id,
+          role: p.role,
+          team: p.team,
+          jersey_number: p.jersey_number,
+        }),
+      });
+      const out = await res.json();
+      const keepFrame = frameIdx;
+      const keepPerson = selectedPersonIdx;
+      await loadMatch(matchData.match_id);
+      frameIdx = Math.min(keepFrame, Math.max(0, matchData.frames.length - 1));
+      selectedPersonIdx = keepPerson;
+      renderFrame();
+      toast(`تم تعميم المسار #${p.track_id} على ${out.updated_instances} لقطة`);
+    }
+
+    function canvasCoords(evt) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (evt.clientX - rect.left) * (canvas.width / rect.width),
+        y: (evt.clientY - rect.top) * (canvas.height / rect.height),
+      };
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      const pt = canvasCoords(e);
+      if (drawMode || e.shiftKey) {
+        dragStart = pt;
+        dragCur = pt;
+        return;
+      }
+      const f = curFrame();
+      if (!f) return;
+      const hit = f.persons.findIndex(p => {
+        const [x1, y1, x2, y2] = p.bbox;
+        return pt.x >= x1 && pt.x <= x2 && pt.y >= y1 && pt.y <= y2;
+      });
+      if (hit >= 0) {
+        selectedPersonIdx = hit;
+        renderSidebar();
+        drawCanvas();
+      }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!dragStart) return;
+      dragCur = canvasCoords(e);
+      drawCanvas();
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      if (!dragStart || !dragCur) return;
+      const x1 = Math.min(dragStart.x, dragCur.x), y1 = Math.min(dragStart.y, dragCur.y);
+      const x2 = Math.max(dragStart.x, dragCur.x), y2 = Math.max(dragStart.y, dragCur.y);
+      dragStart = null; dragCur = null; drawMode = false;
+      if ((x2 - x1) > 8 && (y2 - y1) > 12) {
+        const f = curFrame();
+        const nextId = f.persons.reduce((m, p) => Math.max(m, p.ann_id), 0) + 1;
+        f.persons.push({
+          ann_id: nextId, bbox: [Math.round(x1), Math.round(y1), Math.round(x2), Math.round(y2)],
+          role: 'player', team: 'none', jersey_number: null, track_id: null, x_m: null, y_m: null, verified: true, notes: ''
+        });
+        selectedPersonIdx = f.persons.length - 1;
+      }
+      renderSidebar();
+      drawCanvas();
+    });
+
+    document.querySelectorAll('#roleBtns button').forEach(b => b.onclick = () => updateSelected({ role: b.dataset.role }));
+    document.querySelectorAll('#teamBtns button').forEach(b => b.onclick = () => updateSelected({ team: b.dataset.team }));
+    jerseyInput.addEventListener('change', () => {
+      const val = jerseyInput.value.trim();
+      updateSelected({ jersey_number: val ? parseInt(val, 10) : null });
+    });
+    document.getElementById('propagateBtn').onclick = propagateCurrentTrack;
+    document.getElementById('drawModeBtn').onclick = () => { drawMode = true; toast('اسحب بالماوس على الصورة لرسم صندوق'); };
+    document.getElementById('deleteBoxBtn').onclick = () => {
+      const f = curFrame();
+      if (!f || !f.persons.length) return;
+      f.persons.splice(selectedPersonIdx, 1);
+      selectedPersonIdx = Math.max(0, selectedPersonIdx - 1);
+      renderSidebar(); drawCanvas();
+    };
+    document.getElementById('prevFrameBtn').onclick = async () => { await saveMatch(true); frameIdx = Math.max(0, frameIdx - 1); selectedPersonIdx = 0; renderFrame(); };
+    document.getElementById('nextFrameBtn').onclick = async () => { await saveMatch(true); frameIdx = Math.min(matchData.frames.length - 1, frameIdx + 1); selectedPersonIdx = 0; renderFrame(); };
+    document.getElementById('completeFrameBtn').onclick = async () => {
+      const f = curFrame(); if (!f) return;
+      f.completed = true;
+      await saveMatch(true);
+      if (frameIdx < matchData.frames.length - 1) frameIdx++;
+      selectedPersonIdx = 0;
+      renderFrame();
+      toast('تم اعتماد الفريم ✓');
+    };
+    document.getElementById('saveBtn').onclick = () => saveMatch(false);
+    matchSelect.onchange = () => loadMatch(matchSelect.value);
+
+    window.addEventListener('keydown', (e) => {
+      if (document.activeElement === jerseyInput) {
+        if (e.key === 'Enter' || e.key === 'Escape') { jerseyInput.blur(); }
+        return;
+      }
+      const k = e.key.toLowerCase();
+      if (k === '1') updateSelected({ role: 'player' });
+      else if (k === '2') updateSelected({ role: 'goalkeeper' });
+      else if (k === '3') updateSelected({ role: 'referee' });
+      else if (k === '4') updateSelected({ role: 'assistant_referee' });
+      else if (k === 'a') updateSelected({ team: 'team_a' });
+      else if (k === 'b') updateSelected({ team: 'team_b' });
+      else if (k === 'n') updateSelected({ team: 'none' });
+      else if (k === 'j') { e.preventDefault(); jerseyInput.focus(); jerseyInput.select(); }
+      else if (k === 't') propagateCurrentTrack();
+      else if (k === 's') { e.preventDefault(); saveMatch(false); }
+      else if (k === 'c') document.getElementById('completeFrameBtn').click();
+      else if (e.key === ' ' || e.key === 'Tab') {
+        e.preventDefault();
+        const f = curFrame();
+        if (f && f.persons.length) {
+          selectedPersonIdx = (selectedPersonIdx + (e.shiftKey ? -1 : 1) + f.persons.length) % f.persons.length;
+          renderSidebar(); drawCanvas();
+        }
+      } else if (e.key === 'ArrowRight' || k === 'd') document.getElementById('nextFrameBtn').click();
+      else if (e.key === 'ArrowLeft') document.getElementById('prevFrameBtn').click();
+      else if (e.key === 'Delete' || e.key === 'Backspace') document.getElementById('deleteBoxBtn').click();
+    });
+
+    loadMatchList();
+  </script>
+</body>
+</html>

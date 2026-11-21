@@ -1,0 +1,184 @@
+"""Comprehensive test suite for Waves 1-5 engineering modules & Colab L4 Full Notebook."""
+from __future__ import annotations
+
+import ast
+import json
+import unittest
+
+import numpy as np
+import pandas as pd
+
+from packages.innovation_lab.kinematic_sandbox import optimize_set_piece_self_play
+from packages.shared_contracts.config import get_repo_root
+from packages.shared_contracts.lineup_connector import parse_scoresheet_text
+from packages.shared_contracts.r2_storage import (
+    generate_signed_video_token,
+    verify_signed_video_token,
+)
+from services.cv_worker.lazy_engines.event_pose import (
+    evaluate_pose_with_resolution_gate,
+    select_event_pose_windows,
+)
+from services.cv_worker.lazy_engines.video_export import build_hls_ffmpeg_command
+from services.cv_worker.stages.ball_tracker import (
+    generate_sahi_tiles,
+    track_and_inpaint_ball,
+)
+from services.cv_worker.stages.events_spotting import (
+    classify_shot_gate,
+    detect_scoreboard_goal_changes,
+    extract_goal_forensics_window,
+)
+from services.cv_worker.stages.jersey_ocr import (
+    check_jersey_legibility,
+    vote_track_jersey_number,
+)
+from services.cv_worker.stages.reid_embedder import merge_fragmented_tracks_reid
+from services.orchestrator.chunk_pipeline import (
+    plan_video_chunks,
+    stitch_chunk_dataframes,
+)
+
+
+class TestWaves1To5(unittest.TestCase):
+    def test_wave1_18_chunk_orchestrator_and_cross_chunk_stitcher(self) -> None:
+        chunks = plan_video_chunks(duration_s=5400.0, fps=25.0, chunk_duration_s=300.0, overlap_s=5.0)
+        self.assertEqual(len(chunks), 18)
+        self.assertEqual(chunks[0].start_s, 0.0)
+        self.assertEqual(chunks[1].overlap_s, 5.0)
+
+        # Stitch two overlapping chunks where local track 7 in chunk 2 is the same player as track 1 in chunk 1
+        c1 = pd.DataFrame([
+            {"frame_id": 100, "track_id": 1, "role": "player", "x1": 100, "y1": 100, "x2": 130, "y2": 180, "x_m": 40.0, "y_m": 30.0},
+            {"frame_id": 101, "track_id": 1, "role": "player", "x1": 102, "y1": 100, "x2": 132, "y2": 180, "x_m": 40.3, "y_m": 30.1},
+        ])
+        c2 = pd.DataFrame([
+            {"frame_id": 101, "track_id": 7, "role": "player", "x1": 103, "y1": 100, "x2": 133, "y2": 180, "x_m": 40.4, "y_m": 30.1},
+            {"frame_id": 102, "track_id": 7, "role": "player", "x1": 105, "y1": 100, "x2": 135, "y2": 180, "x_m": 40.7, "y_m": 30.2},
+        ])
+        stitched = stitch_chunk_dataframes([c1, c2])
+        self.assertEqual(len(stitched), 3)
+        self.assertTrue((stitched["track_id"] == 1).all())
+
+    def test_wave1_jersey_legibility_voting_reid_and_scoresheet(self) -> None:
+        tiny = np.zeros((10, 10, 3), dtype=np.uint8)
+        self.assertFalse(check_jersey_legibility(tiny).is_legible)
+
+        num, conf = vote_track_jersey_number([(10, 0.85), (10, 0.90), (18, 0.40)], official_roster_numbers={10, 9})
+        self.assertEqual(num, 10)
+        self.assertGreater(conf, 0.7)
+
+        # Re-ID merges fragmented same-player tracks across a short gap
+        df = pd.DataFrame([
+            {"frame_id": 10, "time_s": 0.4, "track_id": 2, "role": "player", "team": "team_a", "x_m": 30.0, "y_m": 25.0},
+            {"frame_id": 25, "time_s": 1.0, "track_id": 99, "role": "player", "team": "team_a", "x_m": 32.0, "y_m": 26.0},
+        ])
+        merged, remap = merge_fragmented_tracks_reid(
+            df, {2: np.array([1.0, 0.2, 0.1]), 99: np.array([0.99, 0.21, 0.11])}
+        )
+        self.assertEqual(remap.get(99), 2)
+        self.assertEqual(merged["track_id"].nunique(), 1)
+
+        roster = parse_scoresheet_text("1 - محمد الشناوي (GK) (C)\n10 إمام عاشور\n--- احتياط ---\n14 - حسين الشحات")
+        self.assertEqual(len(roster), 3)
+        self.assertTrue(roster[0].is_captain and roster[0].position == "GK")
+        self.assertFalse(roster[2].is_starter)
+
+    def test_wave2_ball_sahi_kalman_3d_arc_events_and_hls(self) -> None:
+        tiles = generate_sahi_tiles(1280, 720)
+        self.assertGreaterEqual(len(tiles), 4)
+
+        # Long aerial pass at ~18 m/s with a 2-frame occlusion gap
+        dets = [(i, i * 0.04, None if i in (5, 6) else (20.0 + i * 0.72, 34.0)) for i in range(20)]
+        states = track_and_inpaint_ball(dets)
+        self.assertEqual(len(states), 20)
+        self.assertTrue(any(s.inpainted for s in states))
+        self.assertTrue(any(s.z_m > 0.5 for s in states))  # parabolic 3D flight height computed
+
+        # Teleportation spike rejection + cut-gap reset
+        dets_spike = [
+            (0, 0.00, (48.0, 18.0)),
+            (4, 0.16, (48.5, 17.5)),
+            (8, 0.32, (21.6, 55.0)),   # impossible ~430 km/h teleport spike -> rejected!
+            (12, 0.48, (49.2, 16.8)),
+            (90, 3.60, (12.0, 40.0)),  # new shot after 3.1s cut -> resets cleanly
+        ]
+        st_spike = track_and_inpaint_ball(dets_spike)
+        self.assertEqual([s.frame_id for s in st_spike], [0, 4, 8, 12, 90])
+        self.assertTrue(st_spike[2].inpainted)
+        self.assertAlmostEqual(st_spike[4].x_m, 12.0, delta=0.5)
+
+        # Scoreboard dual-lock ignores replay wipes and confirms real goal
+        self.assertEqual(classify_shot_gate(14, 0.1, False), "tactical_wide")
+        self.assertEqual(classify_shot_gate(14, 0.1, True), "replay")
+        readings = [
+            (100, 4.0, 0, 0, "tactical_wide"),
+            (101, 4.1, 1, 0, "replay"),  # ignored replay!
+            (102, 4.2, 1, 0, "tactical_wide"),
+            (103, 4.3, 1, 0, "tactical_wide"),
+            (104, 4.4, 1, 0, "tactical_wide"),
+        ]
+        goals = detect_scoreboard_goal_changes(readings, confirm_frames=3)
+        self.assertEqual(len(goals), 1)
+        self.assertEqual(goals[0].team, "team_a")
+
+        win = extract_goal_forensics_window([s.to_dict() for s in states], goal_time_s=0.76)
+        self.assertGreater(win["ball_travel_m"], 5.0)
+
+        cmd = build_hls_ffmpeg_command("in.mp4", "out_hls", keyint=15)
+        self.assertIn("15", cmd)
+
+    def test_wave3_drm_schema_and_waves4_5_pose_and_innovation_lab(self) -> None:
+        schema_sql = (get_repo_root() / "packages" / "shared_contracts" / "db_schema.sql").read_text(encoding="utf-8")
+        self.assertIn("ENABLE ROW LEVEL SECURITY", schema_sql)
+        self.assertIn("CREATE TABLE IF NOT EXISTS match_track", schema_sql)
+
+        tok = generate_signed_video_token("matches/m2/master.m3u8", "club_ahly", ttl_seconds=600)
+        self.assertTrue(verify_signed_video_token("matches/m2/master.m3u8", "club_ahly", int(tok["expires"]), str(tok["sig"])))
+        self.assertFalse(verify_signed_video_token("matches/m2/master.m3u8", "other_club", int(tok["expires"]), str(tok["sig"])))
+
+        # Wave 4 Event-Triggered Pose Resolution Gate (<75px skips head scanning, >=75px enables it)
+        windows = select_event_pose_windows([10.0, 11.5, 40.0], window_half_s=2.0)
+        self.assertEqual(len(windows), 2)
+        small_p = evaluate_pose_with_resolution_gate(1, 100, [10, 10, 30, 60], (1.0, 0.2), [0, 40, -30])
+        self.assertFalse(small_p.head_scanning_enabled)
+        big_p = evaluate_pose_with_resolution_gate(1, 100, [10, 10, 50, 110], (1.0, 0.2), [0, 40, -30])
+        self.assertTrue(big_p.head_scanning_enabled)
+        self.assertEqual(big_p.head_scan_count, 2)
+
+        # Wave 5 Tactical Innovation Lab
+        sim = optimize_set_piece_self_play(n_candidates=10, rollouts_per_candidate=200)
+        self.assertGreaterEqual(sim.optimized_goal_prob_pct, sim.baseline_goal_prob_pct)
+        self.assertEqual(sim.human_realism_constraints["reaction_time_ms"], 250)
+
+    def test_pro_api_routes_and_colab_l4_notebook_syntax(self) -> None:
+        from fastapi.testclient import TestClient
+        from apps.api.main import app
+
+        client = TestClient(app)
+        p_res = client.post("/api/lineups/parse-scoresheet", json={"raw_text": "10 - Emam Ashour\n9 - Wessam"})
+        self.assertEqual(p_res.status_code, 200)
+        self.assertEqual(p_res.json()["count"], 2)
+
+        drm = client.get("/api/matches/m2_ahly_enppi/drm-token")
+        self.assertEqual(drm.status_code, 200)
+        self.assertIn("sig", drm.json())
+
+        inn = client.post("/api/tactics/innovation/simulate", json={"n_candidates": 8, "rollouts_per_candidate": 150})
+        self.assertEqual(inn.status_code, 200)
+        self.assertIn("optimized_goal_prob_pct", inn.json())
+
+        rep = client.get("/api/matches/m2_ahly_enppi/export-report")
+        self.assertEqual(rep.status_code, 200)
+        self.assertIn("تقرير المباراة الموثّق", rep.text)
+
+        nb_p = get_repo_root() / "notebooks" / "kaggle_zero_budget" / "egy_scout_v8_colab_l4_full.ipynb"
+        self.assertTrue(nb_p.is_file())
+        nb = json.loads(nb_p.read_text(encoding="utf-8"))
+        for i, cell in enumerate(nb["cells"]):
+            if cell["cell_type"] == "code":
+                ast.parse("".join(cell["source"]), filename=f"colab_l4_cell_{i}")
+
+
+if __name__ == "__main__":
+    unittest.main()

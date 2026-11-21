@@ -1,0 +1,51 @@
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+*.log
+
+# Secrets & Environment
+.env
+.env.*
+!.env.example
+
+# AI Model Weights, Datasets & Large Media (Keep Git Repo Light!)
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.ckpt
+*.engine
+*.parquet
+*.npy
+*.npz
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.zip
+*.tar.gz
+*.sqlite
+*.db
+datasets/
+.cache/
+
+# Legacy & External Engine Clones
+open_source_engines/
+_archive_old_project/
+egy-tactical-scout/
+scout5/data/
