@@ -1,0 +1,16 @@
+{
+  "name": "scoutzero",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "cd apps/web && npm run dev",
+    "build": "cd apps/web && npm run build",
+    "db:generate": "cd apps/web && npx drizzle-kit generate",
+    "db:migrate": "cd apps/web && npx drizzle-kit migrate",
+    "db:seed": "cd apps/web && npx tsx src/db/seed.ts",
+    "db:push": "cd apps/web && npx drizzle-kit push",
+    "lint": "cd apps/web && npm run lint",
+    "typecheck": "cd apps/web && npx tsc --noEmit"
+  },
+  "engines": { "node": ">=20" }
+}

@@ -1,0 +1,16 @@
+node_modules
+.next
+.env
+.env.local
+dist
+__pycache__
+*.pyc
+.venv
+uploads/
+clips/
+thumbnails/
+*.mp4
+*.mkv
+.DS_Store
+coverage/
+.turbo/

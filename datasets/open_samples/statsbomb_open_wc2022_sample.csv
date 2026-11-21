@@ -1,0 +1,7 @@
+player_id,display_name,team_name,position,archetype_en,archetype_ar,data_source,minutes_analyzed,vaep_per90,xt_per90,team_xt_share_pct,padj_defensive_actions_per90,hir_distance_m_per90,avg_speed_kmh,max_speed_kmh,positional_discipline_score,progressive_runs_per90
+sb_wc22_amrabat,Sofyan Amrabat,Morocco (WC 2022),DM,Ball-Winning Anchor,ارتكاز قاطع كرات,StatsBomb Open Data (FIFA WC 2022),660,0.31,0.14,11.8,14.2,810,7.4,31.2,88.5,5.1
+sb_wc22_hakimi,Achraf Hakimi,Morocco (WC 2022),FB,Attacking Overlap FB,ظهير هجومي سريع,StatsBomb Open Data (FIFA WC 2022),633,0.44,0.29,19.4,11.6,960,7.6,35.3,83.2,8.4
+sb_wc22_ounahi,Azzedine Ounahi,Morocco (WC 2022),CM,Press-Resistant Carrier,وسط مقاوم للضغط,StatsBomb Open Data (FIFA WC 2022),570,0.38,0.24,17.2,10.8,890,7.7,31.8,84.0,7.6
+sb_wc22_macallister,Alexis Mac Allister,Argentina (WC 2022),CM,Half-Space Connector,صانع لعب أنصاف المساحات,StatsBomb Open Data (FIFA WC 2022),554,0.46,0.27,16.5,9.4,840,7.5,30.9,86.4,6.9
+sb_wc22_enzo,Enzo Fernández,Argentina (WC 2022),DM,Deep-Lying Playmaker,صانع لعب عميق,StatsBomb Open Data (FIFA WC 2022),563,0.42,0.25,18.1,12.1,855,7.4,30.4,87.1,6.2
+sb_wc22_gvardiol,Joško Gvardiol,Croatia (WC 2022),CB,Ball-Playing CB,قلب دفاع بنّاء,StatsBomb Open Data (FIFA WC 2022),690,0.34,0.16,12.4,10.9,720,6.8,33.1,89.2,4.8

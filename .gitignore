@@ -4,12 +4,16 @@ __pycache__/
 *$py.class
 .venv/
 venv/
+**/venv/
+**/.venv/
 .pytest_cache/
 *.egg-info/
 
 # Node / Next.js
 node_modules/
+**/node_modules/
 .next/
+**/.next/
 out/
 dist/
 build/
@@ -23,7 +27,7 @@ npm-debug.log*
 .env.*
 !.env.example
 
-# AI Model Weights, Datasets & Large Media (Keep Git Repo Light!)
+# AI Model Weights, Datasets & Large Media (Keep Git Repo Light & Under 100MB)
 *.pt
 *.pth
 *.onnx
@@ -41,11 +45,12 @@ npm-debug.log*
 *.tar.gz
 *.sqlite
 *.db
-datasets/
 .cache/
+**/.cache/
+out_hls/
+**/out_hls/
 
-# Legacy & External Engine Clones
-open_source_engines/
-_archive_old_project/
-egy-tactical-scout/
+# Local Data Directories (Videos & Heavy Telemetry)
 scout5/data/
+egy-tactical-scout/backend/data/
+egy-tactical-scout/backend/cache/
