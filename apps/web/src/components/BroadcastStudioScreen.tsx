@@ -25,13 +25,18 @@ import {
   Trash2,
   Undo2,
   Video,
+  X,
+  ZoomIn,
 } from "lucide-react";
 import { EChartsMatchMomentum } from "@/components/TacticalCharts";
 import FormationBlueprintBoard from "@/components/FormationBlueprintBoard";
+import GlossaryTooltip from "@/components/GlossaryTooltip";
+import TaggingPlaylistPanel from "@/components/TaggingPlaylistPanel";
 import TacticalTwinCanvas, { SetPieceSimState } from "@/components/TacticalTwinCanvas";
 import {
   API_BASE,
   apiFetch,
+  ClipTagItem,
   FormationBlueprintPayload,
   frameImageUrl,
   matchVideoUrl,
@@ -44,6 +49,7 @@ import {
   TimelinePayload,
   TimelineTrack,
   UserRole,
+  WorkspaceMode,
 } from "@/lib/api";
 import {
   draw3DCurvedArrow,
@@ -63,11 +69,15 @@ interface Props {
   lang: "ar" | "en";
   matchId: string;
   role: UserRole;
+  workspaceMode?: WorkspaceMode;
   externalBlueprint?: FormationBlueprintPayload | null;
+  jumpToTimeSec?: number | null;
+  onJumpHandled?: () => void;
 }
 
-type ToolMode = "spotlight" | "chain" | "arrow" | "tape" | "zone" | "ghost";
+type ToolMode = "spotlight" | "chain" | "arrow" | "tape" | "zone" | "ghost" | "zoom";
 type ArDensity = "focus" | "all" | "clean";
+type StudioPreset = "video_twin" | "dissect" | "tactics_board" | "locker_room" | "split";
 
 interface TelestratorDrawing {
   kind: "arrow" | "tape" | "zone";
@@ -421,9 +431,25 @@ function buildGreenTurfMask(
   }
 }
 
-export default function BroadcastStudioScreen({ lang, matchId, role, externalBlueprint = null }: Props) {
+export default function BroadcastStudioScreen({
+  lang,
+  matchId,
+  role,
+  workspaceMode = "analyst",
+  externalBlueprint = null,
+  jumpToTimeSec = null,
+  onJumpHandled,
+}: Props) {
   const isAr = lang === "ar";
   const isReadOnly = role === "board" || role === "player";
+  const [studioPreset, setStudioPreset] = useState<StudioPreset>(
+    workspaceMode === "coach" ? "dissect" : "video_twin"
+  );
+  const [pinnedZoom, setPinnedZoom] = useState<{ vx: number; vy: number } | null>(null);
+  const [quickTagSignal, setQuickTagSignal] = useState<number>(0);
+  const [presentQueue, setPresentQueue] = useState<ClipTagItem[] | null>(null);
+  const [presentIdx, setPresentIdx] = useState<number>(0);
+  const [drillSeedNote, setDrillSeedNote] = useState<string | null>(null);
   const [selectedTeamAId, setSelectedTeamAId] = useState<number | null>(null);
   const [selectedTeamBId, setSelectedTeamBId] = useState<number | null>(null);
 
@@ -632,6 +658,7 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
     teamBHex: "#38BDF8",
     teamAName: "Team A",
     teamBName: "Team B",
+    pinnedZoom: null as { vx: number; vy: number } | null,
     isAr,
   });
   stateRef.current = {
@@ -657,8 +684,88 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
     teamBHex: data?.kit_colors?.team_b_hex || "#38BDF8",
     teamAName: timelineMeta.teamAName,
     teamBName: timelineMeta.teamBName,
+    pinnedZoom,
     isAr,
   };
+
+  // Switch preset cleanly when Workspace Mode or external AI blueprint changes
+  useEffect(() => {
+    if (workspaceMode === "coach") setStudioPreset("dissect");
+  }, [workspaceMode]);
+
+  useEffect(() => {
+    if (externalBlueprint) {
+      setStudioPreset((cur) => (cur === "split" ? "split" : "tactics_board"));
+    }
+  }, [externalBlueprint]);
+
+  // Jump to clip when requested from Scouting H2H / Evidence Clips
+  useEffect(() => {
+    if (jumpToTimeSec !== null && jumpToTimeSec !== undefined) {
+      setStudioPreset("video_twin");
+      const v = videoRef.current;
+      if (v) {
+        v.currentTime = jumpToTimeSec;
+        setHudTimeS(jumpToTimeSec);
+      }
+      onJumpHandled?.();
+    }
+  }, [jumpToTimeSec, onJumpHandled]);
+
+  // V8.4 Pro Keyboard Shortcuts inside Broadcast Studio (Space, Arrows, S, G, A, Z, T, Escape)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === " ") {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        if (presentQueue) {
+          setPresentIdx((i) => Math.max(0, i - 1));
+        } else {
+          stepFrame(-1);
+        }
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        if (presentQueue) {
+          setPresentIdx((i) => Math.min(presentQueue.length - 1, i + 1));
+        } else {
+          stepFrame(1);
+        }
+      } else if (k === "s") {
+        setTool("spotlight");
+      } else if (k === "g") {
+        setTool("ghost");
+      } else if (k === "a") {
+        setTool("arrow");
+      } else if (k === "z") {
+        setTool("zoom");
+      } else if (k === "t") {
+        setQuickTagSignal((s) => s + 1);
+      } else if (e.key === "Escape" && presentQueue) {
+        setPresentQueue(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presentQueue]);
+
+  // Fullscreen Locker-Room Present Mode auto-seek on slide change
+  useEffect(() => {
+    if (!presentQueue || !presentQueue[presentIdx]) return;
+    const clip = presentQueue[presentIdx];
+    const v = videoRef.current;
+    if (v) {
+      v.currentTime = clip.start_s;
+      v.play().catch(() => {});
+      setIsPlaying(true);
+    }
+  }, [presentQueue, presentIdx]);
 
   useEffect(() => {
     lastDrawTsRef.current = 0;
@@ -676,6 +783,7 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
     activeDraft,
     ghostDx,
     ghostDy,
+    pinnedZoom,
     attackDirOverride,
     data,
     timelineMeta,
@@ -1130,6 +1238,66 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
               ctx.fillText(`${tCur.toFixed(1)}s`, hx + hudW - 10, cyMid + 0.5);
               ctx.restore();
             }
+
+            // V8.4 Pinned 2.2x Broadcast Zoom Loupe (KlipDraw-style corner magnifier)
+            if (st.pinnedZoom && sourceEl) {
+              const { vx: zx, vy: zy } = st.pinnedZoom;
+              const boxW = Math.min(250, Math.round(vw * 0.28));
+              const boxH = Math.round(boxW * 0.62);
+              const srcW = boxW / 2.2;
+              const srcH = boxH / 2.2;
+              const sx = Math.max(0, Math.min(vw - srcW, zx - srcW * 0.5));
+              const sy = Math.max(0, Math.min(vh - srcH, zy - srcH * 0.5));
+              const bx = 14;
+              const by = 14;
+
+              ctx.save();
+              // Dashed connector from pinned point to loupe box
+              ctx.strokeStyle = "rgba(16, 185, 129, 0.78)";
+              ctx.lineWidth = 1.6;
+              ctx.setLineDash([4, 4]);
+              ctx.beginPath();
+              ctx.moveTo(zx, zy);
+              ctx.lineTo(bx + boxW, by + boxH);
+              ctx.stroke();
+              ctx.setLineDash([]);
+
+              // Highlight source target box on turf
+              ctx.strokeStyle = "#10B981";
+              ctx.lineWidth = 1.8;
+              ctx.strokeRect(sx, sy, srcW, srcH);
+
+              // Draw magnified inset in top-left corner
+              ctx.beginPath();
+              ctx.roundRect(bx, by, boxW, boxH, 10);
+              ctx.clip();
+              ctx.drawImage(sourceEl, sx, sy, srcW, srcH, bx, by, boxW, boxH);
+              // Subtle center reticle
+              ctx.strokeStyle = "rgba(16, 185, 129, 0.75)";
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(bx + boxW * 0.5 - 8, by + boxH * 0.5);
+              ctx.lineTo(bx + boxW * 0.5 + 8, by + boxH * 0.5);
+              ctx.moveTo(bx + boxW * 0.5, by + boxH * 0.5 - 8);
+              ctx.lineTo(bx + boxW * 0.5, by + boxH * 0.5 + 8);
+              ctx.stroke();
+              ctx.restore();
+
+              ctx.save();
+              ctx.strokeStyle = "#10B981";
+              ctx.lineWidth = 2.4;
+              ctx.beginPath();
+              ctx.roundRect(bx, by, boxW, boxH, 10);
+              ctx.stroke();
+              ctx.fillStyle = "rgba(9, 13, 22, 0.88)";
+              ctx.beginPath();
+              ctx.roundRect(bx + 8, by + 6, 86, 17, 5);
+              ctx.fill();
+              ctx.fillStyle = "#34D399";
+              ctx.font = "800 10px Inter, sans-serif";
+              ctx.fillText("ZOOM 2.2x", bx + 16, by + 17.5);
+              ctx.restore();
+            }
           }
         }
       }
@@ -1296,6 +1464,11 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
       }
       dragDrawStartRef.current = { vx, vy };
       setActiveDraft({ kind: tool, x1: vx, y1: vy, x2: vx, y2: vy });
+      return;
+    }
+
+    if (tool === "zoom") {
+      setPinnedZoom({ vx, vy });
       return;
     }
 
@@ -1588,18 +1761,86 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
         className="hidden"
       />
 
-      {/* Top Header + AR Density Selector */}
+      {/* V8.3 / V8.4 Fullscreen Locker-Room Present Banner */}
+      {presentQueue && presentQueue[presentIdx] && (
+        <div className="p-3.5 rounded-2xl bg-emerald-950/90 border-2 border-emerald-400 shadow-2xl flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2 text-xs font-extrabold text-emerald-300">
+              <span>📽️ {isAr ? "وضع عرض غرفة الملابس (Locker-Room Present Mode)" : "Locker-Room Present Mode"}</span>
+              <span className="px-2 py-0.5 rounded bg-emerald-500/25 text-white tabular-nums">
+                {presentIdx + 1} / {presentQueue.length}
+              </span>
+            </div>
+            <div className="text-sm font-black text-white">
+              {isAr ? presentQueue[presentIdx].label_ar : presentQueue[presentIdx].label_en}{" "}
+              <span dir="ltr" className="text-sky-300 text-xs font-semibold">
+                ({presentQueue[presentIdx].start_s.toFixed(1)}s – {presentQueue[presentIdx].end_s.toFixed(1)}s)
+              </span>
+            </div>
+            {presentQueue[presentIdx].note && (
+              <div className="text-xs text-amber-200">{presentQueue[presentIdx].note}</div>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              type="button"
+              disabled={presentIdx <= 0}
+              onClick={() => setPresentIdx((i) => Math.max(0, i - 1))}
+              className="px-3 py-1.5 rounded-lg bg-[#090D16] border border-white/15 text-white font-bold disabled:opacity-40"
+            >
+              {isAr ? "◀ السابق" : "◀ Prev"}
+            </button>
+            <button
+              type="button"
+              disabled={presentIdx >= presentQueue.length - 1}
+              onClick={() => setPresentIdx((i) => Math.min(presentQueue.length - 1, i + 1))}
+              className="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-extrabold disabled:opacity-40"
+            >
+              {isAr ? "التالي ▶" : "Next ▶"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPresentQueue(null)}
+              className="px-3 py-1.5 rounded-lg bg-rose-500/20 border border-rose-400/40 text-rose-200 font-bold flex items-center gap-1"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>{isAr ? "إنهاء العرض (Esc)" : "Exit (Esc)"}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Top Header + Sample-Size Confidence Badge + AR Density Selector */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-bold text-white">
-            {data
-              ? isAr ? data.analysis_title_ar : data.analysis_title_en
-              : isAr ? "استوديو البث التكتيكي 60FPS" : "60FPS Broadcast Tactical Studio"}
-          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-lg font-bold text-white">
+              {data
+                ? isAr ? data.analysis_title_ar : data.analysis_title_en
+                : isAr ? "استوديو البث التكتيكي 60FPS" : "60FPS Broadcast Tactical Studio"}
+            </h1>
+            {timelineMeta.tEnd > timelineMeta.tStart && (
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10.5px] font-bold border tabular-nums ${
+                  timelineMeta.tEnd - timelineMeta.tStart >= 300
+                    ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+                    : "bg-amber-500/15 border-amber-500/40 text-amber-300"
+                }`}
+              >
+                {timelineMeta.tEnd - timelineMeta.tStart >= 300
+                  ? isAr
+                    ? `عينة قوية (${Math.round((timelineMeta.tEnd - timelineMeta.tStart) / 60)} دقيقة)`
+                    : `Full Sample (${Math.round((timelineMeta.tEnd - timelineMeta.tStart) / 60)}m)`
+                  : isAr
+                  ? `لقطة تكتيكية (${Math.round(timelineMeta.tEnd - timelineMeta.tStart)}ث) — تحليل لحظي`
+                  : `Tactical Clip (${Math.round(timelineMeta.tEnd - timelineMeta.tStart)}s)`}
+              </span>
+            )}
+          </div>
           <p className="text-xs text-slate-400 mt-0.5">
             {isAr
-              ? "وضع تركيز أوروبي بدون تشويش • تتبع كرة كالمان ثلاثي الأبعاد • إخفاء الطبقات خلف الأرجل + توأم 2D/3D/Player-POV."
-              : "Focus-first European Broadcast AR • 3D Kalman Ball Trail • Turf Occlusion + 2D/3D/Player-POV Twin."}
+              ? "بدّل بين الأوضاع الجاهزة أدناه بدون سكرول طويل — أو اضغط ? لعرض اختصارات الكيبورد الاحترافية."
+              : "Switch Panel Presets below with zero vertical clutter — press ? for pro keyboard shortcuts."}
           </p>
         </div>
 
@@ -1625,8 +1866,34 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
         </div>
       </div>
 
-      {/* Main 12-Col Broadcast Studio Grid */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+      {/* V8.3 Panel Presets Bar (Metrica Nexus style — zero vertical clutter!) */}
+      <div className="flex flex-wrap items-center gap-1.5 p-1.5 rounded-2xl bg-[#0C1220] border border-white/[0.09] text-xs">
+        {(
+          [
+            { id: "video_twin" as StudioPreset, ar: "📺 المشاهدة والرسم (فيديو + 2D/3D)", en: "📺 Video & 2D/3D Twin" },
+            { id: "dissect" as StudioPreset, ar: "🔬 التشريح التكتيكي (لحظة + فعل/لم يفعل)", en: "🔬 Moment Dissection" },
+            { id: "tactics_board" as StudioPreset, ar: "📋 مرسم الـ 22 لاعباً المتحرك والـ AI", en: "📋 Animated 22-Player Board" },
+            { id: "locker_room" as StudioPreset, ar: "📽️ التكويد وقائمة غرفة الملابس", en: "📽️ Tagging & Locker-Room" },
+            { id: "split" as StudioPreset, ar: "🔀 عرض مقسم (فيديو + مرسم معاً)", en: "🔀 Split View (Video + Board)" },
+          ]
+        ).map((pr) => (
+          <button
+            key={pr.id}
+            type="button"
+            onClick={() => setStudioPreset(pr.id)}
+            className={`px-3 py-2 rounded-xl font-bold transition whitespace-nowrap ${
+              studioPreset === pr.id
+                ? "bg-emerald-500 text-slate-950 shadow-md shadow-emerald-950/60"
+                : "text-slate-300 hover:text-white hover:bg-white/[0.05]"
+            }`}
+          >
+            {isAr ? pr.ar : pr.en}
+          </button>
+        ))}
+      </div>
+
+      {/* Main 12-Col Broadcast Studio Grid (kept mounted when hidden so video state stays warm!) */}
+      <div className={`${studioPreset === "tactics_board" ? "hidden" : "grid"} grid-cols-1 xl:grid-cols-12 gap-5 items-start`}>
         {/* Left 70%: Video AR Canvas + Docked Broadcast Telestrator Bar (no video obstruction!) */}
         <div className="xl:col-span-8 studio-panel p-3 space-y-3">
           <div className="relative rounded-lg overflow-hidden bg-black border border-white/[0.08]">
@@ -1660,6 +1927,7 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
                   { id: "arrow" as ToolMode, icon: <ArrowUpRight className="w-3.5 h-3.5" />, label: "3D Arrow" },
                   { id: "tape" as ToolMode, icon: <Ruler className="w-3.5 h-3.5" />, label: "3D Tape" },
                   { id: "zone" as ToolMode, icon: <Circle className="w-3.5 h-3.5" />, label: "Zone" },
+                  { id: "zoom" as ToolMode, icon: <ZoomIn className="w-3.5 h-3.5" />, label: isAr ? "عدسة 2.2x" : "Pinned Zoom" },
                   { id: "ghost" as ToolMode, icon: <Ghost className="w-3.5 h-3.5" />, label: "Ghost" },
                 ]
               ).map((t) => (
@@ -1774,13 +2042,14 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
                   <Undo2 className="w-3.5 h-3.5" />
                 </button>
               )}
-              {(drawings.length > 0 || chainIds.length > 0 || spotlightIds.length > 0) && (
+              {(drawings.length > 0 || chainIds.length > 0 || spotlightIds.length > 0 || pinnedZoom !== null) && (
                 <button
                   type="button"
                   onClick={() => {
                     setDrawings([]);
                     setChainIds([]);
                     setSpotlightIds([]);
+                    setPinnedZoom(null);
                   }}
                   className="p-1.5 rounded-lg bg-[#111827] border border-white/[0.08] text-slate-300 hover:text-red-400"
                   title="Clear Telestration"
@@ -2002,7 +2271,9 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
                   onClick={applySuggestedGhost}
                   className="px-2.5 py-1 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold whitespace-nowrap transition"
                 >
-                  {isAr ? "تحسين تلقائي (What-If)" : "Auto-Optimize What-If"}
+                  <GlossaryTooltip term="what_if" lang={lang}>
+                    <span>{isAr ? "تحسين تلقائي (What-If)" : "Auto-Optimize What-If"}</span>
+                  </GlossaryTooltip>
                 </button>
               )}
               {(ghostDx !== 0 || ghostDy !== 0) && (
@@ -2043,13 +2314,17 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
               </div>
               <div className="bg-[#090D16] border border-white/[0.06] rounded-lg p-2.5">
                 <div className="text-[11px] text-slate-400">
-                  {isAr ? (
-                    <>
-                      تغيّر خطورة التسديد <bdi dir="ltr">(xG)</bdi>
-                    </>
-                  ) : (
-                    "Shot xG Impact"
-                  )}
+                  <GlossaryTooltip term="xg" lang={lang}>
+                    <span>
+                      {isAr ? (
+                        <>
+                          تغيّر خطورة التسديد <bdi dir="ltr">(xG)</bdi>
+                        </>
+                      ) : (
+                        "Shot xG Impact"
+                      )}
+                    </span>
+                  </GlossaryTooltip>
                 </div>
                 <div dir="ltr" className="font-bold text-white mt-0.5 inline-block">
                   {isCloseUpUi
@@ -2121,6 +2396,7 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
       </div>
 
       {/* Section Below Studio: Oracle Match Momentum + UEFA 4-Moment Events + Grounded Coach Brief & Playbook */}
+      {(studioPreset === "video_twin" || studioPreset === "dissect") && (
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
         {/* Interactive Oracle Momentum & Clickable UEFA 4-Moment Strip */}
         <div className="xl:col-span-7 studio-panel p-4 space-y-4">
@@ -2256,9 +2532,10 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
           )}
         </div>
       </div>
+      )}
 
       {/* PDF Pages 25-26: Two-Team Live Moment State Analyzer (Did / Did Not / Where & Why for BOTH Teams simultaneously!) */}
-      {momentState && (
+      {momentState && (studioPreset === "dissect" || studioPreset === "video_twin") && (
         <div className="studio-panel p-5 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -2387,9 +2664,23 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
                         <p className="text-slate-200 leading-relaxed">{activePs.did_not_ar}</p>
                       </div>
 
-                      <div className="p-2.5 rounded-lg bg-[#111827]/90 border border-amber-500/30 space-y-1">
-                        <div className="font-bold text-amber-300">
-                          {isAr ? "📍 3. أين ولماذا أخطأ / التمركز الأمثل:" : "📍 3. Where & Why / Optimal Fix:"}
+                      <div className="p-2.5 rounded-lg bg-[#111827]/90 border border-amber-500/30 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="font-bold text-amber-300">
+                            {isAr ? "📍 3. أين ولماذا أخطأ / التمركز الأمثل:" : "📍 3. Where & Why / Optimal Fix:"}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDrillSeedNote(
+                                `تمرين تصحيح خطأ ${activePs.player_label}: ${activePs.where_and_why_ar}`
+                              );
+                              setStudioPreset("tactics_board");
+                            }}
+                            className="px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold whitespace-nowrap"
+                          >
+                            {isAr ? "🏋️ حوّل الخطأ إلى تمرين" : "🏋️ Turn Into Drill"}
+                          </button>
                         </div>
                         <p className="text-slate-200 leading-relaxed">{activePs.where_and_why_ar}</p>
                       </div>
@@ -2406,14 +2697,40 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
         </div>
       )}
 
-      {/* Interactive 22-Player Freeform Tactical Formation & AI Plan Blueprint Board */}
-      <FormationBlueprintBoard
-        lang={lang}
-        matchId={matchId}
-        role={role}
-        defaultFormation={blueprintFormation}
-        externalBlueprint={externalBlueprint}
-      />
+      {/* V8.4 Tagging Panel, Locker-Room Playlists, Voiceover & Sportscode XML */}
+      {(studioPreset === "locker_room" || studioPreset === "video_twin" || studioPreset === "dissect") && (
+        <TaggingPlaylistPanel
+          lang={lang}
+          matchId={matchId}
+          role={role}
+          currentTimeSec={hudTimeS}
+          selectedPlayerLabel={
+            selectedDefId !== null
+              ? activePlayersRef.current.find((p) => p.track_id === selectedDefId)?.verified_name ||
+                `#${selectedDefId}`
+              : ""
+          }
+          quickTagSignal={quickTagSignal}
+          onJumpToTag={(startS) => seekToTime(startS)}
+          onStartPresentMode={(queue) => {
+            setPresentQueue(queue);
+            setPresentIdx(0);
+            setStudioPreset("video_twin");
+          }}
+        />
+      )}
+
+      {/* Interactive 22-Player Freeform Animated Tactical Board & Training Lab (V8.5) */}
+      {(studioPreset === "tactics_board" || studioPreset === "split") && (
+        <FormationBlueprintBoard
+          lang={lang}
+          matchId={matchId}
+          role={role}
+          defaultFormation={blueprintFormation}
+          externalBlueprint={externalBlueprint}
+          initialDrillNote={drillSeedNote}
+        />
+      )}
     </div>
   );
 }

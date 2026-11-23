@@ -297,8 +297,9 @@ function renderFormattedMarkdown(text: string): React.ReactNode {
 }
 
 const AI_MODELS = [
-  { id: "openai/gpt-oss-120b", ar: "GPT-OSS 120B (الأقوى)", en: "GPT-OSS 120B (Flagship)" },
-  { id: "qwen/qwen3.8-27b", ar: "Qwen 3.8 27B (ذكي وسريع)", en: "Qwen 3.8 27B (Fast)" },
+  { id: "auto", ar: "⚡ تلقائي ذكي (Auto Smart Router)", en: "⚡ Auto Smart Router (Recommended)" },
+  { id: "openai/gpt-oss-120b", ar: "GPT-OSS 120B (الأقوى للخطط المعقدة)", en: "GPT-OSS 120B (Deep Tactical)" },
+  { id: "qwen/qwen3.8-27b", ar: "Qwen 3.8 27B (ذكي وسريع بالعربي)", en: "Qwen 3.8 27B (Fast Arabic)" },
   { id: "openai/gpt-oss-20b", ar: "GPT-OSS 20B (فائق السرعة)", en: "GPT-OSS 20B (Turbo)" },
   { id: "allam-2-7b", ar: "ALLaM 2 7B (عربي أصيل)", en: "ALLaM 2 7B (Arabic)" },
 ];
@@ -316,7 +317,8 @@ export default function TacticalAIChatbot({
   const isAr = lang === "ar";
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<string>("openai/gpt-oss-120b");
+  const [selectedModel, setSelectedModel] = useState<string>("auto");
+  const [showAdvancedModel, setShowAdvancedModel] = useState<boolean>(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -457,14 +459,29 @@ export default function TacticalAIChatbot({
           </button>
         </div>
 
-        {/* AI Model Switcher */}
-        <div className="flex items-center gap-2 text-[11px]">
-          <span className="text-slate-400 shrink-0">{isAr ? "موديل الذكاء:" : "AI Model:"}</span>
+        {/* V8.3 Clean Auto Smart Router (Raw models tucked cleanly under Advanced!) */}
+        <div className="flex items-center justify-between gap-2 text-[11px]">
+          <span className="text-emerald-300 font-semibold truncate">
+            {selectedModel === "auto"
+              ? isAr
+                ? "⚡ الوضع التلقائي الذكي (يختار الموديل الأنسب تلقائياً)"
+                : "⚡ Auto Smart Router Active"
+              : activeModelLabel}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowAdvancedModel((v) => !v)}
+            className="px-2 py-0.5 rounded bg-[#090D16] border border-white/10 text-[10px] text-slate-400 hover:text-white shrink-0"
+          >
+            {showAdvancedModel ? (isAr ? "إخفاء الموديلات" : "Hide") : isAr ? "⚙️ إعدادات متقدمة" : "⚙️ Advanced"}
+          </button>
+        </div>
+        {showAdvancedModel && (
           <select
             aria-label={isAr ? "اختيار موديل الذكاء الاصطناعي" : "Select AI Model"}
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
-            className="flex-1 bg-[#090D16] border border-emerald-500/35 rounded-lg px-2 py-1 text-[11px] font-bold text-emerald-300 focus:outline-none focus:border-emerald-400"
+            className="w-full bg-[#090D16] border border-emerald-500/35 rounded-lg px-2 py-1 text-[11px] font-bold text-emerald-300 focus:outline-none focus:border-emerald-400"
           >
             {AI_MODELS.map((m) => (
               <option key={m.id} value={m.id}>
@@ -472,7 +489,7 @@ export default function TacticalAIChatbot({
               </option>
             ))}
           </select>
-        </div>
+        )}
       </div>
 
       {/* Messages Feed */}

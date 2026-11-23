@@ -2,19 +2,26 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import {
+  AlignHorizontalJustifyCenter,
   Bot,
   Compass,
   Download,
+  Film,
   FolderOpen,
   Hand,
+  Magnet,
   MoveUpRight,
+  Pause,
   Pencil,
+  Play,
   Plus,
+  Redo2,
   Save,
   Sparkles,
   Square,
   Trash2,
   Undo2,
+  Upload,
   UserMinus,
   Users,
   Zap,
@@ -25,8 +32,11 @@ import {
   BlueprintNode,
   BlueprintPassingArrow,
   FormationBlueprintPayload,
+  MathValidationResult,
   UserRole,
 } from "@/lib/api";
+import GlossaryTooltip from "@/components/GlossaryTooltip";
+import TacticalMathValidatorCard from "@/components/TacticalMathValidatorCard";
 
 interface Props {
   lang: "ar" | "en";
@@ -35,10 +45,35 @@ interface Props {
   defaultFormation?: string;
   team?: "team_a" | "team_b";
   externalBlueprint?: FormationBlueprintPayload | null;
+  initialDrillNote?: string | null;
 }
 
 type DrawTool = "drag_player" | "run_arrow" | "pass_arrow" | "press_arrow" | "zone_box" | "freehand";
 type TeamDisplayMode = "both" | "team_a" | "team_b";
+type PitchViewMode = "full" | "half" | "corner";
+
+interface TrainingProp {
+  id: string;
+  kind: "cone" | "mini_goal" | "mannequin" | "ball";
+  x_m: number;
+  y_m: number;
+}
+
+interface BoardKeyframe {
+  label: string;
+  nodesA: BlueprintNode[];
+  nodesB: BlueprintNode[];
+  props: TrainingProp[];
+}
+
+interface BoardSnapshot {
+  nodesA: BlueprintNode[];
+  nodesB: BlueprintNode[];
+  userArrows: BlueprintPassingArrow[];
+  userZones: BlueprintCustomZone[];
+  freehandStrokes: FreehandStroke[];
+  trainingProps: TrainingProp[];
+}
 
 interface FreehandStroke {
   color: string;
@@ -48,6 +83,7 @@ interface FreehandStroke {
 const PRESET_FORMATIONS = ["4-2-3-1", "4-3-3", "3-4-2-1", "3-5-2", "4-4-2", "5-3-2", "4-1-4-1", "4-2-2-2"];
 
 const GROQ_AI_MODELS = [
+  { id: "auto", ar: "⚡ تلقائي ذكي (Auto Smart Router)", en: "⚡ Auto Smart Router" },
   { id: "openai/gpt-oss-120b", ar: "GPT-OSS 120B (الأقوى للخطط المبتكرة)", en: "GPT-OSS 120B (Flagship)" },
   { id: "qwen/qwen3.8-27b", ar: "Qwen 3.8 27B (ذكي وسريع)", en: "Qwen 3.8 27B (Fast Arabic)" },
   { id: "openai/gpt-oss-20b", ar: "GPT-OSS 20B (فائق السرعة)", en: "GPT-OSS 20B (Turbo)" },
@@ -99,6 +135,7 @@ export default function FormationBlueprintBoard({
   role,
   defaultFormation = "4-2-3-1",
   externalBlueprint = null,
+  initialDrillNote = null,
 }: Props) {
   const isAr = lang === "ar";
   const [formationA, setFormationA] = useState(defaultFormation);
@@ -130,28 +167,218 @@ export default function FormationBlueprintBoard({
   const [savedPlans, setSavedPlans] = useState<SavedTacticalPlan[]>([]);
   const [saveBanner, setSaveBanner] = useState<string | null>(null);
 
-  // AI Live Drawing Prompt + Multi-Model Picker
+  // V8.5 Pro Lab State: Multi-Pitch Views, Snap-to-Grid, Training Props, 50-Step Undo/Redo, Keyframe Animation & Math Validator
+  const [pitchView, setPitchView] = useState<PitchViewMode>("full");
+  const [snapGrid, setSnapGrid] = useState<boolean>(false);
+  const [trainingProps, setTrainingProps] = useState<TrainingProp[]>([
+    { id: "ball-main", kind: "ball", x_m: 52.5, y_m: 34.0 },
+  ]);
+  const [keyframes, setKeyframes] = useState<BoardKeyframe[]>([]);
+  const [activeKfIdx, setActiveKfIdx] = useState<number>(0);
+  const [isAnimating, setIsAnimating] = useState<boolean>(false);
+  const [animStepProgress, setAnimStepProgress] = useState<number>(0);
+  const [recordingVideo, setRecordingVideo] = useState<boolean>(false);
+  const [undoStack, setUndoStack] = useState<BoardSnapshot[]>([]);
+  const [redoStack, setRedoStack] = useState<BoardSnapshot[]>([]);
+  const [mathValidation, setMathValidation] = useState<MathValidationResult | null>(null);
+
+  // AI Live Drawing Prompt + Auto Smart Router (raw models cleanly expandable!)
   const [aiPrompt, setAiPrompt] = useState("");
-  const [aiModel, setAiModel] = useState<string>("openai/gpt-oss-120b");
+  const [aiModel, setAiModel] = useState<string>("auto");
+  const [showAdvancedModel, setShowAdvancedModel] = useState<boolean>(false);
   const [aiLoading, setAiLoading] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const importFileRef = useRef<HTMLInputElement | null>(null);
   const skipNextFetchRef = useRef<boolean>(false);
-  const draggingNodeRef = useRef<{ team: "team_a" | "team_b"; index: number; mode: "body" | "arrow_tip" } | null>(null);
+  const draggingNodeRef = useRef<
+    { team: "team_a" | "team_b"; index: number; mode: "body" | "arrow_tip" } | { propId: string } | null
+  >(null);
   const draftShapeRef = useRef<{ startX_m: number; startY_m: number; curX_m: number; curY_m: number } | null>(null);
   const activeStrokeRef = useRef<FreehandStroke | null>(null);
   const [, setRenderTick] = useState(0);
 
-  // Load saved custom tactical plans from localStorage
+  const cloneSnap = (): BoardSnapshot => ({
+    nodesA: nodesA.map((n) => ({ ...n })),
+    nodesB: nodesB.map((n) => ({ ...n })),
+    userArrows: userArrows.map((a) => ({ ...a })),
+    userZones: userZones.map((z) => ({ ...z })),
+    freehandStrokes: freehandStrokes.map((s) => ({ ...s, points: s.points.map((p) => ({ ...p })) })),
+    trainingProps: trainingProps.map((p) => ({ ...p })),
+  });
+
+  const pushHistory = () => {
+    setUndoStack((prev) => [...prev.slice(-49), cloneSnap()]);
+    setRedoStack([]);
+  };
+
+  const handleUndo = () => {
+    setUndoStack((prev) => {
+      if (prev.length === 0) return prev;
+      const last = prev[prev.length - 1];
+      setRedoStack((r) => [...r.slice(-49), cloneSnap()]);
+      setNodesA(last.nodesA);
+      setNodesB(last.nodesB);
+      setUserArrows(last.userArrows);
+      setUserZones(last.userZones);
+      setFreehandStrokes(last.freehandStrokes);
+      setTrainingProps(last.trainingProps);
+      return prev.slice(0, -1);
+    });
+  };
+
+  const handleRedo = () => {
+    setRedoStack((prev) => {
+      if (prev.length === 0) return prev;
+      const next = prev[prev.length - 1];
+      setUndoStack((u) => [...u.slice(-49), cloneSnap()]);
+      setNodesA(next.nodesA);
+      setNodesB(next.nodesB);
+      setUserArrows(next.userArrows);
+      setUserZones(next.userZones);
+      setFreehandStrokes(next.freehandStrokes);
+      setTrainingProps(next.trainingProps);
+      return prev.slice(0, -1);
+    });
+  };
+
+  // Ctrl+Z / Ctrl+Y 50-step Undo/Redo keyboard binding
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(SAVED_PLANS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) setSavedPlans(parsed);
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea") return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) handleRedo();
+        else handleUndo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        handleRedo();
       }
-    } catch {}
-  }, []);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodesA, nodesB, userArrows, userZones, freehandStrokes, trainingProps]);
+
+  // Seed drill mode when bridged from Moment State "Turn Into Drill"
+  useEffect(() => {
+    if (initialDrillNote) {
+      setPitchView("half");
+      setBlueprint((prev) =>
+        prev
+          ? {
+              ...prev,
+              title_ar: initialDrillNote.slice(0, 75),
+              philosophy_ar: initialDrillNote,
+            }
+          : prev
+      );
+      setTrainingProps([
+        { id: "ball-main", kind: "ball", x_m: 66, y_m: 34 },
+        { id: "cone-1", kind: "cone", x_m: 74, y_m: 20 },
+        { id: "cone-2", kind: "cone", x_m: 74, y_m: 48 },
+        { id: "man-1", kind: "mannequin", x_m: 82, y_m: 34 },
+      ]);
+    }
+  }, [initialDrillNote]);
+
+  // Load saved custom tactical plans from SQLite Server API (with localStorage fallback)
+  useEffect(() => {
+    let alive = true;
+    apiFetch<{ plans: SavedTacticalPlan[] }>(
+      `/api/plans?match_id=${encodeURIComponent(matchId)}`,
+      {},
+      "club_demo_egypt",
+      role
+    )
+      .then((res) => {
+        if (alive && Array.isArray(res.plans)) setSavedPlans(res.plans);
+      })
+      .catch(() => {
+        try {
+          const raw = localStorage.getItem(SAVED_PLANS_KEY);
+          if (raw && alive) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) setSavedPlans(parsed);
+          }
+        } catch {}
+      });
+    return () => {
+      alive = false;
+    };
+  }, [matchId, role]);
+
+  // Live Deterministic Tactical Math Validation (Math-First, debounced 240ms on every drag/edit)
+  useEffect(() => {
+    if (nodesA.length === 0) return;
+    const t = setTimeout(() => {
+      apiFetch<MathValidationResult>(
+        "/api/plans/validate",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            nodes_a: nodesA,
+            nodes_b: nodesB,
+            formation_code: formationA,
+          }),
+        },
+        "club_demo_egypt",
+        role
+      )
+        .then((res) => setMathValidation(res))
+        .catch(() => {});
+    }, 240);
+    return () => clearTimeout(t);
+  }, [nodesA, nodesB, formationA, role]);
+
+  // Smooth 60FPS Keyframe Animation Playback Loop
+  useEffect(() => {
+    if (!isAnimating || keyframes.length < 2) return;
+    let rafId = 0;
+    const totalSegments = keyframes.length - 1;
+    const segMs = 1500;
+    const startTs = performance.now();
+
+    const step = (now: number) => {
+      const elapsed = now - startTs;
+      const totalDuration = totalSegments * segMs;
+      const clamped = elapsed % totalDuration;
+      const segIdx = Math.min(totalSegments - 1, Math.floor(clamped / segMs));
+      const u = (clamped - segIdx * segMs) / segMs;
+      // Smoothstep easing
+      const ease = u * u * (3 - 2 * u);
+
+      const k0 = keyframes[segIdx];
+      const k1 = keyframes[segIdx + 1];
+      const lerpNodes = (aList: BlueprintNode[], bList: BlueprintNode[]) =>
+        aList.map((n, i) => {
+          const target = bList[i] || n;
+          return {
+            ...n,
+            x_m: Number((n.x_m + (target.x_m - n.x_m) * ease).toFixed(1)),
+            y_m: Number((n.y_m + (target.y_m - n.y_m) * ease).toFixed(1)),
+          };
+        });
+
+      setNodesA(lerpNodes(k0.nodesA, k1.nodesA));
+      setNodesB(lerpNodes(k0.nodesB, k1.nodesB));
+      setTrainingProps(
+        k0.props.map((pr, i) => {
+          const tp = k1.props[i] || pr;
+          return {
+            ...pr,
+            x_m: Number((pr.x_m + (tp.x_m - pr.x_m) * ease).toFixed(1)),
+            y_m: Number((pr.y_m + (tp.y_m - pr.y_m) * ease).toFixed(1)),
+          };
+        })
+      );
+      setAnimStepProgress(segIdx + u);
+      rafId = requestAnimationFrame(step);
+    };
+    rafId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafId);
+  }, [isAnimating, keyframes]);
 
   // Sync when externalBlueprint arrives from AI Chatbot (preserve custom AI coordinates!)
   useEffect(() => {
@@ -305,7 +532,7 @@ export default function FormationBlueprintBoard({
     a.click();
   };
 
-  const handleSaveCurrentPlan = () => {
+  const handleSaveCurrentPlan = async () => {
     const planName =
       blueprint?.title_ar || `${blueprint?.team_name || "Team A"} (${formationA}) × (${formationB})`;
     const item: SavedTacticalPlan = {
@@ -325,16 +552,32 @@ export default function FormationBlueprintBoard({
       userZones,
       freehandStrokes,
     };
-    const next = [item, ...savedPlans].slice(0, 12);
-    setSavedPlans(next);
     try {
-      localStorage.setItem(SAVED_PLANS_KEY, JSON.stringify(next));
-      setSaveBanner(isAr ? "✅ تم حفظ الخطة بالكامل في جهازك!" : "✅ Plan saved locally!");
+      const res = await apiFetch<{ plans: SavedTacticalPlan[] }>(
+        "/api/plans",
+        {
+          method: "POST",
+          body: JSON.stringify({ ...item, match_id: matchId, trainingProps, keyframes }),
+        },
+        "club_demo_egypt",
+        role
+      );
+      setSavedPlans(res.plans || [item, ...savedPlans]);
+      setSaveBanner(isAr ? "✅ تم حفظ الخطة دائماً في قاعدة بيانات السيرفر!" : "✅ Saved permanently to Server SQLite DB!");
+      setTimeout(() => setSaveBanner(null), 2800);
+    } catch {
+      const next = [item, ...savedPlans].slice(0, 12);
+      setSavedPlans(next);
+      try {
+        localStorage.setItem(SAVED_PLANS_KEY, JSON.stringify(next));
+      } catch {}
+      setSaveBanner(isAr ? "✅ تم حفظ الخطة محلياً!" : "✅ Saved locally!");
       setTimeout(() => setSaveBanner(null), 2600);
-    } catch {}
+    }
   };
 
   const handleLoadSavedPlan = (plan: SavedTacticalPlan) => {
+    pushHistory();
     skipNextFetchRef.current = true;
     setFormationA(plan.formationA);
     setCustomInputA(plan.formationA);
@@ -362,15 +605,199 @@ export default function FormationBlueprintBoard({
     setTeamDisplay("both");
   };
 
-  const handleDeleteSavedPlan = (id: string) => {
-    const next = savedPlans.filter((p) => p.id !== id);
-    setSavedPlans(next);
+  const handleDeleteSavedPlan = async (id: string) => {
+    setSavedPlans((prev) => prev.filter((p) => p.id !== id));
     try {
-      localStorage.setItem(SAVED_PLANS_KEY, JSON.stringify(next));
+      await apiFetch(
+        `/api/plans/${encodeURIComponent(id)}?match_id=${encodeURIComponent(matchId)}`,
+        { method: "DELETE" },
+        "club_demo_egypt",
+        role
+      );
     } catch {}
   };
 
-  // Convert canvas client event -> pitch meters (0..105, 0..68)
+  const handleExportEgyPlan = () => {
+    const payload = {
+      schema: "egy-scout-plan-v9",
+      matchId,
+      formationA,
+      formationB,
+      styleA,
+      styleB,
+      titleAr: blueprint?.title_ar || "",
+      philosophyAr: blueprint?.philosophy_ar || "",
+      stepsAr: blueprint?.execution_steps_ar || [],
+      nodesA,
+      nodesB,
+      userArrows,
+      userZones,
+      freehandStrokes,
+      trainingProps,
+      keyframes,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `egy-scout-${formationA.replace(/[^0-9A-Za-z-]/g, "")}.egyplan`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportEgyPlan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      pushHistory();
+      skipNextFetchRef.current = true;
+      if (parsed.formationA) {
+        setFormationA(parsed.formationA);
+        setCustomInputA(parsed.formationA);
+      }
+      if (parsed.formationB) {
+        setFormationB(parsed.formationB);
+        setCustomInputB(parsed.formationB);
+      }
+      if (parsed.nodesA) setNodesA(parsed.nodesA);
+      if (parsed.nodesB) setNodesB(parsed.nodesB);
+      if (parsed.userArrows) setUserArrows(parsed.userArrows);
+      if (parsed.userZones) setUserZones(parsed.userZones);
+      if (parsed.trainingProps) setTrainingProps(parsed.trainingProps);
+      if (parsed.keyframes) setKeyframes(parsed.keyframes);
+      setSaveBanner(isAr ? "✅ تم استيراد ملف .egyplan بنجاح!" : "✅ Imported .egyplan file!");
+      setTimeout(() => setSaveBanner(null), 2600);
+    } catch {} finally {
+      e.target.value = "";
+    }
+  };
+
+  const addTrainingProp = (kind: TrainingProp["kind"]) => {
+    pushHistory();
+    const xBase = pitchView === "corner" ? 88 : pitchView === "half" ? 74 : 55;
+    setTrainingProps((prev) => [
+      ...prev,
+      {
+        id: `${kind}-${Date.now()}`,
+        kind,
+        x_m: Number((xBase + (prev.length % 4) * 3.5).toFixed(1)),
+        y_m: Number((22 + (prev.length % 5) * 6.5).toFixed(1)),
+      },
+    ]);
+  };
+
+  const autoAlignLines = () => {
+    pushHistory();
+    const alignTeam = (list: BlueprintNode[]) => {
+      // Group outfield players into 3 vertical bands by X and align each band cleanly
+      const gk = list.filter((n) => n.slot === "GK");
+      const out = list.filter((n) => n.slot !== "GK");
+      if (out.length < 3) return list;
+      const xs = out.map((n) => n.x_m).sort((a, b) => a - b);
+      const t1 = xs[Math.floor(xs.length / 3)];
+      const t2 = xs[Math.floor((2 * xs.length) / 3)];
+      const bands: BlueprintNode[][] = [[], [], []];
+      out.forEach((n) => {
+        if (n.x_m <= t1) bands[0].push(n);
+        else if (n.x_m <= t2) bands[1].push(n);
+        else bands[2].push(n);
+      });
+      const updatedMap = new Map<BlueprintNode, BlueprintNode>();
+      bands.forEach((b) => {
+        if (b.length === 0) return;
+        const avgX = Math.round((b.reduce((s, n) => s + n.x_m, 0) / b.length) * 2) / 2;
+        const sortedY = [...b].sort((a, c) => a.y_m - c.y_m);
+        sortedY.forEach((n, idx) => {
+          const evenY =
+            sortedY.length === 1 ? 34 : Number((10 + (idx / (sortedY.length - 1)) * 48).toFixed(1));
+          updatedMap.set(n, { ...n, x_m: avgX, y_m: evenY });
+        });
+      });
+      return [...gk, ...out.map((n) => updatedMap.get(n) || n)];
+    };
+    setNodesA((prev) => alignTeam(prev));
+    setSaveBanner(isAr ? "📏 تمت محاذاة خطوط التشكيل تلقائياً!" : "📏 Formation lines aligned!");
+    setTimeout(() => setSaveBanner(null), 2200);
+  };
+
+  const captureKeyframe = (createNew: boolean) => {
+    const snap: BoardKeyframe = {
+      label: isAr ? `المرحلة ${createNew ? keyframes.length + 1 : Math.max(1, activeKfIdx + 1)}` : `Phase ${createNew ? keyframes.length + 1 : Math.max(1, activeKfIdx + 1)}`,
+      nodesA: nodesA.map((n) => ({ ...n })),
+      nodesB: nodesB.map((n) => ({ ...n })),
+      props: trainingProps.map((p) => ({ ...p })),
+    };
+    if (createNew || keyframes.length === 0) {
+      const next = [...keyframes, snap];
+      setKeyframes(next);
+      setActiveKfIdx(next.length - 1);
+      // Also advance players slightly along their run arrows when creating Phase 2+ so motion is instant!
+      if (next.length >= 2) {
+        setNodesA((prev) =>
+          prev.map((n) => ({
+            ...n,
+            x_m: n.move_to_x_m || n.x_m,
+            y_m: n.move_to_y_m || n.y_m,
+          }))
+        );
+      }
+    } else {
+      setKeyframes((prev) => prev.map((k, i) => (i === activeKfIdx ? snap : k)));
+    }
+  };
+
+  const selectKeyframe = (idx: number) => {
+    setIsAnimating(false);
+    const kf = keyframes[idx];
+    if (!kf) return;
+    setActiveKfIdx(idx);
+    setNodesA(kf.nodesA.map((n) => ({ ...n })));
+    setNodesB(kf.nodesB.map((n) => ({ ...n })));
+    setTrainingProps(kf.props.map((p) => ({ ...p })));
+  };
+
+  const handleRecordAnimatedVideo = () => {
+    const cvs = canvasRef.current;
+    if (!cvs || keyframes.length < 2 || recordingVideo) return;
+    try {
+      const stream = cvs.captureStream(30);
+      const rec = new MediaRecorder(stream, { mimeType: "video/webm" });
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (ev) => {
+        if (ev.data.size > 0) chunks.push(ev.data);
+      };
+      rec.onstop = () => {
+        const blob = new Blob(chunks, { type: "video/webm" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `egy-scout-animated-${formationA.replace(/[^0-9A-Za-z-]/g, "")}.webm`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setRecordingVideo(false);
+        setIsAnimating(false);
+      };
+      setRecordingVideo(true);
+      setIsAnimating(true);
+      rec.start();
+      const totalMs = Math.max(2200, (keyframes.length - 1) * 1500 + 300);
+      setTimeout(() => {
+        if (rec.state !== "inactive") rec.stop();
+      }, totalMs);
+    } catch {
+      setRecordingVideo(false);
+    }
+  };
+
+  const getViewBounds = () =>
+    pitchView === "half"
+      ? { x0: 48, x1: 105, y0: 0, y1: 68 }
+      : pitchView === "corner"
+      ? { x0: 68, x1: 105, y0: 0, y1: 48 }
+      : { x0: 0, x1: 105, y0: 0, y1: 68 };
+
+  // Convert canvas client event -> pitch meters (respecting Full / Half / Corner pitchView + optional Snap-to-Grid!)
   const clientToPitchMeters = (clientX: number, clientY: number): [number, number] => {
     const cvs = canvasRef.current;
     if (!cvs) return [52.5, 34.0];
@@ -378,10 +805,17 @@ export default function FormationBlueprintBoard({
     const pad = 24;
     const pw = cvs.width - pad * 2;
     const ph = cvs.height - pad * 2;
+    const vb = getViewBounds();
     const cx = ((clientX - rect.left) / Math.max(1, rect.width)) * cvs.width;
     const cy = ((clientY - rect.top) / Math.max(1, rect.height)) * cvs.height;
-    const xm = Math.max(1.0, Math.min(104.0, ((cx - pad) / pw) * 105.0));
-    const ym = Math.max(1.0, Math.min(67.0, ((cy - pad) / ph) * 68.0));
+    let xm = vb.x0 + ((cx - pad) / pw) * (vb.x1 - vb.x0);
+    let ym = vb.y0 + ((cy - pad) / ph) * (vb.y1 - vb.y0);
+    if (snapGrid) {
+      xm = Math.round(xm / 2.5) * 2.5;
+      ym = Math.round(ym / 2.5) * 2.5;
+    }
+    xm = Math.max(1.0, Math.min(104.0, xm));
+    ym = Math.max(1.0, Math.min(67.0, ym));
     return [Math.round(xm * 10) / 10, Math.round(ym * 10) / 10];
   };
 
@@ -389,6 +823,14 @@ export default function FormationBlueprintBoard({
     const [xm, ym] = clientToPitchMeters(e.clientX, e.clientY);
 
     if (drawTool === "drag_player") {
+      // 0. Check training props (ball, cone, mini_goal, mannequin) within 3.2m
+      const hitProp = trainingProps.find((pr) => Math.hypot(pr.x_m - xm, pr.y_m - ym) <= 3.2);
+      if (hitProp) {
+        pushHistory();
+        draggingNodeRef.current = { propId: hitProp.id };
+        return;
+      }
+
       // 1. Check if clicking the selected player's arrow tip handle first (to resize/re-aim run arrow!)
       const selList = selectedNode.team === "team_a" ? nodesA : nodesB;
       const selNd = selList[selectedNode.index];
@@ -397,6 +839,7 @@ export default function FormationBlueprintBoard({
         Math.hypot(selNd.move_to_x_m - xm, selNd.move_to_y_m - ym) <= 3.8 &&
         Math.hypot(selNd.move_to_x_m - selNd.x_m, selNd.move_to_y_m - selNd.y_m) >= 2.0
       ) {
+        pushHistory();
         draggingNodeRef.current = { team: selectedNode.team, index: selectedNode.index, mode: "arrow_tip" };
         return;
       }
@@ -421,12 +864,14 @@ export default function FormationBlueprintBoard({
       }
       if (bestHit) {
         const hit = bestHit as { team: "team_a" | "team_b"; index: number };
+        pushHistory();
         draggingNodeRef.current = { team: hit.team, index: hit.index, mode: "body" };
         setSelectedNode({ team: hit.team, index: hit.index });
       }
       return;
     }
 
+    pushHistory();
     if (drawTool === "freehand") {
       activeStrokeRef.current = {
         color: drawColor,
@@ -444,6 +889,11 @@ export default function FormationBlueprintBoard({
     const [xm, ym] = clientToPitchMeters(e.clientX, e.clientY);
 
     if (draggingNodeRef.current) {
+      if ("propId" in draggingNodeRef.current) {
+        const pid = draggingNodeRef.current.propId;
+        setTrainingProps((prev) => prev.map((p) => (p.id === pid ? { ...p, x_m: xm, y_m: ym } : p)));
+        return;
+      }
       const { team, index, mode } = draggingNodeRef.current;
       const setter = team === "team_a" ? setNodesA : setNodesB;
       if (mode === "arrow_tip") {
@@ -557,15 +1007,51 @@ export default function FormationBlueprintBoard({
     const pw = W - pad * 2;
     const ph = H - pad * 2;
 
-    // 1. Stadium Turf Background with Mowed Stripes
+    // 1. Stadium Turf Background with Mowed Stripes + Multi-Pitch View Zoom Transform
     ctx.fillStyle = "#061A13";
     ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    const vb = getViewBounds();
+    if (pitchView !== "full") {
+      ctx.beginPath();
+      ctx.rect(pad, pad, pw, ph);
+      ctx.clip();
+      const sx = 105 / (vb.x1 - vb.x0);
+      const sy = 68 / (vb.y1 - vb.y0);
+      ctx.translate(pad, pad);
+      ctx.scale(sx, sy);
+      ctx.translate(-(pad + (vb.x0 / 105) * pw), -(pad + (vb.y0 / 68) * ph));
+    }
+
     const nStripes = 12;
     for (let i = 0; i < nStripes; i++) {
       if (i % 2 === 0) {
         ctx.fillStyle = "#09251B";
         ctx.fillRect(pad + (i * pw) / nStripes, pad, pw / nStripes, ph);
       }
+    }
+
+    // Optional Magnetic Snap-to-Grid Overlay (2.5m spacing)
+    if (snapGrid) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(16, 185, 129, 0.14)";
+      ctx.lineWidth = 0.8;
+      for (let gx = 5; gx < 105; gx += 5) {
+        const px = pad + (gx / 105) * pw;
+        ctx.beginPath();
+        ctx.moveTo(px, pad);
+        ctx.lineTo(px, H - pad);
+        ctx.stroke();
+      }
+      for (let gy = 5; gy < 68; gy += 5) {
+        const py = pad + (gy / 68) * ph;
+        ctx.beginPath();
+        ctx.moveTo(pad, py);
+        ctx.lineTo(W - pad, py);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
     // 2. FIFA Pitch Markings
@@ -875,6 +1361,56 @@ export default function FormationBlueprintBoard({
     if (teamDisplay !== "team_b") {
       renderTeamNodes(nodesA, "team_a", hexA);
     }
+
+    // 6. Render V8.5 Training Equipment Props (Cones, Mini-Goals, Mannequins, Footballs)
+    for (const pr of trainingProps) {
+      const px = pad + (pr.x_m / 105) * pw;
+      const py = pad + (pr.y_m / 68) * ph;
+      ctx.save();
+      if (pr.kind === "ball") {
+        ctx.beginPath();
+        ctx.arc(px, py, 6.2, 0, Math.PI * 2);
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fill();
+        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = "#0F172A";
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(px, py, 2.2, 0, Math.PI * 2);
+        ctx.fillStyle = "#1E293B";
+        ctx.fill();
+      } else if (pr.kind === "cone") {
+        ctx.fillStyle = "#F97316";
+        ctx.strokeStyle = "#FFFFFF";
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(px, py - 8);
+        ctx.lineTo(px + 7, py + 6);
+        ctx.lineTo(px - 7, py + 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (pr.kind === "mini_goal") {
+        ctx.fillStyle = "rgba(255,255,255,0.18)";
+        ctx.strokeStyle = "#F8FAFC";
+        ctx.lineWidth = 2.2;
+        ctx.fillRect(px - 14, py - 7, 28, 14);
+        ctx.strokeRect(px - 14, py - 7, 28, 14);
+      } else if (pr.kind === "mannequin") {
+        ctx.fillStyle = "#FACC15";
+        ctx.strokeStyle = "#0F172A";
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(px, py - 7, 4.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillRect(px - 4.5, py - 2, 9, 12);
+        ctx.strokeRect(px - 4.5, py - 2, 9, 12);
+      }
+      ctx.restore();
+    }
+
+    ctx.restore();
   }, [
     blueprint,
     nodesA,
@@ -889,6 +1425,9 @@ export default function FormationBlueprintBoard({
     drawTool,
     drawColor,
     drawDashed,
+    pitchView,
+    snapGrid,
+    trainingProps,
   ]);
 
   const activeNodeList = selectedNode.team === "team_a" ? nodesA : nodesB;
@@ -966,18 +1505,28 @@ export default function FormationBlueprintBoard({
             <Bot className="w-4 h-4" />
             <span>{isAr ? "ابتكر وارسم بالـ AI:" : "AI Tactical Drawer:"}</span>
           </div>
-          <select
-            aria-label={isAr ? "اختيار موديل الذكاء الاصطناعي" : "Select AI Model"}
-            value={aiModel}
-            onChange={(e) => setAiModel(e.target.value)}
-            className="bg-[#111827] border border-emerald-500/35 rounded-lg px-2.5 py-2 text-[11px] font-bold text-emerald-300 focus:outline-none focus:border-emerald-400"
+          <button
+            type="button"
+            onClick={() => setShowAdvancedModel((v) => !v)}
+            className="px-2 py-2 rounded-lg bg-[#111827] border border-emerald-500/30 text-[11px] font-bold text-emerald-300 hover:bg-emerald-500/15 shrink-0"
+            title={isAr ? "اختيار موديل الذكاء الاصطناعي يدوياً" : "Advanced AI Model Selection"}
           >
-            {GROQ_AI_MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {isAr ? m.ar : m.en}
-              </option>
-            ))}
-          </select>
+            {aiModel === "auto" ? (isAr ? "⚡ تلقائي ذكي" : "⚡ Auto AI") : aiModel.split("/").pop()}
+          </button>
+          {showAdvancedModel && (
+            <select
+              aria-label={isAr ? "اختيار موديل الذكاء الاصطناعي" : "Select AI Model"}
+              value={aiModel}
+              onChange={(e) => setAiModel(e.target.value)}
+              className="bg-[#111827] border border-emerald-500/35 rounded-lg px-2.5 py-2 text-[11px] font-bold text-emerald-300 focus:outline-none focus:border-emerald-400"
+            >
+              {GROQ_AI_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {isAr ? m.ar : m.en}
+                </option>
+              ))}
+            </select>
+          )}
           <input
             type="text"
             value={aiPrompt}
@@ -1263,19 +1812,43 @@ export default function FormationBlueprintBoard({
             </button>
             <button
               type="button"
-              onClick={() => {
-                if (freehandStrokes.length > 0) {
-                  setFreehandStrokes((p) => p.slice(0, -1));
-                } else if (userArrows.length > 0) {
-                  setUserArrows((p) => p.slice(0, -1));
-                } else if (userZones.length > 0) {
-                  setUserZones((p) => p.slice(0, -1));
-                }
-              }}
-              className="p-1.5 rounded-lg bg-[#111827] hover:bg-white/10 border border-white/10 text-slate-300"
-              title={isAr ? "تراجع عن آخر رسم" : "Undo last drawing"}
+              onClick={() => setSnapGrid((g) => !g)}
+              className={`px-2 py-1 rounded border text-[11px] font-semibold flex items-center gap-1 ${
+                snapGrid
+                  ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
+                  : "bg-[#111827] border-white/10 text-slate-400"
+              }`}
+              title={isAr ? "شبكة ملعب مغناطيسية (Snap-to-Grid)" : "Snap-to-Grid (2.5m)"}
+            >
+              <Magnet className="w-3 h-3" />
+              <span>{isAr ? "شبكة" : "Grid"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={autoAlignLines}
+              className="px-2 py-1 rounded border bg-[#111827] hover:bg-white/10 border-white/10 text-slate-300 text-[11px] font-semibold flex items-center gap-1"
+              title={isAr ? "محاذاة خطوط التشكيل تلقائياً" : "Auto-Align Formation Lines"}
+            >
+              <AlignHorizontalJustifyCenter className="w-3 h-3 text-sky-400" />
+              <span>{isAr ? "محاذاة" : "Align"}</span>
+            </button>
+            <button
+              type="button"
+              disabled={undoStack.length === 0}
+              onClick={handleUndo}
+              className="p-1.5 rounded-lg bg-[#111827] hover:bg-white/10 disabled:opacity-35 border border-white/10 text-slate-300"
+              title={isAr ? `تراجع Ctrl+Z (${undoStack.length})` : `Undo Ctrl+Z (${undoStack.length})`}
             >
               <Undo2 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              disabled={redoStack.length === 0}
+              onClick={handleRedo}
+              className="p-1.5 rounded-lg bg-[#111827] hover:bg-white/10 disabled:opacity-35 border border-white/10 text-slate-300"
+              title={isAr ? `إعادة Ctrl+Y (${redoStack.length})` : `Redo Ctrl+Y (${redoStack.length})`}
+            >
+              <Redo2 className="w-3.5 h-3.5" />
             </button>
             <button
               type="button"
@@ -1358,8 +1931,94 @@ export default function FormationBlueprintBoard({
               className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 font-bold flex items-center gap-1"
             >
               <Download className="w-3 h-3" />
-              <span>{isAr ? "📥 تحميل PNG" : "📥 Export PNG"}</span>
+              <span>{isAr ? "📥 تحميل PNG" : "📥 PNG"}</span>
             </button>
+            <button
+              type="button"
+              onClick={handleExportEgyPlan}
+              className="px-2 py-1 rounded-lg bg-[#111827] hover:bg-white/10 border border-white/15 text-slate-200 font-semibold"
+              title={isAr ? "تصدير ملف .egyplan للمشاركة مع الجهاز الفني" : "Export .egyplan file"}
+            >
+              .egyplan ↓
+            </button>
+            <input ref={importFileRef} type="file" accept=".egyplan,.json" onChange={handleImportEgyPlan} className="hidden" />
+            <button
+              type="button"
+              onClick={() => importFileRef.current?.click()}
+              className="px-2 py-1 rounded-lg bg-[#111827] hover:bg-white/10 border border-white/15 text-slate-200 font-semibold flex items-center gap-1"
+              title={isAr ? "استيراد ملف .egyplan" : "Import .egyplan file"}
+            >
+              <Upload className="w-3 h-3 text-sky-400" />
+              <span>{isAr ? "استيراد" : "Import"}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Row 3 (V8.5): Multi-Pitch Views + Training Equipment Props + Keyframe Animation Controls */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/[0.06] text-[11px]">
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-slate-400">{isAr ? "منظور الملعب:" : "View:"}</span>
+            {(
+              [
+                { id: "full" as PitchViewMode, ar: "ملعب كامل", en: "Full" },
+                { id: "half" as PitchViewMode, ar: "نصف هجومي", en: "Half" },
+                { id: "corner" as PitchViewMode, ar: "منظور ركنية", en: "Corner" },
+              ]
+            ).map((pv) => (
+              <button
+                key={pv.id}
+                type="button"
+                onClick={() => setPitchView(pv.id)}
+                className={`px-2 py-0.5 rounded font-bold transition ${
+                  pitchView === pv.id
+                    ? "bg-emerald-500 text-slate-950"
+                    : "bg-[#111827] text-slate-300 border border-white/10 hover:text-white"
+                }`}
+              >
+                {isAr ? pv.ar : pv.en}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-slate-400">{isAr ? "أدوات التدريب:" : "Drills:"}</span>
+            <button
+              type="button"
+              onClick={() => addTrainingProp("cone")}
+              className="px-2 py-0.5 rounded bg-[#111827] hover:bg-orange-500/20 border border-white/10 text-orange-300 font-semibold"
+            >
+              + 🔺 {isAr ? "قمع" : "Cone"}
+            </button>
+            <button
+              type="button"
+              onClick={() => addTrainingProp("mini_goal")}
+              className="px-2 py-0.5 rounded bg-[#111827] hover:bg-white/15 border border-white/10 text-slate-200 font-semibold"
+            >
+              + 🥅 {isAr ? "مرمى صغير" : "Mini-Goal"}
+            </button>
+            <button
+              type="button"
+              onClick={() => addTrainingProp("mannequin")}
+              className="px-2 py-0.5 rounded bg-[#111827] hover:bg-amber-500/20 border border-white/10 text-amber-300 font-semibold"
+            >
+              + 🧍 {isAr ? "دمية حائط" : "Wall"}
+            </button>
+            <button
+              type="button"
+              onClick={() => addTrainingProp("ball")}
+              className="px-2 py-0.5 rounded bg-[#111827] hover:bg-white/15 border border-white/10 text-white font-semibold"
+            >
+              + ⚽ {isAr ? "كرة" : "Ball"}
+            </button>
+            {trainingProps.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setTrainingProps([{ id: "ball-main", kind: "ball", x_m: 52.5, y_m: 34.0 }])}
+                className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300"
+              >
+                ×
+              </button>
+            )}
           </div>
         </div>
 
@@ -1440,20 +2099,90 @@ export default function FormationBlueprintBoard({
               drawTool === "drag_player" ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair"
             }`}
           />
-          <div className="px-3 py-1.5 bg-[#090D16] border-t border-white/[0.06] flex flex-wrap items-center justify-between gap-2 text-[10.5px] text-slate-400">
-            <span>
-              {isAr
-                ? "💡 اسحب دائرة أي لاعب من ناديك أو الخصم لتغيير مكانه، واسحب النقطة الصفراء في رأس السهم لتوجيه تحركه!"
-                : "💡 Drag any player circle (both teams) to reposition, and drag the yellow arrow-tip dot to aim their run!"}
-            </span>
-            <span className="tabular-nums text-emerald-400 font-semibold">
-              <bdi dir="ltr">{formationA}</bdi> vs <bdi dir="ltr">{formationB}</bdi>
-            </span>
+          <div className="px-3 py-2 bg-[#090D16] border-t border-white/[0.06] space-y-2 text-[11px]">
+            {/* V8.5 Keyframe Tactical Animation Timeline (TacticalPad / Metrica Nexus style!) */}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <GlossaryTooltip term="keyframe" lang={lang}>
+                  <span className="font-bold text-emerald-300 flex items-center gap-1">
+                    <Film className="w-3.5 h-3.5" />
+                    {isAr ? "تحريك الخطة (المراحل):" : "Animation Phases:"}
+                  </span>
+                </GlossaryTooltip>
+                {keyframes.map((kf, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => selectKeyframe(idx)}
+                    className={`px-2 py-0.5 rounded font-bold transition ${
+                      activeKfIdx === idx && !isAnimating
+                        ? "bg-emerald-500 text-slate-950"
+                        : "bg-[#111827] text-slate-300 border border-white/10 hover:text-white"
+                    }`}
+                  >
+                    {kf.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => captureKeyframe(true)}
+                  className="px-2.5 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-bold"
+                >
+                  + {isAr ? `إضافة المرحلة ${keyframes.length + 1}` : `Add Phase ${keyframes.length + 1}`}
+                </button>
+                {keyframes.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => captureKeyframe(false)}
+                    className="px-2 py-0.5 rounded bg-white/[0.06] hover:bg-white/[0.12] text-slate-200 font-semibold"
+                  >
+                    {isAr ? "تحديث المرحلة" : "Update"}
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={keyframes.length < 2}
+                  onClick={() => setIsAnimating((v) => !v)}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-35 text-slate-950 font-extrabold flex items-center gap-1"
+                >
+                  {isAnimating ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                  <span>
+                    {isAnimating
+                      ? isAr ? `إيقاف (${(animStepProgress + 1).toFixed(1)})` : "Stop"
+                      : isAr ? "▶ تشغيل الحركة" : "▶ Animate"}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  disabled={keyframes.length < 2 || recordingVideo}
+                  onClick={handleRecordAnimatedVideo}
+                  className="px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 disabled:opacity-35 border border-sky-400/40 text-sky-300 font-bold"
+                >
+                  {recordingVideo ? (isAr ? "⏺ جاري التسجيل..." : "⏺ Recording...") : isAr ? "🎬 تصدير فيديو WebM" : "🎬 Export Video"}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[10.5px] text-slate-400">
+              <span>
+                {isAr
+                  ? "💡 اسحب أي لاعب أو أداة تدريب (قمع/كرة/مرمى) أو النقطة الصفراء لرأس السهم — واستخدم Ctrl+Z للتراجع."
+                  : "💡 Drag any player, training prop, or yellow arrow-tip — press Ctrl+Z / Ctrl+Y for 50-step Undo/Redo."}
+              </span>
+              <span className="tabular-nums text-emerald-400 font-semibold">
+                <bdi dir="ltr">{formationA}</bdi> vs <bdi dir="ltr">{formationB}</bdi>
+              </span>
+            </div>
           </div>
         </div>
 
         {blueprint && (
           <div className="lg:col-span-4 space-y-3 text-xs">
+            {/* V8.5 Deterministic Tactical Math Validator (Math-First Audit!) */}
+            <TacticalMathValidatorCard lang={lang} validation={mathValidation || blueprint.math_validation || null} />
             {/* Editable Plan Title & Philosophy */}
             <div className="p-3.5 rounded-xl bg-[#090D16] border border-emerald-500/30 space-y-2">
               <div className="flex items-center justify-between gap-2">

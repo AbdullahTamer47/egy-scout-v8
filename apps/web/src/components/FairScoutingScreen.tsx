@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Bookmark, Crosshair, FileText, Film, Play, RotateCcw, ShieldAlert, Trash2, Upload, UserCheck, X } from "lucide-react";
 import { EChartsPlayerRadar, EChartsVaepScatter } from "@/components/TacticalCharts";
+import HeadToHeadComparisonPanel from "@/components/HeadToHeadComparisonPanel";
 import {
   API_BASE,
   apiFetch,
@@ -21,6 +22,7 @@ interface Props {
   lang: "ar" | "en";
   matchId: string;
   role: UserRole;
+  onJumpToClip?: (startSec: number) => void;
 }
 
 type SubTab = "video_tracks" | "benchmark" | "four_point";
@@ -88,7 +90,7 @@ function SvgRadarChart({ players }: { players: ScoutingPlayer[] }) {
   );
 }
 
-export default function FairScoutingScreen({ lang, matchId, role }: Props) {
+export default function FairScoutingScreen({ lang, matchId, role, onJumpToClip }: Props) {
   const isAr = lang === "ar";
   const isReadOnly = role === "board" || role === "player";
 
@@ -1034,6 +1036,17 @@ export default function FairScoutingScreen({ lang, matchId, role }: Props) {
             )}
           </div>
         </div>
+      )}
+
+      {/* V9.0 Head-to-Head Comparison, Multi-Match Progression, Opponent Scouting & Mobile Player Portal */}
+      {data && (
+        <HeadToHeadComparisonPanel
+          lang={lang}
+          matchId={matchId}
+          role={role}
+          pool={[...(data.benchmark_players || []), ...(data.video_tracks || [])]}
+          onJumpToClip={onJumpToClip}
+        />
       )}
     </div>
   );

@@ -82,13 +82,14 @@ export function drawBroadcastGroundRing(
   ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Outer crisp double-bezel broadcast ring
+  // Outer crisp double-bezel broadcast OPEN BASE ring (270° arc open at front of boots — KlipDraw/Viz Libero style!)
   ctx.shadowColor = hexToRgba(colorHex, emphasized ? 0.85 : 0.55);
   ctx.shadowBlur = emphasized ? 14 : 7;
   ctx.beginPath();
-  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, cy, rx, ry, 0, Math.PI * 0.72, Math.PI * 2.28);
   ctx.strokeStyle = hexToRgba(colorHex, emphasized || isCarrier ? 0.96 : 0.84);
-  ctx.lineWidth = emphasized || isCarrier ? 2.6 : 1.75;
+  ctx.lineWidth = emphasized || isCarrier ? 2.8 : 1.85;
+  ctx.lineCap = "round";
   ctx.stroke();
   ctx.shadowBlur = 0;
 

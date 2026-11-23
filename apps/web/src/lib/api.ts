@@ -591,6 +591,7 @@ export interface FormationBlueprintPayload {
     y2_m: number;
   }>;
   execution_steps_ar: string[];
+  math_validation?: MathValidationResult;
 }
 
 export interface TacticalChatResponse {
@@ -719,4 +720,102 @@ export interface PlayerDossierPayload {
   watchouts_ar: string[];
   watchouts_en: string[];
   evidence_clips: ScoutingPlayer["evidence_clips"];
+}
+
+export type WorkspaceMode = "coach" | "analyst" | "scout";
+
+export interface MathValidationResult {
+  overall_balance_score: number;
+  rest_defense_score: number;
+  half_spaces_score: number;
+  rest_defenders_count: number;
+  attacking_players_count: number;
+  vertical_length_m: number;
+  horizontal_width_m: number;
+  corridors: Array<{
+    id: string;
+    label_ar: string;
+    label_en: string;
+    count: number;
+    status: "overload" | "covered" | "empty";
+  }>;
+  strengths_ar: string[];
+  strengths_en: string[];
+  vulnerabilities_ar: string[];
+  vulnerabilities_en: string[];
+  risk_level: "low" | "medium" | "high";
+}
+
+export interface ClipTagItem {
+  id: string;
+  match_id: string;
+  category: string;
+  label_ar: string;
+  label_en: string;
+  time_s: number;
+  start_s: number;
+  end_s: number;
+  playlist_name: string;
+  player_label: string;
+  note: string;
+  created_at?: string;
+}
+
+export interface HeadToHeadComparisonPayload {
+  match_id: string;
+  players: Array<{
+    player_id: string;
+    display_name: string;
+    team_name: string;
+    position: string;
+    archetype_ar: string;
+    rating_10: number | null;
+    minutes_analyzed: number;
+    sample_confidence: string;
+    radar: {
+      attack_impact: number;
+      progression_xt: number;
+      defensive_work: number;
+      physical_hir: number;
+      tactical_discipline: number;
+    };
+    metrics: {
+      vaep_per90: number | null;
+      xt_per90: number | null;
+      padj_def_per90: number | null;
+      hir_m_per90: number | null;
+      max_speed_kmh: number;
+      discipline: number;
+    };
+    evidence_clips: ScoutingPlayer["evidence_clips"];
+  }>;
+  fairness_note_ar: string;
+  fairness_note_en: string;
+}
+
+export interface MultiMatchTrendsPayload {
+  total_matches_in_archive: number;
+  player_progression: Array<{
+    player_name: string;
+    matches_count: number;
+    sample_warning_ar: string;
+    series: Array<{
+      match_id: string;
+      match_title_ar: string;
+      max_speed_kmh: number;
+      avg_speed_kmh: number;
+      discipline: number;
+      observed_s: number;
+      confidence: string;
+    }>;
+  }>;
+  opponent_scouting: Array<{
+    opponent_name: string;
+    matches_analyzed: number;
+    total_observed_s: number;
+    sample_warning_ar: string;
+    avg_box_control_conceded_pct: number;
+    recurring_vulnerabilities_ar: string[];
+    coach_focus_points_ar: string[];
+  }>;
 }

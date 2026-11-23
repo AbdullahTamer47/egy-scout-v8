@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { Box, Compass, Eye, RotateCcw } from "lucide-react";
+import { Box, Compass, Eye, RotateCcw, Zap } from "lucide-react";
 import ThreePitchTwin from "@/components/ThreePitchTwin";
+import GlossaryTooltip from "@/components/GlossaryTooltip";
 import { MomentStatePayload, TimelineBall } from "@/lib/api";
 import { hexToRgba, RenderPlayer } from "@/lib/broadcastRenderer";
 
@@ -121,6 +122,7 @@ export default function TacticalTwinCanvas({
   const [showPassingChannels, setShowPassingChannels] = useState(true);
   const [showCorrectionArrows, setShowCorrectionArrows] = useState(true);
   const [showZone14, setShowZone14] = useState(true);
+  const [performanceMode, setPerformanceMode] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const draggingGhostRef = useRef(false);
   const orbitingRef = useRef<{ active: boolean; lastX: number; lastY: number }>({
@@ -355,8 +357,25 @@ export default function TacticalTwinCanvas({
             }`}
           >
             <Eye className="w-3 h-3" />
-            <span>Player-POV</span>
+            <GlossaryTooltip term="player_pov" lang={lang}>
+              <span>Player-POV</span>
+            </GlossaryTooltip>
           </button>
+          {viewMode !== "2d" && (
+            <button
+              type="button"
+              onClick={() => setPerformanceMode((v) => !v)}
+              className={`inline-flex items-center gap-0.5 px-1.5 py-1 rounded-md text-[10px] font-bold transition ${
+                performanceMode
+                  ? "bg-amber-400 text-slate-950"
+                  : "text-slate-400 hover:text-amber-300"
+              }`}
+              title={isAr ? "وضع الأداء السريع (تقليل الظلال للأجهزة الضعيفة)" : "Performance Mode (Disable 3D Shadows)"}
+            >
+              <Zap className="w-3 h-3" />
+              <span>{isAr ? "سريع" : "Perf"}</span>
+            </button>
+          )}
           {viewMode === "3d" && (
             <button
               type="button"
@@ -440,6 +459,7 @@ export default function TacticalTwinCanvas({
           />
         ) : (
           <ThreePitchTwin
+            key={performanceMode ? "perf" : "hq"}
             mode={viewMode}
             players={players}
             ball={ball}
@@ -452,6 +472,7 @@ export default function TacticalTwinCanvas({
             ghostDy={ghostDy}
             chainIds={chainIds}
             setPieceSim={setPieceSim}
+            performanceMode={performanceMode}
           />
         )}
 

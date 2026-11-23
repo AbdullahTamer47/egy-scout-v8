@@ -233,6 +233,104 @@ class TestWaves1To5(unittest.TestCase):
         self.assertEqual(parse_scoreboard_text(["0-0", "12:05"]), (0, 0))
         self.assertIsNotNone(resolve_ffmpeg_binary())
 
+    def test_v9_math_validator_sqlite_xml_h2h_share_and_rbac(self) -> None:
+        from fastapi.testclient import TestClient
+        from apps.api.main import app
+
+        client = TestClient(app)
+
+        # 1. Tactical Math Validator (Math-First audit on crazy sweeper-keeper 2-1-6-1 shape)
+        val_resp = client.post(
+            "/api/plans/validate",
+            json={
+                "formation_code": "2-1-6-1",
+                "nodes_a": [
+                    {"slot": "GK", "x_m": 38.0, "y_m": 34.0},
+                    {"slot": "CB1", "x_m": 25.0, "y_m": 20.0},
+                    {"slot": "CB2", "x_m": 25.0, "y_m": 48.0},
+                    {"slot": "DM", "x_m": 46.0, "y_m": 22.0},
+                    {"slot": "M1", "x_m": 65.0, "y_m": 8.0},
+                    {"slot": "M2", "x_m": 68.0, "y_m": 16.0},
+                    {"slot": "M3", "x_m": 70.0, "y_m": 22.0},
+                    {"slot": "M4", "x_m": 72.0, "y_m": 28.0},
+                    {"slot": "M5", "x_m": 74.0, "y_m": 36.0},
+                    {"slot": "M6", "x_m": 70.0, "y_m": 46.0},
+                    {"slot": "ST", "x_m": 88.0, "y_m": 34.0},
+                ],
+                "nodes_b": [
+                    {"slot": "GK", "x_m": 99.0, "y_m": 34.0},
+                    {"slot": "ST1", "x_m": 50.0, "y_m": 26.0},
+                    {"slot": "ST2", "x_m": 52.0, "y_m": 42.0},
+                ],
+            },
+        )
+        self.assertEqual(val_resp.status_code, 200)
+        vdata = val_resp.json()
+        self.assertEqual(vdata["risk_level"], "high")
+        self.assertEqual(len(vdata["corridors"]), 5)
+        self.assertTrue(any("الحارس المتقدم" in v for v in vdata["vulnerabilities_ar"]))
+
+        # 2. SQLite Server Persistence for Saved Plans + RBAC read-only check for Board/Player
+        save_resp = client.post(
+            "/api/plans",
+            json={"match_id": "m2_ahly_enppi", "name": "Test Plan V9", "formationA": "3-5-2", "formationB": "5-3-2", "nodesA": [], "nodesB": []},
+            headers={"X-User-Role": "analyst"},
+        )
+        self.assertEqual(save_resp.status_code, 200)
+        plan_id = save_resp.json()["plan"]["id"]
+        list_resp = client.get("/api/plans?match_id=m2_ahly_enppi", headers={"X-User-Role": "board"})
+        self.assertEqual(list_resp.status_code, 200)
+        self.assertTrue(any(p["id"] == plan_id for p in list_resp.json()["plans"]))
+        # Board must be blocked (403) from mutating plans
+        board_block = client.post(
+            "/api/plans",
+            json={"match_id": "m2_ahly_enppi", "name": "Blocked"},
+            headers={"X-User-Role": "board"},
+        )
+        self.assertEqual(board_block.status_code, 403)
+        del_resp = client.delete(f"/api/plans/{plan_id}?match_id=m2_ahly_enppi", headers={"X-User-Role": "analyst"})
+        self.assertEqual(del_resp.status_code, 200)
+
+        # 3. Clip Tagging + Sportscode / Nacsport XML Export & Import Round-Trip
+        t_resp = client.post(
+            "/api/matches/m2_ahly_enppi/tags",
+            json={"category": "high_press", "label_ar": "ضغط عالٍ", "label_en": "High Press", "time_s": 54.0, "pre_roll_s": 3, "post_roll_s": 3},
+        )
+        self.assertEqual(t_resp.status_code, 200)
+        tag_id = t_resp.json()["tag"]["id"]
+        xml_resp = client.get("/api/matches/m2_ahly_enppi/tags/export-xml")
+        self.assertEqual(xml_resp.status_code, 200)
+        self.assertIn(b"<ALL_INSTANCES>", xml_resp.content)
+        imp_resp = client.post(
+            "/api/matches/m2_ahly_enppi/tags/import-xml",
+            json={"xml_text": xml_resp.text},
+        )
+        self.assertEqual(imp_resp.status_code, 200)
+        self.assertGreaterEqual(imp_resp.json()["imported_count"], 1)
+        # Clean up test tags
+        for tg in imp_resp.json()["tags"]:
+            if tg["id"] == tag_id or tg.get("playlist_name") in ("محاضرة غرفة الملابس", "مستورد من XML"):
+                client.delete(f"/api/matches/m2_ahly_enppi/tags/{tg['id']}")
+
+        # 4. Head-to-Head Fair Comparison & Multi-Match Trends
+        h2h_resp = client.get("/api/scouting/compare?match_id=m2_ahly_enppi")
+        self.assertEqual(h2h_resp.status_code, 200)
+        self.assertGreaterEqual(len(h2h_resp.json()["players"]), 2)
+        tr_resp = client.get("/api/scouting/multi-match-trends")
+        self.assertEqual(tr_resp.status_code, 200)
+        self.assertGreaterEqual(tr_resp.json()["total_matches_in_archive"], 3)
+
+        # 5. Role-Aware Mobile Player Share Portal (Redacts internal board notes)
+        sh_resp = client.post(
+            "/api/share/player",
+            json={"match_id": "m2_ahly_enppi", "player_name": "إمام عاشور", "position": "CM", "rating_10": 8.4},
+        )
+        self.assertEqual(sh_resp.status_code, 200)
+        self.assertTrue(sh_resp.json()["redacted_internal_notes"])
+        portal = client.get(sh_resp.json()["share_url"])
+        self.assertEqual(portal.status_code, 200)
+        self.assertIn("إمام عاشور", portal.text)
+
 
 if __name__ == "__main__":
     unittest.main()

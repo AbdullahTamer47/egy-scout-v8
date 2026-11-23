@@ -19,6 +19,7 @@ interface Props {
   ghostDy: number;
   chainIds: number[];
   setPieceSim: SetPieceSimState | null;
+  performanceMode?: boolean;
 }
 
 /** Build a high-res procedural FIFA 105x68m mowed grass & white-line stadium pitch texture. */
@@ -133,13 +134,16 @@ export default function ThreePitchTwin(props: Props) {
 
     let renderer: THREE.WebGLRenderer;
     try {
-      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+      renderer = new THREE.WebGLRenderer({
+        antialias: !props.performanceMode,
+        powerPreference: "high-performance",
+      });
     } catch {
       return;
     }
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.shadowMap.enabled = true;
+    renderer.setPixelRatio(props.performanceMode ? 1 : Math.min(window.devicePixelRatio || 1, 2));
+    renderer.shadowMap.enabled = !props.performanceMode;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.innerHTML = "";
     container.appendChild(renderer.domElement);
@@ -148,9 +152,9 @@ export default function ThreePitchTwin(props: Props) {
     scene.add(new THREE.AmbientLight(0xdbeafe, 0.72));
     const sun = new THREE.DirectionalLight(0xffffff, 1.15);
     sun.position.set(22, 58, 36);
-    sun.castShadow = true;
-    sun.shadow.mapSize.width = 1024;
-    sun.shadow.mapSize.height = 1024;
+    sun.castShadow = !props.performanceMode;
+    sun.shadow.mapSize.width = props.performanceMode ? 512 : 1024;
+    sun.shadow.mapSize.height = props.performanceMode ? 512 : 1024;
     scene.add(sun);
 
     const rim = new THREE.DirectionalLight(0x38bdf8, 0.38);

@@ -163,6 +163,8 @@ class ScoutV8Service:
         self._load_env_file()
         self.data_paths = get_data_paths(create=True)
         self.provider = get_compute_provider()
+        from apps.api.storage_db import ScoutSQLiteStore
+        self.sqlite_store = ScoutSQLiteStore(self.data_paths.outputs / "egy_scout_v9.db")
         self._v8_cache: dict[str, pd.DataFrame] = {}
         self._legacy_cache: dict[str, pd.DataFrame] = {}
         self._meta_cache: dict[str, dict[str, Any]] = {}
@@ -2422,6 +2424,10 @@ class ScoutV8Service:
         bp["match_id"] = match_id
         bp["team"] = team
         bp["kit_colors"] = self.get_match_kit_colors(match_id)
+        from packages.tactics_engine.plan_validator import validate_tactical_plan
+        bp["math_validation"] = validate_tactical_plan(
+            bp.get("nodes", []), bp.get("opponent_nodes", []), formation_code=bp.get("formation_code", "")
+        )
         return bp
 
     def _call_external_llm_if_configured(
@@ -2456,8 +2462,14 @@ class ScoutV8Service:
                 msgs.append({"role": "user", "content": user_question})
 
                 default_order = ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b", "allam-2-7b"]
-                if preferred_model and preferred_model.strip() in default_order:
-                    pm = preferred_model.strip()
+                pm = (preferred_model or "").strip()
+                if pm == "auto" or not pm:
+                    # V8.3 Auto Smart Router: 120B for complex tactical geometry/JSON, Qwen 3.8 / 20B for snappy Arabic chat
+                    if json_mode or len(user_question) > 65:
+                        model_order = ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b", "allam-2-7b"]
+                    else:
+                        model_order = ["qwen/qwen3.8-27b", "openai/gpt-oss-20b", "openai/gpt-oss-120b", "allam-2-7b"]
+                elif pm in default_order:
                     model_order = [pm] + [m for m in default_order if m != pm]
                 else:
                     model_order = default_order
@@ -2734,6 +2746,10 @@ class ScoutV8Service:
                     "color": "#F59E0B",
                     "label_ar": "منطقة الكثافة والتفوق الهجومي",
                 }]
+        from packages.tactics_engine.plan_validator import validate_tactical_plan
+        bp["math_validation"] = validate_tactical_plan(
+            bp.get("nodes", []), bp.get("opponent_nodes", []), formation_code=bp.get("formation_code", "")
+        )
         bp["ai_provider"] = provider or "EGY-SCOUT Tactical Geometry Engine"
         return bp
 
