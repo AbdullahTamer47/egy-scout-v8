@@ -135,21 +135,39 @@ def _bbox_iou(a: list[float], b: list[float]) -> float:
 
 
 def _extract_jersey_dominant_rgb(crop_bgr: np.ndarray) -> Optional[np.ndarray]:
-    """Compute dominant non-grass RGB of a torso crop (filters out green pitch background)."""
+    """Compute dominant non-grass RGB of a torso crop (strictly filters out green pitch turf in both HSV and RGB)."""
     if crop_bgr is None or crop_bgr.size == 0:
         return None
-    hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV)
-    grass = (
-        (hsv[:, :, 0] >= 30)
-        & (hsv[:, :, 0] <= 88)
-        & (hsv[:, :, 1] >= 45)
-        & (hsv[:, :, 2] >= 40)
-    )
-    fg_mask = ~grass
-    if int(fg_mask.sum()) < 12:
-        fg_mask = np.ones(crop_bgr.shape[:2], dtype=bool)
-    rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)[fg_mask]
-    return np.median(rgb, axis=0).astype(np.float32)
+    h, w = crop_bgr.shape[:2]
+    inner = crop_bgr[max(0, int(h * 0.12)) : max(1, int(h * 0.85)), max(0, int(w * 0.15)) : max(1, int(w * 0.85))]
+    if inner.size == 0:
+        inner = crop_bgr
+    hsv = cv2.cvtColor(inner, cv2.COLOR_BGR2HSV)
+    rgb_img = cv2.cvtColor(inner, cv2.COLOR_BGR2RGB).astype(np.int32)
+    r_ch, g_ch, b_ch = rgb_img[:, :, 0], rgb_img[:, :, 1], rgb_img[:, :, 2]
+
+    # Strict green turf mask: HSV green range OR green channel strictly dominating red & blue
+    grass_hsv = (hsv[:, :, 0] >= 22) & (hsv[:, :, 0] <= 98) & (hsv[:, :, 1] >= 20)
+    grass_rgb = (g_ch > (r_ch + 5)) & (g_ch > (b_ch + 5))
+    # Also exclude very dark shadow/black shorts pixels (V < 28)
+    dark_px = hsv[:, :, 2] < 28
+    fg_mask = ~(grass_hsv | grass_rgb | dark_px)
+
+    if int(fg_mask.sum()) >= 5:
+        pts = rgb_img[fg_mask].astype(np.float32)
+        return np.median(pts, axis=0).astype(np.float32)
+
+    non_grass = ~(grass_hsv | grass_rgb)
+    if int(non_grass.sum()) >= 3:
+        pts = rgb_img[non_grass].astype(np.float32)
+        return np.median(pts, axis=0).astype(np.float32)
+
+    # Last fallback: choose the pixels with the lowest (G - max(R, B)) green excess
+    flat_rgb = rgb_img.reshape(-1, 3).astype(np.float32)
+    green_excess = flat_rgb[:, 1] - np.maximum(flat_rgb[:, 0], flat_rgb[:, 2])
+    best_k = max(1, len(flat_rgb) // 4)
+    idx_least_green = np.argsort(green_excess)[:best_k]
+    return np.median(flat_rgb[idx_least_green], axis=0).astype(np.float32)
 
 
 def _extract_appearance_vec(crop_bgr: np.ndarray) -> np.ndarray:
@@ -506,6 +524,7 @@ def ingest_clip_with_football_yolo(
     crops: list[Optional[np.ndarray]] = []
     track_reid_vecs: dict[int, list[np.ndarray]] = defaultdict(list)
     preview_frame: Optional[np.ndarray] = None
+    best_preview_boxes = -1
     team_rgbs: dict[str, list[np.ndarray]] = {"team_a": [], "team_b": []}
     fps = 25.0
 
@@ -547,6 +566,9 @@ def ingest_clip_with_football_yolo(
                         res = yolo.predict(frame, imgsz=960, conf=0.28, verbose=False)[0]
 
                     if res.boxes is not None and len(res.boxes) > 0:
+                        if len(res.boxes) > best_preview_boxes:
+                            best_preview_boxes = len(res.boxes)
+                            preview_frame = frame.copy()
                         boxes = res.boxes.xyxy.cpu().numpy()
                         clss = res.boxes.cls.int().cpu().numpy()
                         confs = res.boxes.conf.cpu().numpy()
@@ -672,7 +694,11 @@ def ingest_clip_with_football_yolo(
     clusterer = get_siglip_clusterer(prefer_siglip=use_siglip) if len(valid_crops) >= 3 else None
     v8_df = ZeroRefereeLeakShield(
         clusterer=clusterer,
-        config=RefereeShieldConfig(max_speed_kmh=36.0),
+        config=RefereeShieldConfig(
+            max_speed_kmh=36.0,
+            min_team_conf=0.45,
+            min_track_frames=6,
+        ),
     ).apply(raw_df, crops=crops)
 
     mean_embs = {
@@ -682,12 +708,61 @@ def ingest_clip_with_football_yolo(
     }
     v8_df, reid_remap = merge_fragmented_tracks_reid(v8_df, mean_embs, sim_threshold=0.88)
 
+    # Track-Level Two-Team Jersey Separation: ensure EVERY outfield player track has a valid team (team_a vs team_b)
+    # and never collapses into a single team or team='none' due to grass background!
+    track_dom_rgbs: dict[int, list[np.ndarray]] = defaultdict(list)
     for idx, r in v8_df.iterrows():
-        t = str(r["team"])
-        if t in ("team_a", "team_b") and idx < len(crops) and crops[idx] is not None:
+        tid = int(r["track_id"])
+        role = str(r["role"])
+        if tid >= 0 and role in ("player", "goalkeeper") and idx < len(crops) and crops[idx] is not None:
             dom = _extract_jersey_dominant_rgb(crops[idx])
             if dom is not None:
-                team_rgbs[t].append(dom)
+                track_dom_rgbs[tid].append(dom)
+
+    player_tids = sorted(
+        int(t)
+        for t in v8_df[v8_df["role"].isin(["player", "goalkeeper"])]["track_id"].unique()
+        if int(t) >= 0 and int(t) in track_dom_rgbs
+    )
+    if len(player_tids) >= 2:
+        from sklearn.cluster import KMeans
+
+        track_med_rgb = np.asarray(
+            [np.median(track_dom_rgbs[tid], axis=0) for tid in player_tids],
+            dtype=np.float32,
+        )
+        # Convert RGB -> CIE LAB for perceptually uniform 2-team kit separation
+        bgr_patch = np.uint8(np.clip(track_med_rgb[:, ::-1], 0, 255)).reshape(-1, 1, 3)
+        lab_vecs = cv2.cvtColor(bgr_patch, cv2.COLOR_BGR2LAB).reshape(-1, 3).astype(np.float32)
+
+        km2 = KMeans(n_clusters=2, n_init=10, random_state=42)
+        t_labels = km2.fit_predict(lab_vecs)
+        # Order clusters deterministically so team_a is the higher-count or warmer/brighter kit
+        c0_cnt = int((t_labels == 0).sum())
+        c1_cnt = int((t_labels == 1).sum())
+        swap = c1_cnt > c0_cnt
+        for tid, cid, rgb_vec in zip(player_tids, t_labels, track_med_rgb):
+            assigned_team = "team_b" if (int(cid) == 1) ^ swap else "team_a"
+            mask_t = (v8_df["track_id"] == tid) & (v8_df["role"].isin(["player", "goalkeeper"]))
+            v8_df.loc[mask_t, "team"] = assigned_team
+            v8_df.loc[mask_t, "team_conf"] = np.maximum(v8_df.loc[mask_t, "team_conf"], np.float32(0.84))
+            team_rgbs[assigned_team].append(rgb_vec)
+
+    # Guarantee zero player/goalkeeper rows remain with team == 'none'
+    remaining_none = v8_df["role"].isin(["player", "goalkeeper"]) & (~v8_df["team"].isin(["team_a", "team_b"]))
+    if remaining_none.any():
+        for tid in v8_df.loc[remaining_none, "track_id"].unique():
+            t_mask = remaining_none & (v8_df["track_id"] == tid)
+            med_x = float(v8_df.loc[t_mask, "x_m"].median()) if v8_df.loc[t_mask, "x_m"].notna().any() else 52.5
+            v8_df.loc[t_mask, "team"] = "team_a" if med_x <= 52.5 else "team_b"
+            v8_df.loc[t_mask, "team_conf"] = np.float32(0.70)
+    else:
+        for idx, r in v8_df.iterrows():
+            t = str(r["team"])
+            if t in ("team_a", "team_b") and idx < len(crops) and crops[idx] is not None:
+                dom = _extract_jersey_dominant_rgb(crops[idx])
+                if dom is not None:
+                    team_rgbs[t].append(dom)
 
     kit_colors = {
         "team_a_hex": _rgb_to_hex(tuple(np.median(team_rgbs["team_a"], axis=0)))

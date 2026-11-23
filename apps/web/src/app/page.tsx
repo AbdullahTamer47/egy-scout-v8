@@ -18,7 +18,7 @@ import BroadcastStudioScreen from "@/components/BroadcastStudioScreen";
 import FairScoutingScreen from "@/components/FairScoutingScreen";
 import QuickAnalysisScreen from "@/components/QuickAnalysisScreen";
 import TacticalAIChatbot from "@/components/TacticalAIChatbot";
-import { API_BASE, apiFetch, MatchListItem, UserRole } from "@/lib/api";
+import { API_BASE, apiFetch, FormationBlueprintPayload, MatchListItem, UserRole } from "@/lib/api";
 
 type TabKey = "accuracy" | "studio" | "scouting" | "quick";
 
@@ -68,6 +68,7 @@ export default function HomePage() {
   const [matches, setMatches] = useState<MatchListItem[]>(FALLBACK_MATCHES);
   const [role, setRole] = useState<UserRole>("analyst");
   const [chatOpen, setChatOpen] = useState(false);
+  const [aiBlueprint, setAiBlueprint] = useState<FormationBlueprintPayload | null>(null);
 
   const loadMatches = useCallback(() => {
     apiFetch<{ matches: MatchListItem[] }>("/api/matches", {}, "club_demo_egypt", role)
@@ -251,7 +252,14 @@ export default function HomePage() {
 
         <main className="flex-1 p-4 lg:p-6 max-w-[1600px] w-full mx-auto">
           {tab === "accuracy" && <AccuracyProofScreen lang={lang} matchId={matchId} role={role} />}
-          {tab === "studio" && <BroadcastStudioScreen lang={lang} matchId={matchId} role={role} />}
+          {tab === "studio" && (
+            <BroadcastStudioScreen
+              lang={lang}
+              matchId={matchId}
+              role={role}
+              externalBlueprint={aiBlueprint}
+            />
+          )}
           {tab === "scouting" && <FairScoutingScreen lang={lang} matchId={matchId} role={role} />}
           {tab === "quick" && (
             <QuickAnalysisScreen
@@ -280,6 +288,7 @@ export default function HomePage() {
           isOpen={chatOpen}
           onToggleOpen={() => setChatOpen((v) => !v)}
           onNavigateTab={(targetTab) => setTab(targetTab)}
+          onAiBlueprintDrawn={(bp) => setAiBlueprint(bp)}
         />
       </div>
     </div>

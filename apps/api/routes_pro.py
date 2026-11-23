@@ -457,9 +457,11 @@ def api_formation_blueprint(
     formation_code: str = "4-2-3-1",
     team: str = "team_a",
     tactical_mode: str = "balanced",
+    opponent_formation_code: str = "4-4-2",
+    opponent_tactical_mode: str = "balanced",
     ctx: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
-    """Interactive 11v11 Formation Blueprint Board populated with real match tracks/roster."""
+    """Interactive 22-player (Two-Team 11v11) Formation Blueprint Board populated with real match tracks/roster."""
     ctx.require("read:tactics")
     from apps.api.main import service
 
@@ -470,9 +472,27 @@ def api_formation_blueprint(
             formation_code=formation_code,
             team=team,
             tactical_mode=tactical_mode,
+            opponent_formation_code=opponent_formation_code,
+            opponent_tactical_mode=opponent_tactical_mode,
         )
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/api/matches/{match_id}/ai-draw")
+def api_ai_tactical_draw(
+    match_id: str,
+    payload: dict[str, Any],
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    """Use Groq Llama-3.3-70B to draw any custom two-team formation, tactical style, arrows, and zones on the pitch."""
+    ctx.require("read:tactics")
+    from apps.api.main import service
+
+    try:
+        return service.generate_ai_tactical_drawing(ctx.tenant_id, match_id, payload)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/api/chat/ask")

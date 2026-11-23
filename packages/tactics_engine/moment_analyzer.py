@@ -767,8 +767,10 @@ def analyze_frame_moment_state(
         reverse=True,
     )
 
-    # Pick the primary focal player for the top Moment State summary card
+    # Pick the primary focal player for EACH team so BOTH teams are always analyzed simultaneously!
     focal_player = player_states[0] if player_states else None
+    team_a_focal = next((s for s in player_states if s["team"] == "team_a"), focal_player)
+    team_b_focal = next((s for s in player_states if s["team"] == "team_b"), focal_player)
     primary_def_fault = next(
         (s for s in player_states if s["team"] == defending_team and s["status_tag"] != "disciplined"),
         next((s for s in player_states if s["team"] == defending_team), focal_player),
@@ -850,6 +852,8 @@ def analyze_frame_moment_state(
             else "التمركز الدفاعي والهجومي متوازن حالياً."
         ),
         "focal_player": focal_player,
+        "team_a_focal_player": team_a_focal,
+        "team_b_focal_player": team_b_focal,
     }
 
     return {
@@ -864,36 +868,155 @@ def analyze_frame_moment_state(
     }
 
 
-def build_formation_blueprint(
-    formation_code: str = "4-2-3-1",
-    team_name: str = "الأهلي",
-    opponent_name: str = "إنبي",
-    attack_right: bool = True,
-    roster_players: Optional[list[dict[str, Any]]] = None,
-    tactical_mode: str = "balanced",
-) -> dict[str, Any]:
-    """Generate a complete 11v11 visual tactical formation blueprint on a 105x68m FIFA pitch.
+TACTICAL_STYLES_CATALOG: dict[str, dict[str, Any]] = {
+    "balanced": {
+        "title_ar": "متوازن (Mid-Block & Progressive Build-up)",
+        "shift_x": 0.0,
+        "width_scale": 1.0,
+        "philosophy_ar": "توازن بين تأمين المنطقة 14 بمحور ارتكاز مزدوج والتدرج المنظم عبر أنصاف المساحات.",
+    },
+    "aggressive": {
+        "title_ar": "ضغط عالٍ عكسي (Gegenpressing & High Line)",
+        "shift_x": 0.10,
+        "width_scale": 0.92,
+        "philosophy_ar": "رفع خط الدفاع لمنتصف الملعب مع ضغط ثلاثي فوري خلال 5 ثوانٍ من فقدان الكرة لإجبار الخصم على الخطأ.",
+    },
+    "conservative": {
+        "title_ar": "تكتل دفاعي منخفض (Low-Block & Compactness)",
+        "shift_x": -0.09,
+        "width_scale": 0.80,
+        "philosophy_ar": "تضييق المساحات الطولية والعرضية أمام منطقة الجزاء وإغلاق العمق تماماً مع الاعتماد على التحولات.",
+    },
+    "tiki_taka": {
+        "title_ar": "تيكي تاكا واستحواذ هجومي (Positional Play & Triangles)",
+        "shift_x": 0.06,
+        "width_scale": 1.05,
+        "philosophy_ar": "تقارب الخطوط لخلق مثلثات تمرير قصيرة مستمرة وتفوق عددي في أنصاف المساحات والمنطقة 14.",
+    },
+    "counter_attack": {
+        "title_ar": "هجوم مرتد خاطف وتحولات عمودية (Direct Counter-Attack)",
+        "shift_x": -0.04,
+        "width_scale": 1.08,
+        "philosophy_ar": "استدراج الخصم للأمام ثم ضرب المساحات خلف أظهرة الخصم بتمريرة عمودية سريعة للأجنحة والمهاجم.",
+    },
+    "inverted_fullbacks": {
+        "title_ar": "أظهرة عكسية وصندوق وسط (Inverted Fullbacks & Box Midfield)",
+        "shift_x": 0.05,
+        "width_scale": 0.96,
+        "philosophy_ar": "دخول الظهيرين إلى عمق الوسط بجوار الارتكاز لتشكيل صندوق رباعي يسيطر على العمق ويحرر صناع اللعب.",
+    },
+    "wing_overload": {
+        "title_ar": "غزارة هجومية وعرضيات من الأطراف (Wing Overload)",
+        "shift_x": 0.07,
+        "width_scale": 1.15,
+        "philosophy_ar": "توسيع الملعب لأقصى درجة عبر الأجنحة والأظهرة المتقدمة لخلق موقف 2 ضد 1 على الطرف وإرسال عرضيات خطيرة.",
+    },
+}
 
-    Maps real match players/tracks onto the 11 tactical roles, computes connected line geometry,
-    pressing zones, and tactical movement vectors so the frontend can draw the exact plan on canvas.
-    """
-    clean_code = formation_code.strip() if formation_code.strip() in TACTICAL_FORMATIONS_CATALOG else "4-2-3-1"
-    spec = TACTICAL_FORMATIONS_CATALOG[clean_code]
 
-    # Mode shift: aggressive pushes lines +9m higher, conservative drops lines -7m deeper
-    mode_shift_x = 0.08 if tactical_mode == "aggressive" else (-0.06 if tactical_mode == "conservative" else 0.0)
-    roster = list(roster_players or [])
+def parse_any_formation_spec(formation_code: str) -> dict[str, Any]:
+    """Return formation spec from catalog OR dynamically synthesize any custom formation (e.g. 3-5-2, 4-1-4-1, 5-3-2, 4-2-2-2, 3-2-4-1)."""
+    clean = formation_code.strip()
+    if clean in TACTICAL_FORMATIONS_CATALOG:
+        return TACTICAL_FORMATIONS_CATALOG[clean]
+
+    parts = [int(p) for p in clean.replace("/", "-").replace(" ", "-").split("-") if p.strip().isdigit() and int(p) > 0]
+    if not parts or sum(parts) < 6 or sum(parts) > 10:
+        return TACTICAL_FORMATIONS_CATALOG["4-2-3-1"]
+    # Normalize sum of outfield lines to 10 players if needed
+    while sum(parts) < 10:
+        parts[-1] += 1
+    while sum(parts) > 10 and len(parts) > 1:
+        if parts[-1] > 1:
+            parts[-1] -= 1
+        else:
+            parts.pop()
+    norm_code = "-".join(str(p) for p in parts)
+    if norm_code in TACTICAL_FORMATIONS_CATALOG:
+        return TACTICAL_FORMATIONS_CATALOG[norm_code]
+
+    nodes: list[dict[str, Any]] = [
+        {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.06, "y_norm": 0.50}
+    ]
+    lines: list[dict[str, Any]] = []
+    n_lines = len(parts)
+    x_positions = np.linspace(0.22, 0.81, n_lines)
+    line_types = ["backline", "midfield", "attack"]
+    line_names_ar = ["خط الدفاع", "خط الوسط الأول", "خط الوسط المتقدم", "خط الهجوم"]
+
+    slot_counter = 1
+    for l_idx, count in enumerate(parts):
+        x_val = round(float(x_positions[l_idx]), 3)
+        if count == 1:
+            y_vals = [0.50]
+        elif count == 2:
+            y_vals = [0.36, 0.64]
+        elif count == 3:
+            y_vals = [0.22, 0.50, 0.78]
+        elif count == 4:
+            y_vals = [0.15, 0.38, 0.62, 0.85]
+        else:
+            y_vals = [round(float(v), 3) for v in np.linspace(0.12, 0.88, count)]
+
+        ltype = "backline" if l_idx == 0 else ("attack" if l_idx == n_lines - 1 else "midfield")
+        llabel = line_names_ar[min(l_idx, len(line_names_ar) - 1)]
+        line_slots: list[str] = []
+        for c_idx, y_val in enumerate(y_vals):
+            if l_idx == 0:
+                prefix = "CB" if 0 < c_idx < count - 1 else ("LB" if c_idx == 0 else "RB")
+            elif l_idx == n_lines - 1:
+                prefix = "ST" if (count <= 2 or 0 < c_idx < count - 1) else ("LW" if c_idx == 0 else "RW")
+            else:
+                prefix = "CM" if 0 < c_idx < count - 1 else ("LM" if c_idx == 0 else "RM")
+            slot_name = f"{prefix}{slot_counter}" if any(n["slot"] == prefix for n in nodes) else prefix
+            slot_counter += 1
+            nodes.append(
+                {
+                    "slot": slot_name,
+                    "role_ar": f"{llabel} ({slot_name})",
+                    "x_norm": x_val,
+                    "y_norm": round(float(y_val), 3),
+                }
+            )
+            line_slots.append(slot_name)
+        lines.append({"line_type": ltype, "label_ar": f"{llabel} ({count})", "slots": line_slots})
+
+    return {
+        "code": norm_code,
+        "title_ar": f"تشكيل {norm_code} التكتيكي المخصص",
+        "philosophy_ar": f"توزيع تكتيكي مخصص ({norm_code}) يوازن بين الخطوط الـ {n_lines} ويغلق الممرات النصفية والمنطقة 14.",
+        "nodes": nodes,
+        "lines": lines,
+    }
+
+
+def _build_single_team_nodes_and_lines(
+    spec: dict[str, Any],
+    attack_right: bool,
+    roster: list[dict[str, Any]],
+    tactical_mode: str,
+    team_key: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    style_cfg = TACTICAL_STYLES_CATALOG.get(tactical_mode, TACTICAL_STYLES_CATALOG["balanced"])
+    mode_shift_x = float(style_cfg["shift_x"])
+    width_scale = float(style_cfg["width_scale"])
 
     nodes_out: list[dict[str, Any]] = []
     slot_to_xy: dict[str, tuple[float, float]] = {}
 
     for idx, nd in enumerate(spec["nodes"]):
         x_norm = float(nd["x_norm"])
+        y_norm = float(nd["y_norm"])
         if nd["slot"] != "GK":
-            x_norm = float(np.clip(x_norm + mode_shift_x, 0.14, 0.90))
+            x_norm = float(np.clip(x_norm + mode_shift_x, 0.12, 0.92))
+            y_norm = float(np.clip(0.50 + (y_norm - 0.50) * width_scale, 0.08, 0.92))
+            if tactical_mode == "inverted_fullbacks" and nd["slot"] in ("RB", "LB", "RWB", "LWB"):
+                x_norm = float(np.clip(x_norm + 0.12, 0.25, 0.70))
+                y_norm = 0.50 + (y_norm - 0.50) * 0.58
         if not attack_right:
             x_norm = 1.0 - x_norm
-        y_norm = float(nd["y_norm"])
+            y_norm = 1.0 - y_norm
+
         x_m = round(x_norm * 105.0, 2)
         y_m = round(y_norm * 68.0, 2)
         slot_to_xy[nd["slot"]] = (x_m, y_m)
@@ -905,34 +1028,41 @@ def build_formation_blueprint(
             or (f"#{assigned['jersey_number']}" if assigned and assigned.get("jersey_number") else nd["slot"])
         ) if assigned else nd["slot"]
 
-        # Tactical movement vector for each slot
         dir_s = 1.0 if attack_right else -1.0
-        if nd["slot"] in ("RB", "LB", "RWB", "LWB"):
-            to_x = round(float(np.clip(x_m + dir_s * 11.5, 4.0, 101.0)), 2)
-            to_y = round(y_m + (34.0 - y_m) * 0.12, 2)
-            duty_ar = "تقدم على الطرف مع التغطية العكسية للممر النصفي"
-        elif nd["slot"] in ("CAM", "RAM", "LAM", "RCM", "LCM"):
-            to_x = round(float(np.clip(x_m + dir_s * 8.5, 4.0, 101.0)), 2)
-            to_y = round(y_m + (34.0 - y_m) * 0.22, 2)
-            duty_ar = "اختراق المنطقة 14 وأنصاف المساحات لربط الخطوط"
-        elif nd["slot"] in ("RW", "LW", "RM", "LM"):
-            to_x = round(float(np.clip(x_m + dir_s * 10.0, 4.0, 101.0)), 2)
-            to_y = round(y_m + (34.0 - y_m) * 0.35, 2)
-            duty_ar = "قطع قطري للعمق خلف الظهير لفتح ممر التسديد"
-        elif nd["slot"] in ("ST", "RST", "LST"):
-            to_x = round(float(np.clip(x_m + dir_s * 9.0, 4.0, 101.0)), 2)
+        slot_up = nd["slot"].upper()
+        if any(k in slot_up for k in ("RB", "LB", "WB")):
+            if tactical_mode == "inverted_fullbacks":
+                to_x = round(float(np.clip(x_m + dir_s * 7.5, 4.0, 101.0)), 2)
+                to_y = round(y_m + (34.0 - y_m) * 0.35, 2)
+                duty_ar = "ظهير عكسي يدخل لعمق الوسط لتشكيل تفوق عددي في البناء"
+            else:
+                to_x = round(float(np.clip(x_m + dir_s * 12.0, 4.0, 101.0)), 2)
+                to_y = round(y_m + (34.0 - y_m) * 0.10, 2)
+                duty_ar = "تقدم هجومي على الطرف مع التغطية العكسية للممر النصفي"
+        elif any(k in slot_up for k in ("CAM", "AM", "CM")):
+            to_x = round(float(np.clip(x_m + dir_s * 9.5, 4.0, 101.0)), 2)
+            to_y = round(y_m + (34.0 - y_m) * 0.24, 2)
+            duty_ar = "اختراق المنطقة 14 وأنصاف المساحات لربط الخطوط وصناعة الفرص"
+        elif any(k in slot_up for k in ("RW", "LW", "RM", "LM")):
+            to_x = round(float(np.clip(x_m + dir_s * 11.0, 4.0, 101.0)), 2)
+            to_y = round(y_m + (34.0 - y_m) * (0.15 if tactical_mode == "wing_overload" else 0.38), 2)
+            duty_ar = "اختراق قطري خلف الظهير نحو منطقة الجزاء"
+        elif "ST" in slot_up:
+            to_x = round(float(np.clip(x_m + dir_s * 9.5, 4.0, 101.0)), 2)
             to_y = y_m
-            duty_ar = "تثبيت قلبي الدفاع والضغط على محور بناء اللعب"
-        elif nd["slot"] in ("CDM", "RDM", "LDM"):
-            to_x = round(float(np.clip(x_m + dir_s * 4.0, 4.0, 101.0)), 2)
+            duty_ar = "تثبيت قلبي الدفاع والانطلاق في ظهر الخط الخلفي"
+        elif "DM" in slot_up:
+            to_x = round(float(np.clip(x_m + dir_s * 4.5, 4.0, 101.0)), 2)
             to_y = round(y_m + (34.0 - y_m) * 0.25, 2)
-            duty_ar = "حماية المنطقة 14 أمام قلبي الدفاع وإغلاق التحولات"
+            duty_ar = "حماية المنطقة 14 أمام قلبي الدفاع وإغلاق مسارات التحول"
         else:
-            to_x, to_y = x_m, y_m
+            to_x = round(float(np.clip(x_m + dir_s * (3.5 if tactical_mode == "aggressive" else 0.0), 4.0, 101.0)), 2)
+            to_y = y_m
             duty_ar = "ضبط خط التسلل والتغطية العميقة"
 
         nodes_out.append(
             {
+                "team": team_key,
                 "slot": nd["slot"],
                 "role_ar": nd["role_ar"],
                 "player_label": str(p_name),
@@ -948,31 +1078,93 @@ def build_formation_blueprint(
 
     lines_out: list[dict[str, Any]] = []
     for ln in spec["lines"]:
-        pts = []
-        for sl in ln["slots"]:
-            if sl in slot_to_xy:
-                sx, sy = slot_to_xy[sl]
-                pts.append({"slot": sl, "x_m": sx, "y_m": sy})
-        lines_out.append(
-            {
-                "line_type": ln["line_type"],
-                "label_ar": ln["label_ar"],
-                "points": pts,
-            }
-        )
+        pts = [
+            {"slot": sl, "x_m": slot_to_xy[sl][0], "y_m": slot_to_xy[sl][1]}
+            for sl in ln["slots"]
+            if sl in slot_to_xy
+        ]
+        lines_out.append({"team": team_key, "line_type": ln["line_type"], "label_ar": ln["label_ar"], "points": pts})
+
+    # Style-driven tactical passing combinations
+    passing_arrows: list[dict[str, Any]] = []
+    if len(nodes_out) >= 11:
+        # Build 3 signature passing links (build-up -> progression -> final ball)
+        pairs = [(2, 5, "بناء من الخلف للمحور"), (5, 8, "تمريرة كاسرة للخطوط (Zone 14)"), (8, 10, "تمريرة حاسمة للمهاجم")]
+        if tactical_mode == "wing_overload":
+            pairs = [(1, 7, "تدرج على الرواق الطرفي"), (6, 9, "تغيير ملعب للجناح العكسي"), (7, 10, "عرضية داخل منطقة الجزاء")]
+        elif tactical_mode == "counter_attack":
+            pairs = [(5, 8, "تحول سريع لصانع اللعب"), (8, 9, "تمريرة في المساحة للجناح"), (8, 10, "انفراد خلف خط الدفاع")]
+        for i_from, i_to, lbl in pairs:
+            if i_from < len(nodes_out) and i_to < len(nodes_out):
+                n1, n2 = nodes_out[i_from], nodes_out[i_to]
+                passing_arrows.append(
+                    {
+                        "team": team_key,
+                        "from_slot": n1["slot"],
+                        "to_slot": n2["slot"],
+                        "from_x_m": n1["x_m"],
+                        "from_y_m": n1["y_m"],
+                        "to_x_m": n2["move_to_x_m"],
+                        "to_y_m": n2["move_to_y_m"],
+                        "label_ar": lbl,
+                    }
+                )
+
+    return nodes_out, lines_out, passing_arrows
+
+
+def build_formation_blueprint(
+    formation_code: str = "4-2-3-1",
+    team_name: str = "الأهلي",
+    opponent_name: str = "إنبي",
+    attack_right: bool = True,
+    roster_players: Optional[list[dict[str, Any]]] = None,
+    tactical_mode: str = "balanced",
+    opponent_formation_code: str = "4-4-2",
+    opponent_roster_players: Optional[list[dict[str, Any]]] = None,
+    opponent_tactical_mode: str = "balanced",
+) -> dict[str, Any]:
+    """Generate a complete 22-player (Two-Team 11v11) visual tactical formation blueprint on a 105x68m FIFA pitch.
+
+    Supports ANY formation code (catalog or custom hyphenated string) and ANY tactical style for both teams!
+    """
+    spec_a = parse_any_formation_spec(formation_code)
+    spec_b = parse_any_formation_spec(opponent_formation_code)
+    style_cfg = TACTICAL_STYLES_CATALOG.get(tactical_mode, TACTICAL_STYLES_CATALOG["balanced"])
+
+    nodes_a, lines_a, passes_a = _build_single_team_nodes_and_lines(
+        spec=spec_a,
+        attack_right=attack_right,
+        roster=list(roster_players or []),
+        tactical_mode=tactical_mode,
+        team_key="team_a",
+    )
+    nodes_b, lines_b, passes_b = _build_single_team_nodes_and_lines(
+        spec=spec_b,
+        attack_right=not attack_right,
+        roster=list(opponent_roster_players or []),
+        tactical_mode=opponent_tactical_mode,
+        team_key="team_b",
+    )
 
     zone14_x1 = 68.0 if attack_right else (105.0 - 88.5)
     zone14_x2 = 88.5 if attack_right else (105.0 - 68.0)
 
     return {
-        "formation_code": clean_code,
-        "title_ar": spec["title_ar"],
-        "philosophy_ar": spec["philosophy_ar"],
+        "formation_code": spec_a["code"],
+        "opponent_formation_code": spec_b["code"],
+        "title_ar": f"{spec_a['code']} — {style_cfg['title_ar']}",
+        "philosophy_ar": f"{spec_a['philosophy_ar']} • {style_cfg['philosophy_ar']}",
         "team_name": team_name,
         "opponent_name": opponent_name,
         "tactical_mode": tactical_mode,
-        "nodes": nodes_out,
-        "lines": lines_out,
+        "opponent_tactical_mode": opponent_tactical_mode,
+        "nodes": nodes_a,
+        "lines": lines_a,
+        "passing_arrows": passes_a,
+        "opponent_nodes": nodes_b,
+        "opponent_lines": lines_b,
+        "opponent_passing_arrows": passes_b,
         "tactical_zones": [
             {
                 "zone_id": "zone_14",
@@ -1000,8 +1192,8 @@ def build_formation_blueprint(
             },
         ],
         "execution_steps_ar": [
-            f"1. ضبط المسافة الطولية بين خط الدفاع وخط الوسط في تشكيل {clean_code} بحيث لا تتجاوز 13 متراً لإغلاق المنطقة 14.",
-            f"2. توجيه حامل الكرة لدى {opponent_name} نحو الأطراف ثم تفعيل مصيدة الضغط الثلاثي (الظهير + المحور + الجناح).",
-            "3. عند استرجاع الكرة: تمريرة عمودية أولى نحو صانع اللعب في المساحة النصفية مع انطلاق الجناح العكسي خلف الظهير.",
+            f"1. تطبيق تشكيل {spec_a['code']} لفريق {team_name} بأسلوب «{style_cfg['title_ar']}» في مواجهة تشكيل {spec_b['code']} لفريق {opponent_name}.",
+            f"2. ضبط المسافة الطولية بين الخطوط وإغلاق المنطقة 14 مع تفعيل قنوات التمرير المرسومة على الملعب.",
+            "3. يمكنك سحب أي لاعب من الفريقين بالماوس أو رسم أي أسهم ومناطق ضغط بحرية كاملة أو طلب أي خطة من الذكاء الاصطناعي!",
         ],
     }

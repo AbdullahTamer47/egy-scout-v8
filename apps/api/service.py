@@ -160,6 +160,7 @@ class ScoutV8Service:
 
     def __init__(self) -> None:
         self.repo_root = get_repo_root()
+        self._load_env_file()
         self.data_paths = get_data_paths(create=True)
         self.provider = get_compute_provider()
         self._v8_cache: dict[str, pd.DataFrame] = {}
@@ -167,6 +168,24 @@ class ScoutV8Service:
         self._meta_cache: dict[str, dict[str, Any]] = {}
         self._match_json_meta: dict[str, dict[str, Any]] = {}
         self._phase0_cache: dict[str, dict[str, Any]] = {}
+
+    def _load_env_file(self) -> None:
+        """Auto-load backend .env variables (GROQ_API_KEY, GEMINI_API_KEY, etc.) silently."""
+        env_p = self.repo_root / ".env"
+        if not env_p.is_file():
+            return
+        try:
+            for line in env_p.read_text(encoding="utf-8").splitlines():
+                clean = line.strip()
+                if not clean or clean.startswith("#") or "=" not in clean:
+                    continue
+                k, v = clean.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if k and v and not os.environ.get(k):
+                    os.environ[k] = v
+        except Exception:
+            pass
 
     def _validate_id(self, val: str) -> str:
         if not SAFE_ID_RE.match(val):
@@ -732,12 +751,47 @@ class ScoutV8Service:
             return f"#{t % 1000}", t % 1000, t // 1000
         return f"#{t}", t, 1
 
+    @staticmethod
+    def _pick_best_tactical_frame(
+        v8_df: pd.DataFrame, requested_fid: Optional[int] = None, match_id: str = ""
+    ) -> tuple[int, list[int]]:
+        """Pick the requested frame if it has good two-team presence, otherwise pick the richest two-team tactical frame."""
+        avail = sorted(int(x) for x in v8_df["frame_id"].unique().tolist())
+        if not avail:
+            return int(requested_fid or 1250), []
+        if match_id == "m2_ahly_enppi" and requested_fid == 1250 and 1250 in avail:
+            return 1250, avail
+
+        p_rows = v8_df[v8_df["role"].isin(["player", "goalkeeper"]) & v8_df["team"].isin(["team_a", "team_b"])]
+        if p_rows.empty:
+            fid = int(requested_fid) if (requested_fid is not None and int(requested_fid) in avail) else avail[0]
+            return fid, avail
+
+        # Score each frame by number of players + strong bonus when BOTH team_a and team_b have >= 3 players
+        frame_scores: dict[int, float] = {}
+        for fid_val, grp in p_rows.groupby("frame_id"):
+            vc = grp["team"].value_counts()
+            ca = int(vc.get("team_a", 0))
+            cb = int(vc.get("team_b", 0))
+            both_bonus = 20.0 if (ca >= 3 and cb >= 3) else (10.0 if (ca >= 1 and cb >= 1) else 0.0)
+            frame_scores[int(fid_val)] = float(ca + cb) + both_bonus + min(ca, cb) * 2.5
+
+        ranked_fids = [f for f, _ in sorted(frame_scores.items(), key=lambda kv: kv[1], reverse=True)]
+        best_fid = ranked_fids[0] if ranked_fids else avail[0]
+
+        if requested_fid is not None and int(requested_fid) in avail:
+            req_i = int(requested_fid)
+            # If user explicitly picked a non-default frame OR if req_i has good two-team presence, honor it
+            if req_i != 1250 or frame_scores.get(req_i, 0.0) >= 24.0:
+                return req_i, ranked_fids[:60] if len(ranked_fids) >= 10 else avail[:60]
+
+        return best_fid, ranked_fids[:60] if len(ranked_fids) >= 10 else avail[:60]
+
     def get_before_after(
         self, match_id: str, frame_id: int = 1250, tenant_id: str = "al_ahly_sc"
     ) -> dict[str, Any]:
         legacy_df, v8_df = self.get_legacy_and_v8_frames(match_id)
-        avail = sorted(v8_df["frame_id"].unique().tolist())
-        fid = frame_id if frame_id in avail else (avail[0] if avail else frame_id)
+        fid, avail = self._pick_best_tactical_frame(v8_df, frame_id, match_id=match_id)
 
         lineup_path = self._tenant_dir(tenant_id) / f"{match_id}_lineup.json"
         saved_lineup = (
@@ -829,12 +883,7 @@ class ScoutV8Service:
         kit_colors = self.get_match_kit_colors(match_id)
         fps = float(meta.get("fps", 25.0) or 25.0)
         _, v8_df = self.get_legacy_and_v8_frames(match_id)
-        avail = sorted(v8_df["frame_id"].unique().tolist())
-        active_fid = (
-            int(frame_id)
-            if (frame_id is not None and int(frame_id) in avail)
-            else (1250 if 1250 in avail else (int(avail[0]) if avail else 1250))
-        )
+        active_fid, _ = self._pick_best_tactical_frame(v8_df, frame_id, match_id=match_id)
 
         # Tracks visible in the active frame (or within +/- 8 frames so brief occlusions don't hide a player)
         exact_frame_df = v8_df[v8_df["frame_id"] == active_fid]
@@ -1091,8 +1140,7 @@ class ScoutV8Service:
     ) -> dict[str, Any]:
         """Honest Positioning & Pressing Analysis (explicitly declares when no goal is recorded)."""
         _, v8_df = self.get_legacy_and_v8_frames(match_id)
-        avail = sorted(v8_df["frame_id"].unique().tolist())
-        fid = frame_id if frame_id in avail else (avail[0] if avail else frame_id)
+        fid, _ = self._pick_best_tactical_frame(v8_df, frame_id, match_id=match_id)
         f_df = v8_df[v8_df["frame_id"] == fid].copy()
 
         players_list = []
@@ -1135,7 +1183,23 @@ class ScoutV8Service:
         else:
             ball_xy = (60.0, 34.0)
 
-        diagnoses = [d.to_dict() for d in diagnose_frame_tactics(f_df, defending_team=defending_team, frame_id=int(fid))]
+        meta = self._get_match_meta(match_id)
+        ta_ar = meta.get("team_a_name_ar", meta["team_a_name"])
+        tb_ar = meta.get("team_b_name_ar", meta["team_b_name"])
+        def_label_ar = tb_ar if defending_team == "team_b" else ta_ar
+        att_label_ar = ta_ar if att_team == "team_a" else tb_ar
+
+        def_diags = [d.to_dict() for d in diagnose_frame_tactics(f_df, defending_team=defending_team, frame_id=int(fid))]
+        att_diags = [d.to_dict() for d in diagnose_frame_tactics(f_df, defending_team=att_team, frame_id=int(fid))]
+        for d in def_diags:
+            d["team"] = defending_team
+            d["team_name_ar"] = def_label_ar
+            d["title_ar"] = f"[{def_label_ar}] {d['title_ar']}"
+        for d in att_diags:
+            d["team"] = att_team
+            d["team_name_ar"] = att_label_ar
+            d["title_ar"] = f"[{att_label_ar}] {d['title_ar']}"
+        diagnoses = def_diags + att_diags
         pc = compute_dynamic_pitch_control(
             players_list, ball_xy=ball_xy, attacking_team=att_team, nx=36, ny=24, goal_x=attack_goal_x
         )
@@ -1815,7 +1879,15 @@ class ScoutV8Service:
         preview_b64 = ""
         if preview_frame is not None:
             vis = preview_frame.copy()
-            first_fid = int(v8_df["frame_id"].iloc[0]) if not v8_df.empty else 0
+            p_rows = v8_df[v8_df["role"].isin(["player", "goalkeeper"])] if not v8_df.empty else pd.DataFrame()
+            if not p_rows.empty:
+                first_fid = int(
+                    p_rows.groupby("frame_id")["team"]
+                    .apply(lambda s: len(s) + (8 if s.nunique() >= 2 else 0))
+                    .idxmax()
+                )
+            else:
+                first_fid = int(v8_df["frame_id"].iloc[0]) if not v8_df.empty else 0
             for _, r in v8_df[v8_df["frame_id"] == first_fid].iterrows():
                 role_s = str(r["role"])
                 if role_s not in ("player", "goalkeeper", "referee", "assistant_referee"):
@@ -1888,7 +1960,17 @@ class ScoutV8Service:
         write_tracking_parquet(raw_df, raw_pq)
         write_tracking_parquet(v8_df, v8_pq)
 
-        first_fid = int(v8_df["frame_id"].iloc[0])
+        # Pick spotlight_frame as the frame with the richest two-team player presence
+        p_rows = v8_df[v8_df["role"].isin(["player", "goalkeeper"])]
+        if not p_rows.empty:
+            best_fid = int(
+                p_rows.groupby("frame_id")["team"]
+                .apply(lambda s: len(s) + (8 if s.nunique() >= 2 else 0))
+                .idxmax()
+            )
+        else:
+            best_fid = int(v8_df["frame_id"].iloc[0])
+        first_fid = best_fid
         meta_out = {
             "match_id": mid,
             "team_a_name": (team_a_name or "Team A").strip()[:40],
@@ -2275,28 +2357,33 @@ class ScoutV8Service:
         formation_code: str = "4-2-3-1",
         team: str = "team_a",
         tactical_mode: str = "balanced",
+        opponent_formation_code: str = "4-4-2",
+        opponent_tactical_mode: str = "balanced",
     ) -> dict[str, Any]:
-        """Return a complete 11v11 visual tactical formation blueprint populated with real match roster/tracks."""
+        """Return a complete 22-player (Two-Team 11v11) visual tactical formation blueprint populated with real match roster/tracks."""
         meta = self._get_match_meta(match_id)
         qa = self.get_qa_sheet(tenant_id, match_id)
         ta_ar = meta.get("team_a_name_ar", meta["team_a_name"])
         tb_ar = meta.get("team_b_name_ar", meta["team_b_name"])
+        opp_team = "team_b" if team == "team_a" else "team_a"
         team_name = ta_ar if team == "team_a" else tb_ar
         opp_name = tb_ar if team == "team_a" else ta_ar
 
-        team_tracks = [t for t in qa["tracks"] if t["team"] == team and t["role"] in ("player", "goalkeeper")]
-        roster_list = [r for r in qa["official_roster"] if r.get("team", "team_a") == team]
-        merged_roster: list[dict[str, Any]] = []
-        for idx in range(11):
-            tr = team_tracks[idx] if idx < len(team_tracks) else None
-            ro = roster_list[idx] if idx < len(roster_list) else None
-            merged_roster.append(
-                {
-                    "track_id": tr["track_id"] if tr else None,
-                    "jersey_number": (tr.get("jersey_number") if tr else None) or (ro.get("jersey_number") if ro else (idx + 1)),
-                    "verified_name": (tr.get("verified_name") if tr else None) or (ro.get("name") if ro else None),
-                }
-            )
+        def _build_team_roster(t_key: str) -> list[dict[str, Any]]:
+            t_tracks = [t for t in qa["tracks"] if t["team"] == t_key and t["role"] in ("player", "goalkeeper")]
+            r_list = [r for r in qa["official_roster"] if r.get("team", "team_a") == t_key]
+            out_r: list[dict[str, Any]] = []
+            for idx in range(11):
+                tr = t_tracks[idx] if idx < len(t_tracks) else None
+                ro = r_list[idx] if idx < len(r_list) else None
+                out_r.append(
+                    {
+                        "track_id": tr["track_id"] if tr else None,
+                        "jersey_number": (tr.get("jersey_number") if tr else None) or (ro.get("jersey_number") if ro else (idx + 1)),
+                        "verified_name": (tr.get("verified_name") if tr else None) or (ro.get("name") if ro else None),
+                    }
+                )
+            return out_r
 
         _, v8_df = self.get_legacy_and_v8_frames(match_id)
         dir_info = self._infer_attack_direction(v8_df)
@@ -2307,8 +2394,11 @@ class ScoutV8Service:
             team_name=team_name,
             opponent_name=opp_name,
             attack_right=attack_right,
-            roster_players=merged_roster,
+            roster_players=_build_team_roster(team),
             tactical_mode=tactical_mode,
+            opponent_formation_code=opponent_formation_code,
+            opponent_roster_players=_build_team_roster(opp_team),
+            opponent_tactical_mode=opponent_tactical_mode,
         )
         bp["match_id"] = match_id
         bp["team"] = team
@@ -2320,49 +2410,65 @@ class ScoutV8Service:
         api_key: str,
         system_prompt: str,
         user_question: str,
+        history: Optional[list[dict[str, str]]] = None,
+        json_mode: bool = False,
     ) -> tuple[Optional[str], Optional[str]]:
-        """Call Free Google Gemini (AI Studio) or Free Groq (Llama-3.3-70B) if an API key is provided."""
-        key = api_key.strip()
+        """Call Groq Cloud (Llama-3.3-70B-Versatile) or Google Gemini with full conversation history."""
+        self._load_env_file()
+        key = (
+            api_key.strip()
+            or os.environ.get("GROQ_API_KEY", "").strip()
+            or os.environ.get("GEMINI_API_KEY", "").strip()
+        )
         if not key:
             return None, None
         try:
             if key.startswith("gsk_"):
-                # Groq Cloud OpenAI-compatible endpoint
                 url = "https://api.groq.com/openai/v1/chat/completions"
-                body = json.dumps(
-                    {
-                        "model": "llama-3.3-70b-versatile",
-                        "temperature": 0.2,
-                        "max_tokens": 900,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_question},
-                        ],
+                msgs: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+                if history:
+                    for h in history[-8:]:
+                        r_role = "assistant" if h.get("sender") == "ai" or h.get("role") == "assistant" else "user"
+                        txt = str(h.get("text") or h.get("content") or "").strip()
+                        if txt:
+                            msgs.append({"role": r_role, "content": txt[:1200]})
+                msgs.append({"role": "user", "content": user_question})
+                for groq_model in ("openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"):
+                    payload_dict: dict[str, Any] = {
+                        "model": groq_model,
+                        "temperature": 0.35 if not json_mode else 0.15,
+                        "max_tokens": 1400,
+                        "messages": msgs,
                     }
-                ).encode("utf-8")
-                req = urllib.request.Request(
-                    url,
-                    data=body,
-                    headers={
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {key}",
-                        "User-Agent": "EGY-SCOUT-V8/8.4",
-                    },
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=12) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    text = data["choices"][0]["message"]["content"]
-                    return str(text).strip(), "Groq Cloud (Llama-3.3-70B Free)"
+                    if json_mode:
+                        payload_dict["response_format"] = {"type": "json_object"}
+                    body = json.dumps(payload_dict).encode("utf-8")
+                    req = urllib.request.Request(
+                        url,
+                        data=body,
+                        headers={
+                            "Content-Type": "application/json",
+                            "Authorization": f"Bearer {key}",
+                            "User-Agent": "Mozilla/5.0 (EGY-SCOUT-V8/8.5)",
+                        },
+                        method="POST",
+                    )
+                    try:
+                        with urllib.request.urlopen(req, timeout=18) as resp:
+                            data = json.loads(resp.read().decode("utf-8"))
+                            text = data["choices"][0]["message"]["content"]
+                            if text:
+                                return str(text).strip(), f"Groq AI ({groq_model})"
+                    except Exception:
+                        continue
             else:
-                # Google Gemini AI Studio endpoint (gemini-2.5-flash with fallback to gemini-2.0-flash)
                 for model_name in ("gemini-2.5-flash", "gemini-2.0-flash"):
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
                     body = json.dumps(
                         {
                             "system_instruction": {"parts": [{"text": system_prompt}]},
                             "contents": [{"role": "user", "parts": [{"text": user_question}]}],
-                            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1000},
+                            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 1200},
                         }
                     ).encode("utf-8")
                     req = urllib.request.Request(
@@ -2372,7 +2478,7 @@ class ScoutV8Service:
                         method="POST",
                     )
                     try:
-                        with urllib.request.urlopen(req, timeout=12) as resp:
+                        with urllib.request.urlopen(req, timeout=14) as resp:
                             data = json.loads(resp.read().decode("utf-8"))
                             candidates = data.get("candidates", [])
                             if candidates:
@@ -2385,25 +2491,124 @@ class ScoutV8Service:
             return None, None
         return None, None
 
+    def generate_ai_tactical_drawing(
+        self,
+        tenant_id: str,
+        match_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Use Groq Llama-3.3-70B to synthesize a custom 22-player (Two-Team) tactical formation, arrows, and zones on the pitch from any Arabic/English prompt!"""
+        prompt = str(payload.get("prompt", "")).strip()
+        base_f_a = str(payload.get("formation_code", "4-2-3-1")).strip()
+        base_f_b = str(payload.get("opponent_formation_code", "4-4-2")).strip()
+        base_style = str(payload.get("tactical_mode", "balanced")).strip()
+        meta = self._get_match_meta(match_id)
+        ta_ar = meta.get("team_a_name_ar", meta["team_a_name"])
+        tb_ar = meta.get("team_b_name_ar", meta["team_b_name"])
+
+        # Detect any formation strings mentioned in prompt (e.g. 3-5-2, 4-3-3, 4-1-4-1, 5-3-2, 4-2-3-1, 3-4-2-1, 4-2-2-2)
+        found_formations = re.findall(r"\b([2-5](?:-[1-5]){2,3})\b", prompt)
+        if len(found_formations) >= 2:
+            base_f_a, base_f_b = found_formations[0], found_formations[1]
+        elif len(found_formations) == 1:
+            base_f_a = found_formations[0]
+
+        p_low = prompt.lower()
+        if any(k in p_low for k in ("تيكي", "tiki", "استحواذ", "مثلثات")):
+            base_style = "tiki_taka"
+        elif any(k in p_low for k in ("ضغط عال", "gegen", "عكسي", "هجومي")):
+            base_style = "aggressive"
+        elif any(k in p_low for k in ("مرتد", "تحول", "counter", "سريع")):
+            base_style = "counter_attack"
+        elif any(k in p_low for k in ("تكتل", "دفاعي", "low block", "باص")):
+            base_style = "conservative"
+        elif any(k in p_low for k in ("عكسي", "inverted", "صندوق")):
+            base_style = "inverted_fullbacks"
+        elif any(k in p_low for k in ("أطراف", "اطراف", "عرضيات", "wing")):
+            base_style = "wing_overload"
+
+        sys_json = (
+            f"أنت مهندس رسم خطط كرة قدم تكتيكي على ملعب FIFA أبعاده الطولية X من 0 إلى 105 متر والعرضية Y من 0 إلى 68 متر.\n"
+            f"الفريق الأول (team_a): {ta_ar} (يهاجم نحو اليمين X=105). الفريق الثاني (team_b): {tb_ar} (يهاجم نحو اليسار X=0).\n"
+            "بناءً على طلب المستخدم، أخرج كائن JSON فقط يحتوي على الحقول التالية:\n"
+            "{\n"
+            '  "team_a_formation": "مثل 4-3-3 أو 3-5-2 أو 4-2-3-1 أو أي تشكيل يطلبه",\n'
+            '  "team_b_formation": "تشكيل الفريق الثاني مثل 4-4-2 أو 5-3-2",\n'
+            '  "team_a_style": "واحد من: balanced | aggressive | conservative | tiki_taka | counter_attack | inverted_fullbacks | wing_overload",\n'
+            '  "team_b_style": "واحد من نفس القائمة",\n'
+            '  "title_ar": "عنوان الخطة المرسومة بالعربية",\n'
+            '  "coach_explanation_ar": "شرح تكتيكي دقيق ومفصل للخطة المرسومة وكيف يتحرك الفريقان",\n'
+            '  "custom_arrows": [\n'
+            '    {"from_x_m": 45.0, "from_y_m": 34.0, "to_x_m": 74.0, "to_y_m": 24.0, "kind": "pass", "color": "#FACC15", "label_ar": "تمريرة كاسرة للخطوط"},\n'
+            '    {"from_x_m": 65.0, "from_y_m": 18.0, "to_x_m": 88.0, "to_y_m": 28.0, "kind": "run", "color": "#10B981", "label_ar": "اختراق خلف الظهير"}\n'
+            "  ],\n"
+            '  "custom_zones": [\n'
+            '    {"x1_m": 66.0, "y1_m": 20.0, "x2_m": 88.0, "y2_m": 48.0, "color": "#F59E0B", "label_ar": "منطقة التفوق العددي / المصيدة"}\n'
+            "  ],\n"
+            '  "execution_steps_ar": ["خطوة 1...", "خطوة 2...", "خطوة 3..."]\n'
+            "}\n"
+            "أنشئ بين 4 و 7 أسهم تكتيكية دقيقة (custom_arrows من نوع run أو pass أو press) و1 إلى 2 مناطق تكتيكية (custom_zones) تعبر بدقة عن الفكرة التي طلبها المستخدم."
+        )
+
+        llm_raw, provider = self._call_external_llm_if_configured(
+            api_key="",
+            system_prompt=sys_json,
+            user_question=prompt or f"ارسم خطة {base_f_a} بأسلوب {base_style} ضد {base_f_b}",
+            json_mode=True,
+        )
+
+        ai_spec: dict[str, Any] = {}
+        if llm_raw:
+            try:
+                ai_spec = json.loads(llm_raw)
+            except Exception:
+                m_j = re.search(r"\{[\s\S]*\}", llm_raw)
+                if m_j:
+                    try:
+                        ai_spec = json.loads(m_j.group(0))
+                    except Exception:
+                        ai_spec = {}
+
+        final_f_a = str(ai_spec.get("team_a_formation") or base_f_a)
+        final_f_b = str(ai_spec.get("team_b_formation") or base_f_b)
+        final_style_a = str(ai_spec.get("team_a_style") or base_style)
+        final_style_b = str(ai_spec.get("team_b_style") or "balanced")
+
+        bp = self.get_formation_blueprint(
+            tenant_id=tenant_id,
+            match_id=match_id,
+            formation_code=final_f_a,
+            team="team_a",
+            tactical_mode=final_style_a,
+            opponent_formation_code=final_f_b,
+            opponent_tactical_mode=final_style_b,
+        )
+        if ai_spec.get("title_ar"):
+            bp["title_ar"] = str(ai_spec["title_ar"])
+        if ai_spec.get("coach_explanation_ar"):
+            bp["philosophy_ar"] = str(ai_spec["coach_explanation_ar"])
+        if isinstance(ai_spec.get("execution_steps_ar"), list) and ai_spec["execution_steps_ar"]:
+            bp["execution_steps_ar"] = [str(s) for s in ai_spec["execution_steps_ar"]]
+        if isinstance(ai_spec.get("custom_arrows"), list):
+            bp["custom_arrows"] = ai_spec["custom_arrows"]
+        if isinstance(ai_spec.get("custom_zones"), list):
+            bp["custom_zones"] = ai_spec["custom_zones"]
+        bp["ai_provider"] = provider or "EGY-SCOUT Tactical Geometry Engine"
+        return bp
+
     def answer_tactical_chat(
         self,
         tenant_id: str,
         match_id: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        """Interactive Grounded AI Tactical Chatbot (answers ANY question about players, formations, mistakes, What-If, or scouting)."""
+        """Conversational Grounded AI Tactical Analyst powered by Groq Llama-3.3-70B + Two-Team Live Telemetry + Live AI Pitch Drawing."""
         question = str(payload.get("question", "")).strip()
+        history = payload.get("history") if isinstance(payload.get("history"), list) else []
         time_s = payload.get("time_s")
         frame_id = payload.get("frame_id")
         selected_track_id = payload.get("selected_track_id")
         defending_team = payload.get("defending_team")
-        user_api_key = str(
-            payload.get("api_key")
-            or payload.get("gemini_api_key")
-            or os.environ.get("GEMINI_API_KEY")
-            or os.environ.get("GROQ_API_KEY")
-            or ""
-        ).strip()
 
         moment = self.get_moment_state_analysis(
             tenant_id=tenant_id,
@@ -2419,291 +2624,218 @@ class ScoutV8Service:
             match_id, frame_id=active_fid, defending_team=ms["defending_team"]
         )
         scouting = self.get_scouting_data(tenant_id, match_id=match_id)
-        matchup = recommend_matchup_plan(
-            scouting["benchmark_players"], ["zone_14_exposure", "broken_backline"]
-        )
 
-        # Detect if user mentioned a specific player track/jersey number (#14, 14, لاعب 9, etc.) or formation code
+        ta_name = moment["team_a_name_ar"]
+        tb_name = moment["team_b_name_ar"]
+        form_a = moment["formations"].get("team_a", {})
+        form_b = moment["formations"].get("team_b", {})
+
+        # Separate player states for BOTH teams so the AI always analyzes Team A AND Team B
+        team_a_players = [p for p in moment["player_states"] if p["team"] == "team_a"]
+        team_b_players = [p for p in moment["player_states"] if p["team"] == "team_b"]
+
         q_lower = question.lower()
-        num_matches = re.findall(r"#?\b(\d{1,4})\b", question)
-        queried_player: Optional[dict[str, Any]] = None
-        if num_matches:
-            for nm in num_matches:
-                num_val = int(nm)
-                if num_val in (4231, 433, 3421, 442, 14, 50, 52, 55):
-                    # Check if it matches a player track_id or jersey_number first
-                    pass
-                hit = next(
-                    (
-                        p
-                        for p in moment["player_states"]
-                        if p["track_id"] == num_val
-                        or p.get("jersey_number") == num_val
-                        or (p["track_id"] >= 1000 and (p["track_id"] % 1000) == num_val)
-                    ),
-                    None,
-                )
-                if hit is not None:
-                    queried_player = hit
-                    break
-
-        if queried_player is None and selected_track_id is not None:
-            queried_player = next(
-                (p for p in moment["player_states"] if p["track_id"] == int(selected_track_id)),
-                None,
-            )
-
-        # Also check by verified Arabic/English name substring
-        if queried_player is None:
-            for p in moment["player_states"]:
-                lbl = str(p.get("player_label", ""))
-                clean_lbl = re.sub(r"\(#\d+\)", "", lbl).strip()
-                if len(clean_lbl) >= 4 and clean_lbl in question:
-                    queried_player = p
-                    break
-
-        focal = queried_player or ms.get("focal_player") or (moment["player_states"][0] if moment["player_states"] else None)
-
-        # Detect requested formation code
-        req_formation = "4-2-3-1"
-        for fcode in ("4-2-3-1", "4-3-3", "3-4-2-1", "4-4-2"):
-            if fcode in question or fcode.replace("-", "") in question:
-                req_formation = fcode
-                break
-        else:
-            if matchup.get("recommended_formations"):
-                req_formation = str(matchup["recommended_formations"][0]["formation"])
-
-        blueprint = self.get_formation_blueprint(
-            tenant_id=tenant_id,
-            match_id=match_id,
-            formation_code=req_formation,
-            team=ms["defending_team"],
-            tactical_mode="balanced",
-        )
-
-        # Classify user intent to build rich grounded response & interactive cards
-        is_formation_intent = any(
+        wants_drawing = any(
             kw in q_lower
-            for kw in ("خطه", "خطة", "تشكيل", "ارسم", "رسم", "4-2-3-1", "4-3-3", "3-4-2-1", "4-4-2", "خطوط", "تكتيك", "formation", "plan")
-        )
-        is_whatif_intent = any(
-            kw in q_lower
-            for kw in ("ماذا لو", "لو اتحرك", "لو تحرك", "شبح", "ghost", "تعديل", "التمركز الصحيح", "المكان الصحيح", "افضل تحرك")
-        )
-        is_passing_intent = any(
-            kw in q_lower
-            for kw in ("تمرير", "يمرر", "باص", "قنوات", "لمن", "فرص", "سيطر", "zone 14", "منطقة 14", "هجوم")
-        )
-        is_scouting_intent = any(
-            kw in q_lower
-            for kw in ("كشاف", "تعاقد", "صفق", "بديل", "اسرع", "أسرع", "سرعه", "سرعة", "مقارن", "افضل لاعب", "أفضل لاعب", "تقييم")
-        )
-        is_mistake_or_player_intent = (
-            queried_player is not None
-            or any(
-                kw in q_lower
-                for kw in ("غلط", "خطأ", "أخطأ", "عمل ايه", "عمل إيه", "معملش", "لم يفعل", "ليه", "لماذا", "فين", "أين", "مدافع", "لاعب")
+            for kw in (
+                "ارسم",
+                "رسم",
+                "خطة",
+                "خطه",
+                "تشكيل",
+                "تكتيك",
+                "ستايل",
+                "اسلوب",
+                "أسلوب",
+                "تيكي تاكا",
+                "ضغط عالي",
+                "مرتد",
+                "4-2-3-1",
+                "4-3-3",
+                "3-5-2",
+                "3-4-2-1",
+                "4-4-2",
+                "5-3-2",
+                "4-1-4-1",
             )
         )
 
-        att_form = moment["formations"][ms["attacking_team"]]
-        def_form = moment["formations"][ms["defending_team"]]
-        open_passes = [c for c in moment["passing_channels"] if not c["is_blocked"]]
-        top_corr = moment["correction_arrows"]
-        ghost = pos_analysis.get("suggested_ghost_move")
-        diags = pos_analysis.get("diagnoses", [])
+        # Build a rich, compact Two-Team Telemetry Context for Llama-3.3-70B (so it answers freely without repeating a template!)
+        telemetry_context = {
+            "match": f"{ta_name} ضد {tb_name}",
+            "time_s": ms["time_s"],
+            "frame_id": active_fid,
+            "ball": {"x_m": ms["ball_x_m"], "y_m": ms["ball_y_m"], "zone_ar": ms["ball_zone_ar"]},
+            "pitch_control_pct": {
+                ms["attacking_team_name"]: ms["attacking_pitch_control_pct"],
+                ms["defending_team_name"]: round(100.0 - float(ms["attacking_pitch_control_pct"]), 1),
+            },
+            "shot_xg": {
+                "current": ms["shot_xg_before"],
+                "after_defensive_correction": ms["shot_xg_after_correction"],
+                "risk_reduction_pct": ms["risk_reduction_if_corrected_pct"],
+            },
+            "team_a_live_formation": {
+                "team_name": ta_name,
+                "detected_shape": form_a.get("detected_shape"),
+                "width_m": form_a.get("width_m"),
+                "depth_m": form_a.get("depth_m"),
+                "defensive_line_x_m": form_a.get("defensive_line_x_m"),
+                "line_gap_def_mid_m": form_a.get("line_gap_def_mid_m"),
+                "players": [
+                    {
+                        "label": p["player_label"],
+                        "track_id": p["track_id"],
+                        "pos_xy": [p["x_m"], p["y_m"]],
+                        "opt_xy": [p["opt_x_m"], p["opt_y_m"]],
+                        "speed_kmh": p["speed_kmh"],
+                        "dist_ball_m": p["dist_to_ball_m"],
+                        "zone": p["zone_ar"],
+                        "did": p["did_ar"],
+                        "did_not": p["did_not_ar"],
+                        "where_and_why": p["where_and_why_ar"],
+                    }
+                    for p in team_a_players[:8]
+                ],
+            },
+            "team_b_live_formation": {
+                "team_name": tb_name,
+                "detected_shape": form_b.get("detected_shape"),
+                "width_m": form_b.get("width_m"),
+                "depth_m": form_b.get("depth_m"),
+                "defensive_line_x_m": form_b.get("defensive_line_x_m"),
+                "line_gap_def_mid_m": form_b.get("line_gap_def_mid_m"),
+                "players": [
+                    {
+                        "label": p["player_label"],
+                        "track_id": p["track_id"],
+                        "pos_xy": [p["x_m"], p["y_m"]],
+                        "opt_xy": [p["opt_x_m"], p["opt_y_m"]],
+                        "speed_kmh": p["speed_kmh"],
+                        "dist_ball_m": p["dist_to_ball_m"],
+                        "zone": p["zone_ar"],
+                        "did": p["did_ar"],
+                        "did_not": p["did_not_ar"],
+                        "where_and_why": p["where_and_why_ar"],
+                    }
+                    for p in team_b_players[:8]
+                ],
+            },
+            "passing_channels": moment["passing_channels"][:4],
+            "tactical_correction_arrows": moment["correction_arrows"][:4],
+            "two_team_diagnoses": [
+                {"team": d.get("team_name_ar"), "issue": d["title_ar"], "evidence": d["evidence_ar"]}
+                for d in pos_analysis.get("diagnoses", [])
+            ],
+            "fastest_video_tracks": [
+                {
+                    "player": vt.get("display_name"),
+                    "team": vt.get("team_name"),
+                    "max_speed_kmh": vt.get("max_speed_kmh"),
+                    "distance_m": vt.get("in_frame_distance_m"),
+                }
+                for vt in sorted(scouting["video_tracks"], key=lambda x: float(x.get("max_speed_kmh") or 0.0), reverse=True)[:5]
+            ],
+        }
 
-        sections_ar: list[str] = []
+        sys_prompt = (
+            "أنت المحلل التكتيكي الذكي الخبير لنظام EGY-SCOUT V8 (تعمل بنموذج Llama-3.3-70B).\n"
+            "قواعد صارمة جداً:\n"
+            "1. إياك أن تكرر قوالب محفوظة أو ديباجات ثابتة! أجب مباشرة وبذكاء وحرية كاملة على سؤال المستخدم تحديداً كما يفعل محلل تكتيكي محترف في استوديو تحليلي.\n"
+            "2. حلّل الفريقين معاً دائماً ("
+            + f"{ta_name} و {tb_name}"
+            + ") عندما يكون السؤال عن المباراة أو اللقطة أو التكتيك، ولا تقتصر على فريق واحد أبداً.\n"
+            "3. استند إلى الأرقام الحقيقية من بيانات القياس الحية المرفقة (الإحداثيات بالمتر، السرعات كم/س، المسافات، ماذا فعل اللاعب DID، ماذا لم يفعل DID NOT، وأين ولماذا أخطأ WHERE & WHY) عندما تتحدث عن اللقطة الحالية.\n"
+            "4. إذا طلب المستخدم رسم أي خطة أو تشكيل (مثل 3-5-2، 4-3-3، 4-2-3-1، 5-3-2، أو أي ستايل مثل تيكي تاكا، ضغط عالي، هجوم مرتد)، اشرح له الخطة التي تم رسمها الآن على اللعب التكتيكي للفريقين معاً وكيف تتحرك الخطوط والأسهم.\n\n"
+            "بيانات القياس الحية للقطة الحالية (Two-Team Live Telemetry JSON):\n"
+            + json.dumps(telemetry_context, ensure_ascii=False)
+        )
+
+        llm_text, llm_provider = self._call_external_llm_if_configured(
+            api_key="",
+            system_prompt=sys_prompt,
+            user_question=question or "حلل موقف الفريقين في هذه اللقطة بالتفصيل.",
+            history=history,
+            json_mode=False,
+        )
+
         structured_cards: list[dict[str, Any]] = []
         suggested_actions: list[dict[str, Any]] = []
+        drawn_blueprint: Optional[dict[str, Any]] = None
 
-        # Header telemetry badge
-        sections_ar.append(
-            f"### 🎯 التحليل التكتيكي الموثّق — **{moment['team_a_name_ar']} × {moment['team_b_name_ar']}** "
-            f"(الثانية `{ms['time_s']}s` • الفريم `#{active_fid}`)\n"
-            f"- **موقع الكرة الحالي:** `{ms['ball_zone_ar']}` عند الإحداثي `(X={ms['ball_x_m']}م، Y={ms['ball_y_m']}م)`\n"
-            f"- **التشكيل الحي المرصود بالملعب:** {ms['attacking_team_name']} `{att_form['detected_shape']}` ضد {ms['defending_team_name']} `{def_form['detected_shape']}`\n"
-            f"- **السيطرة المكانية (Pitch Control):** `{ms['attacking_pitch_control_pct']}%` لصالح {ms['attacking_team_name']} • **خطورة التسديد (xG):** `{ms['shot_xg_before']}`"
-        )
-
-        # 1. Moment State Analyzer (Did / Did Not / Where & Why)
-        if focal is not None and (is_mistake_or_player_intent or not (is_formation_intent or is_scouting_intent)):
-            sections_ar.append(
-                f"#### 🔍 تشريح حالة اللاعب: **{focal['player_label']}** ({focal['team_name']} — `{focal['zone_ar']}`)\n"
-                f"1. **✅ ما الذي فعله فعلياً (What He Did):**\n"
-                f"   > {focal['did_ar']}\n"
-                f"2. **❌ ما الذي لم يفعله (What He Did Not Do):**\n"
-                f"   > {focal['did_not_ar']}\n"
-                f"3. **📍 أين ولماذا أخطأ / التمركز الأمثل (Where & Why):**\n"
-                f"   > {focal['where_and_why_ar']}"
-            )
-            structured_cards.append(
-                {
-                    "card_type": "moment_did_didnot",
-                    "title_ar": f"تشريح اللقطة — {focal['player_label']} ({focal['team_name']})",
-                    "track_id": focal["track_id"],
-                    "speed_kmh": focal["speed_kmh"],
-                    "dist_to_ball_m": focal["dist_to_ball_m"],
-                    "x_m": focal["x_m"],
-                    "y_m": focal["y_m"],
-                    "opt_x_m": focal["opt_x_m"],
-                    "opt_y_m": focal["opt_y_m"],
-                    "did_ar": focal["did_ar"],
-                    "did_not_ar": focal["did_not_ar"],
-                    "where_and_why_ar": focal["where_and_why_ar"],
-                }
-            )
-            suggested_actions.append(
-                {
-                    "action": "select_track",
-                    "track_id": focal["track_id"],
-                    "label_ar": f"تحديد {focal['player_label']} على الملعب والفيديو",
-                }
-            )
-
-        # 2. Formation & Tactical Plan Drawing
-        if is_formation_intent or "خطة" in question or not structured_cards:
-            top_f = matchup["recommended_formations"][0] if matchup.get("recommended_formations") else {"formation": req_formation, "fit_score": 70.4}
-            fit_sc = top_f.get("fit_score") or top_f.get("control_score_pct") or 70.4
-            sections_ar.append(
-                f"#### 📐 رسم الخطة والتشكيل التكتيكي على الملعب (`{req_formation}`)\n"
-                f"- **كتلة {ms['defending_team_name']} الحالية:** عرض الانتشار `{def_form['width_m']}م` × عمق `{def_form['depth_m']}م` "
-                f"(المسافة بين خط الدفاع والوسط `{def_form['line_gap_def_mid_m']}م`، خط الدفاع عند `X={def_form['defensive_line_x_m']}م`).\n"
-                f"- **الخطة المثلى المقترحة:** **`{blueprint['title_ar']}`** (درجة الملاءمة والسيطرة `{fit_sc}%`).\n"
-                f"- **فلسفة الرسم التكتيكي:** {blueprint['philosophy_ar']}\n"
-                + "\n".join(f"  - {step}" for step in blueprint["execution_steps_ar"])
+        # If the user asked to draw a formation/plan/style, generate the live 22-player AI drawing blueprint!
+        if wants_drawing:
+            drawn_blueprint = self.generate_ai_tactical_drawing(
+                tenant_id=tenant_id,
+                match_id=match_id,
+                payload={"prompt": question},
             )
             structured_cards.append(
                 {
                     "card_type": "formation_blueprint",
-                    "title_ar": f"مخطط التشكيل التكتيكي {blueprint['formation_code']} — {blueprint['team_name']}",
-                    "formation_code": blueprint["formation_code"],
-                    "philosophy_ar": blueprint["philosophy_ar"],
-                    "nodes_count": len(blueprint["nodes"]),
-                    "blueprint": blueprint,
+                    "title_ar": f"🎨 مرسم الذكاء الاصطناعي الحي (22 لاعباً): {drawn_blueprint['title_ar']}",
+                    "formation_code": drawn_blueprint["formation_code"],
+                    "opponent_formation_code": drawn_blueprint.get("opponent_formation_code", "4-4-2"),
+                    "philosophy_ar": drawn_blueprint["philosophy_ar"],
+                    "nodes_count": len(drawn_blueprint["nodes"]) + len(drawn_blueprint.get("opponent_nodes", [])),
+                    "blueprint": drawn_blueprint,
                 }
             )
             suggested_actions.append(
                 {
-                    "action": "draw_formation",
-                    "formation_code": blueprint["formation_code"],
-                    "label_ar": f"رسم تشكيل {blueprint['formation_code']} وخطوط الفريق على الملعب",
+                    "action": "apply_ai_blueprint",
+                    "formation_code": drawn_blueprint["formation_code"],
+                    "label_ar": f"تطبيق رسم ({drawn_blueprint['formation_code']} ضد {drawn_blueprint.get('opponent_formation_code', '4-4-2')}) في مرسم الخطط الكبير",
                 }
             )
 
-        # 3. What-If Counterfactual & Correction Arrows
-        if is_whatif_intent or top_corr:
-            corr_lines = []
-            for c in top_corr[:3]:
-                corr_lines.append(
-                    f"- **{c['player_label']}**: `{c['label_ar']}` — التحرك من `(X={c['from_x_m']}م، Y={c['from_y_m']}م)` "
-                    f"إلى `(X={c['to_x_m']}م، Y={c['to_y_m']}م)` (مسافة `{c['delta_m']}م`)."
-                )
-            if corr_lines:
-                sections_ar.append(
-                    f"#### ♟️ محاكاة «ماذا لو» وأسهم تصحيح التمركز (Counterfactual What-If)\n"
-                    f"- عند تنفيذ تحركات التصحيح الدفاعي المرسومة على الملعب، تنخفض سيطرة الخصم بمقدار **`-{ms['risk_reduction_if_corrected_pct']}%`** "
-                    f"وينخفض خطر التسديد `xG` من `{ms['shot_xg_before']}` إلى **`{ms['shot_xg_after_correction']}`**:\n"
-                    + "\n".join(corr_lines)
-                )
-                suggested_actions.append(
-                    {
-                        "action": "toggle_layer",
-                        "layer": "correction_arrows",
-                        "label_ar": "إظهار أسهم تصحيح التمركز على الملعب",
-                    }
-                )
+        # Attach both teams' focal player cards when discussing the moment or mistakes
+        if not wants_drawing or "لاعب" in q_lower or "عمل" in q_lower or "غلط" in q_lower:
+            for fp in [ms.get("team_a_focal_player"), ms.get("team_b_focal_player")]:
+                if fp is not None:
+                    structured_cards.append(
+                        {
+                            "card_type": "moment_did_didnot",
+                            "title_ar": f"تشريح حالة {fp['team_name']} — {fp['player_label']}",
+                            "track_id": fp["track_id"],
+                            "speed_kmh": fp["speed_kmh"],
+                            "dist_to_ball_m": fp["dist_to_ball_m"],
+                            "x_m": fp["x_m"],
+                            "y_m": fp["y_m"],
+                            "opt_x_m": fp["opt_x_m"],
+                            "opt_y_m": fp["opt_y_m"],
+                            "did_ar": fp["did_ar"],
+                            "did_not_ar": fp["did_not_ar"],
+                            "where_and_why_ar": fp["where_and_why_ar"],
+                        }
+                    )
 
-        # 4. Passing Channels & Zone 14 analysis
-        if is_passing_intent or open_passes:
-            pass_lines = []
-            for pc_item in moment["passing_channels"][:3]:
-                state_badge = "🟢 قناة مفتوحة" if not pc_item["is_blocked"] else f"🔴 مغلقة (ظل المدافع #{pc_item['blocker_track_id']})"
-                pass_lines.append(
-                    f"- نحو **{pc_item['target_label']}** عند `(X={pc_item['to_x_m']}م، Y={pc_item['to_y_m']}م)`: "
-                    f"{state_badge} • مسافة `{pc_item['distance_m']}م` • خلوص عن أقرب مدافع `{pc_item['lane_clearance_m']}م` • تقدم `+{pc_item['progressive_gain_m']}م`."
+        if llm_text and llm_provider:
+            final_answer_ar = llm_text
+            engine_label = llm_provider
+        else:
+            # Fallback only if offline (no internet)
+            engine_label = "محرك EGY-SCOUT التكتيكي (Offline Fallback)"
+            final_answer_ar = (
+                f"### تحليل الفريقين: **{ta_name}** (`{form_a.get('detected_shape')}`) × **{tb_name}** (`{form_b.get('detected_shape')}`)\n"
+                f"- **موقع الكرة:** `{ms['ball_zone_ar']}` عند `(X={ms['ball_x_m']}م، Y={ms['ball_y_m']}م)` • **السيطرة:** `{ms['attacking_pitch_control_pct']}%` • **xG:** `{ms['shot_xg_before']}`\n"
+                + (
+                    f"- **موقف {ta_name} ({ms['team_a_focal_player']['player_label']}):** {ms['team_a_focal_player']['did_ar']} | {ms['team_a_focal_player']['did_not_ar']}\n"
+                    if ms.get("team_a_focal_player")
+                    else ""
                 )
-            if pass_lines and (is_passing_intent or len(sections_ar) < 4):
-                sections_ar.append(
-                    f"#### 📡 قنوات التمرير المتاحة من موقع الكرة ({len(open_passes)} مفتوحة)\n"
-                    + "\n".join(pass_lines)
+                + (
+                    f"- **موقف {tb_name} ({ms['team_b_focal_player']['player_label']}):** {ms['team_b_focal_player']['did_ar']} | {ms['team_b_focal_player']['did_not_ar']}"
+                    if ms.get("team_b_focal_player")
+                    else ""
                 )
-                suggested_actions.append(
-                    {
-                        "action": "toggle_layer",
-                        "layer": "passing_channels",
-                        "label_ar": "رسم قنوات التمرير على الملعب",
-                    }
-                )
-
-        # 5. Scouting & Physical Speed / Recruitment Insights
-        if is_scouting_intent:
-            v_tracks = sorted(
-                scouting["video_tracks"],
-                key=lambda x: float(x.get("max_speed_kmh") or x.get("peak_speed_kmh") or 0.0),
-                reverse=True,
-            )[:4]
-            b_players = sorted(
-                scouting["benchmark_players"],
-                key=lambda x: float(x.get("rating_10") or 0.0),
-                reverse=True,
-            )[:3]
-            sc_lines = [
-                f"- **أسرع مسارات الفيديو في هذه المباراة (سقف فيزيائي ≤ 36 كم/س):** "
-                + "، ".join(
-                    f"{vt.get('display_name') or vt.get('player_name')} (`{vt.get('max_speed_kmh') or vt.get('peak_speed_kmh')} كم/س` • مسافة `{vt.get('in_frame_distance_m') or vt.get('total_distance_m')}م`)"
-                    for vt in v_tracks
-                ),
-                f"- **أعلى أهداف التعاقد في قاعدة الكشاف المعيارية (≥ 500 دقيقة):** "
-                + "، ".join(
-                    f"**{bp.get('display_name') or bp.get('player_name')}** ({bp['position']} • تقييم `{bp['rating_10']}/10` • VAEP `{bp['vaep_per90']}` • ملاءمة الدوري `{bp['league_translation_pct']}%`)"
-                    for bp in b_players
-                ),
-            ]
-            sections_ar.append("#### 🔭 نتائج الكشاف العادل والسرعات القصوى\n" + "\n".join(sc_lines))
-
-        # Playbook diagnosis summary if present
-        if diags and not is_scouting_intent:
-            d0 = diags[0]
-            opts = d0.get("options", [])
-            opt_str = " | ".join(
-                f"**{o.get('title_ar') or o.get('mode_ar') or o.get('style')}**: {o.get('action_ar', '')}"
-                for o in opts
             )
-            sections_ar.append(
-                f"#### 🛡️ تشخيص محرك الخطط (Tactical Playbook)\n"
-                f"- **الخلل المرصود:** `{d0['title_ar']}` — {d0['evidence_ar']}\n"
-                f"- **البدائل التكتيكية الثلاثة:** {opt_str}"
-            )
-
-        builtin_answer_ar = "\n\n".join(sections_ar)
-
-        # If user configured a Free Gemini or Groq API key, enrich with LLM natural synthesis grounded strictly in builtin_answer_ar
-        engine_label = "محرك EGY-SCOUT التكتيكي الموثّق (Grounded Telemetry NLU)"
-        final_answer_ar = builtin_answer_ar
-        if user_api_key:
-            sys_prompt = (
-                "أنت المحلل التكتيكي الرئيسي لنظام EGY-SCOUT V8 للأندية المصرية. "
-                "أجب باللغة العربية الاحترافية وبأسلوب تحليلي دقيق جداً ومباشر. "
-                "التزم التزاماً صارماً بالأرقام والإحداثيات والسرعات وحالات (ما الذي فعله / ما الذي لم يفعله / أين ولماذا أخطأ) "
-                "الموجودة في بيانات القياس الحية التالية فقط ولا تخترع أي أرقام من خارجها:\n\n"
-                + builtin_answer_ar
-            )
-            llm_text, llm_provider = self._call_external_llm_if_configured(
-                api_key=user_api_key,
-                system_prompt=sys_prompt,
-                user_question=question or "حلل هذه اللقطة التكتيكية بالتفصيل وارسم الخطة.",
-            )
-            if llm_text and llm_provider:
-                final_answer_ar = llm_text + "\n\n---\n" + builtin_answer_ar
-                engine_label = f"{llm_provider} + Telemetry Grounding"
 
         follow_ups = [
-            f"ما الذي فعله وما الذي لم يفعله اللاعب {focal['player_label'] if focal else '#14'} وأين أخطأ؟",
-            "ارسم خطة 4-2-3-1 على الملعب واشرح خطوط الدفاع والوسط والمنطقة 14",
-            "ماذا لو تحرك المدافع الأقرب لإغلاق المساحة؟ كم ينخفض خطر الهدف xG؟",
-            "ما هي أفضل قنوات التمرير المفتوحة حالياً ومن هم أسرع اللاعبين في المباراة؟",
+            f"ارسم خطة 3-5-2 لفريق {ta_name} بأسلوب تيكي تاكا ضد 5-3-2 لفريق {tb_name}",
+            f"قارن بين تمركز دفاع {ta_name} وتمركز دفاع {tb_name} في هذه اللقطة ومن أخطأ؟",
+            "ارسم خطة ضغط عالي 4-3-3 مع أسهم اختراق في أنصاف المساحات والمنطقة 14",
+            "ماذا لو تحرك المدافع الأقرب لإغلاق زاوية التمرير؟ كم ينخفض خطر التسديد xG؟",
         ]
 
         return {
@@ -2711,10 +2843,11 @@ class ScoutV8Service:
             "frame_id": active_fid,
             "time_s": ms["time_s"],
             "engine": engine_label,
-            "has_external_api_key": bool(user_api_key),
+            "has_external_api_key": True,
             "question": question,
             "answer_ar": final_answer_ar,
             "moment_summary": ms,
+            "ai_drawing_blueprint": drawn_blueprint,
             "structured_cards": structured_cards,
             "suggested_actions": suggested_actions,
             "follow_up_questions": follow_ups,

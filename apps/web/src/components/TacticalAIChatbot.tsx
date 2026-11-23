@@ -4,16 +4,12 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   Bot,
   Compass,
-  ExternalLink,
-  KeyRound,
-  MessageSquare,
   Send,
   Sparkles,
   Target,
-  UserCheck,
   X,
 } from "lucide-react";
-import { apiFetch, TacticalChatResponse, UserRole } from "@/lib/api";
+import { apiFetch, FormationBlueprintPayload, TacticalChatResponse, UserRole } from "@/lib/api";
 
 interface Props {
   lang: "ar" | "en";
@@ -23,6 +19,7 @@ interface Props {
   isOpen: boolean;
   onToggleOpen: () => void;
   onNavigateTab?: (tab: "accuracy" | "studio" | "scouting" | "quick") => void;
+  onAiBlueprintDrawn?: (bp: FormationBlueprintPayload) => void;
 }
 
 interface ChatMessage {
@@ -30,13 +27,165 @@ interface ChatMessage {
   sender: "user" | "ai";
   text: string;
   engine?: string;
+  aiBlueprint?: FormationBlueprintPayload | null;
   structuredCards?: Array<Record<string, unknown>>;
   suggestedActions?: TacticalChatResponse["suggested_actions"];
   followUps?: string[];
 }
 
+/** Mini 22-Player Tactical Pitch Canvas rendered directly inside AI Chat messages when the AI draws a plan! */
+function InlineBlueprintMiniCanvas({ blueprint }: { blueprint: FormationBlueprintPayload }) {
+  const cvsRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const cvs = cvsRef.current;
+    if (!cvs || !blueprint) return;
+    const ctx = cvs.getContext("2d");
+    if (!ctx) return;
+
+    const W = cvs.width;
+    const H = cvs.height;
+    const pad = 12;
+    const pw = W - pad * 2;
+    const ph = H - pad * 2;
+
+    ctx.fillStyle = "#061A13";
+    ctx.fillRect(0, 0, W, H);
+    for (let i = 0; i < 10; i++) {
+      if (i % 2 === 0) {
+        ctx.fillStyle = "#09251B";
+        ctx.fillRect(pad + (i * pw) / 10, pad, pw / 10, ph);
+      }
+    }
+
+    ctx.strokeStyle = "rgba(255,255,255,0.28)";
+    ctx.lineWidth = 1.2;
+    ctx.strokeRect(pad, pad, pw, ph);
+    ctx.beginPath();
+    ctx.moveTo(W / 2, pad);
+    ctx.lineTo(W / 2, H - pad);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(W / 2, H / 2, ph * 0.14, 0, Math.PI * 2);
+    ctx.stroke();
+
+    const boxW = pw * (16.5 / 105);
+    const boxH = ph * (40.32 / 68);
+    ctx.strokeRect(pad, (H - boxH) / 2, boxW, boxH);
+    ctx.strokeRect(W - pad - boxW, (H - boxH) / 2, boxW, boxH);
+
+    // Custom / Tactical Zones
+    const zones = blueprint.custom_zones?.length ? blueprint.custom_zones : blueprint.tactical_zones || [];
+    for (const z of zones.slice(0, 2)) {
+      const x1 = pad + (Math.min(z.x1_m, z.x2_m) / 105) * pw;
+      const x2 = pad + (Math.max(z.x1_m, z.x2_m) / 105) * pw;
+      const y1 = pad + (Math.min(z.y1_m, z.y2_m) / 68) * ph;
+      const y2 = pad + (Math.max(z.y1_m, z.y2_m) / 68) * ph;
+      ctx.save();
+      ctx.fillStyle = "rgba(245, 158, 11, 0.15)";
+      ctx.strokeStyle = "rgba(250, 204, 21, 0.5)";
+      ctx.setLineDash([4, 3]);
+      ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+      ctx.restore();
+    }
+
+    const hexA = blueprint.kit_colors?.team_a_hex || "#EF4444";
+    const hexB = blueprint.kit_colors?.team_b_hex || "#38BDF8";
+
+    // Draw lines for both teams
+    const drawLines = (lines: FormationBlueprintPayload["lines"], col: string) => {
+      for (const ln of lines || []) {
+        if (ln.points.length < 2) continue;
+        ctx.save();
+        ctx.strokeStyle = col;
+        ctx.globalAlpha = 0.65;
+        ctx.lineWidth = 1.6;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ln.points.forEach((pt, idx) => {
+          const px = pad + (pt.x_m / 105) * pw;
+          const py = pad + (pt.y_m / 68) * ph;
+          if (idx === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        });
+        ctx.stroke();
+        ctx.restore();
+      }
+    };
+    drawLines(blueprint.lines, hexA);
+    if (blueprint.opponent_lines) drawLines(blueprint.opponent_lines, hexB);
+
+    // Draw custom / passing arrows
+    const arrows = [
+      ...(blueprint.custom_arrows || []),
+      ...(blueprint.passing_arrows || []),
+    ].slice(0, 6);
+    for (const ar of arrows) {
+      const fx = pad + (ar.from_x_m / 105) * pw;
+      const fy = pad + (ar.from_y_m / 68) * ph;
+      const tx = pad + (ar.to_x_m / 105) * pw;
+      const ty = pad + (ar.to_y_m / 68) * ph;
+      if (Math.hypot(tx - fx, ty - fy) < 5) continue;
+      const col = ar.color || (ar.kind === "pass" ? "#FACC15" : "#10B981");
+      ctx.save();
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(fx, fy);
+      ctx.lineTo(tx, ty);
+      ctx.stroke();
+      const ang = Math.atan2(ty - fy, tx - fx);
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(tx - 6 * Math.cos(ang - 0.45), ty - 6 * Math.sin(ang - 0.45));
+      ctx.lineTo(tx - 6 * Math.cos(ang + 0.45), ty - 6 * Math.sin(ang + 0.45));
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Draw nodes for Team B and Team A
+    const drawNodes = (nodes: FormationBlueprintPayload["nodes"], col: string, isTeamA: boolean) => {
+      for (const nd of nodes || []) {
+        const px = pad + (nd.x_m / 105) * pw;
+        const py = pad + (nd.y_m / 68) * ph;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(px, py, 6.2, 0, Math.PI * 2);
+        ctx.fillStyle = nd.slot === "GK" ? (isTeamA ? "#F59E0B" : "#22D3EE") : col;
+        ctx.fill();
+        ctx.strokeStyle = "#FFFFFF";
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = "800 6.8px Inter, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(nd.jersey_number ? `${nd.jersey_number}` : nd.slot.slice(0, 2), px, py);
+        ctx.restore();
+      }
+    };
+    if (blueprint.opponent_nodes) drawNodes(blueprint.opponent_nodes, hexB, false);
+    drawNodes(blueprint.nodes, hexA, true);
+  }, [blueprint]);
+
+  return (
+    <div className="rounded-xl overflow-hidden border border-emerald-500/40 bg-[#061A13] mt-2">
+      <div className="px-2.5 py-1 bg-[#090D16] border-b border-white/10 flex items-center justify-between text-[10px]">
+        <span className="font-bold text-emerald-300">
+          {blueprint.team_name} ({blueprint.formation_code}) × {blueprint.opponent_name} (
+          {blueprint.opponent_formation_code || "4-4-2"})
+        </span>
+        <span className="text-slate-400">22 لاعباً • رسم حي</span>
+      </div>
+      <canvas ref={cvsRef} width={380} height={235} className="w-full block" />
+    </div>
+  );
+}
+
 function renderInlineTokens(line: string): React.ReactNode[] {
-  // Parse **bold** and `code` tokens cleanly into JSX
   const parts = line.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
   return parts.map((part, idx) => {
     if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
@@ -70,6 +219,27 @@ function renderFormattedMarkdown(text: string): React.ReactNode {
         if (line === "---") {
           return <hr key={i} className="border-white/10 my-2" />;
         }
+        if (line.startsWith("|") && line.endsWith("|")) {
+          // Skip pure separator row |---|---|
+          if (/^\|[\s\-:|]+\|$/.test(line)) return null;
+          const cells = line
+            .slice(1, -1)
+            .split("|")
+            .map((c) => c.trim());
+          return (
+            <div
+              key={i}
+              className="grid gap-1.5 px-2 py-1.5 rounded bg-[#090D16]/85 border border-white/[0.07] text-[11px]"
+              style={{ gridTemplateColumns: `repeat(${Math.max(1, cells.length)}, minmax(0, 1fr))` }}
+            >
+              {cells.map((cell, cIdx) => (
+                <div key={cIdx} className={cIdx === 0 ? "font-bold text-emerald-300" : "text-slate-200"}>
+                  {renderInlineTokens(cell)}
+                </div>
+              ))}
+            </div>
+          );
+        }
         if (line.startsWith("### ")) {
           return (
             <div key={i} className="text-xs font-extrabold text-emerald-300 pt-1">
@@ -84,6 +254,20 @@ function renderFormattedMarkdown(text: string): React.ReactNode {
             </div>
           );
         }
+        if (line.startsWith("## ")) {
+          return (
+            <div key={i} className="text-xs font-extrabold text-emerald-300 pt-1">
+              {renderInlineTokens(line.slice(3))}
+            </div>
+          );
+        }
+        if (line.startsWith("# ")) {
+          return (
+            <div key={i} className="text-xs font-extrabold text-white pt-1">
+              {renderInlineTokens(line.slice(2))}
+            </div>
+          );
+        }
         if (line.startsWith("> ")) {
           return (
             <div
@@ -94,7 +278,7 @@ function renderFormattedMarkdown(text: string): React.ReactNode {
             </div>
           );
         }
-        if (line.startsWith("- ")) {
+        if (line.startsWith("- ") || line.startsWith("* ")) {
           return (
             <div key={i} className="flex items-start gap-1.5 text-[11.5px] text-slate-200">
               <span className="text-emerald-400 font-bold">•</span>
@@ -120,38 +304,28 @@ export default function TacticalAIChatbot({
   isOpen,
   onToggleOpen,
   onNavigateTab,
+  onAiBlueprintDrawn,
 }: Props) {
   const isAr = lang === "ar";
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
-  const [apiKey, setApiKey] = useState("");
-  const [showKeyModal, setShowKeyModal] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Load saved free Gemini/Groq API key from localStorage if user entered one previously
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem("egy_scout_ai_api_key");
-      if (saved) setApiKey(saved);
-    } catch {}
-  }, []);
-
-  // Reset welcome message with initial live match analysis when matchId changes
   useEffect(() => {
     setMessages([
       {
         id: `welcome-${matchId}`,
         sender: "ai",
-        engine: "EGY-SCOUT V8 Grounded Tactical Analyst",
+        engine: "Groq AI (openai/gpt-oss-120b)",
         text: isAr
-          ? `أهلاً بك في **المحلل التكتيكي الذكي (EGY-SCOUT AI)** لمباراة **${matchTitleAr}**.\n\nأنا مربوط مباشرة بإحداثيات اللاعبين الحقيقية، سرعاتهم، خطوط التشكيل، ومحرك تشريح اللقطة (**عمل إيه / معملش إيه / غلط فين وليه**).\nاسألني أي سؤال عن أي لاعب، خطة (4-2-3-1، 4-3-3، 3-4-2-1)، ثغرة دفاعية، أو بديل في الكشافة!`
-          : `Welcome to **EGY-SCOUT AI Tactical Analyst** for **${matchTitleAr}**.\n\nI am 100% grounded in the live player telemetry, speeds, formation lines, and Moment State Analyzer (**Did / Did Not / Where & Why**). Ask me anything!`,
+          ? `أهلاً بك في **المحلل التكتيكي الذكي (Groq AI 120B)** لمباراة **${matchTitleAr}**.\n\nأنا متصل مباشرة ببيانات الفريقين معاً (22 لاعباً)، الإحداثيات الحقيقية، السرعات، وتشريح كل لاعب (**عمل إيه / معملش إيه / غلط فين وليه**)، وأقدر **أرسم لك أي خطة بأي تشكيل وأي ستايل تكتيكي مباشرة على الملعب**!`
+          : `Welcome to **EGY-SCOUT AI Tactical Brain (Groq AI 120B)** for **${matchTitleAr}**.\n\nConnected live to both teams' telemetry and the 22-player Tactical Drawing Board. Ask me any question or tell me to draw any tactical plan!`,
         followUps: [
-          "حلل اللقطة الحالية بالتفصيل: كل لاعب عمل إيه ومعملش إيه وغلط فين وليه؟",
-          "ارسم خطة 4-2-3-1 على الملعب واشرح خطوط الدفاع والوسط والمنطقة 14",
-          "ماذا لو تحرك المدافع الأقرب لإغلاق حامل الكرة؟ كم ينخفض خطر الهدف xG؟",
-          "ما هي أفضل قنوات التمرير المفتوحة حالياً ومن هم أسرع اللاعبين في المباراة؟",
+          "ارسم خطة 3-5-2 بأسلوب تيكي تاكا ضد 5-3-2 مع أسهم اختراق للمنطقة 14",
+          "حلل موقف الفريقين معاً في هذه اللقطة: من أخطأ ولماذا؟",
+          "ارسم خطة 4-3-3 بضغط عالي عكسي ومصيدة ضغط على الأطراف",
+          "من هم أسرع اللاعبين في الفريقين وما هي أفضل قنوات التمرير المفتوحة؟",
         ],
       },
     ]);
@@ -173,6 +347,11 @@ export default function TacticalAIChatbot({
       sender: "user",
       text: qText,
     };
+    const historyPayload = messages
+      .filter((m) => !m.id.startsWith("welcome-"))
+      .slice(-6)
+      .map((m) => ({ sender: m.sender, text: m.text }));
+
     setMessages((prev) => [...prev, userMsg]);
     setLoading(true);
 
@@ -184,18 +363,23 @@ export default function TacticalAIChatbot({
           body: JSON.stringify({
             match_id: matchId,
             question: qText,
-            api_key: apiKey.trim() || undefined,
+            history: historyPayload,
           }),
         },
         "club_demo_egypt",
         role
       );
 
+      if (res.ai_drawing_blueprint && onAiBlueprintDrawn) {
+        onAiBlueprintDrawn(res.ai_drawing_blueprint);
+      }
+
       const aiMsg: ChatMessage = {
         id: `ai-${Date.now()}`,
         sender: "ai",
         text: res.answer_ar,
         engine: res.engine,
+        aiBlueprint: res.ai_drawing_blueprint,
         structuredCards: res.structured_cards,
         suggestedActions: res.suggested_actions,
         followUps: res.follow_up_questions,
@@ -215,13 +399,6 @@ export default function TacticalAIChatbot({
     }
   };
 
-  const handleSaveKey = (val: string) => {
-    setApiKey(val);
-    try {
-      window.localStorage.setItem("egy_scout_ai_api_key", val.trim());
-    } catch {}
-  };
-
   if (!isOpen) {
     return (
       <button
@@ -230,7 +407,7 @@ export default function TacticalAIChatbot({
         className="fixed bottom-5 end-5 z-50 flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs shadow-2xl shadow-emerald-950/80 border border-emerald-300 transition transform hover:scale-[1.03]"
       >
         <Bot className="w-5 h-5" />
-        <span>{isAr ? "🤖 اسأل المساعد التكتيكي الذكي (AI Chat)" : "🤖 Ask AI Tactical Analyst"}</span>
+        <span>{isAr ? "🤖 المساعد التكتيكي الذكي (Llama-3.3-70B)" : "🤖 AI Tactical Analyst"}</span>
       </button>
     );
   }
@@ -238,9 +415,9 @@ export default function TacticalAIChatbot({
   return (
     <div
       dir={isAr ? "rtl" : "ltr"}
-      className="fixed bottom-4 end-4 z-50 w-[95vw] sm:w-[470px] h-[640px] max-h-[86vh] rounded-2xl bg-[#0B101C] border border-emerald-500/40 shadow-2xl shadow-black/90 flex flex-col overflow-hidden"
+      className="fixed bottom-4 end-4 z-50 w-[95vw] sm:w-[485px] h-[660px] max-h-[88vh] rounded-2xl bg-[#0B101C] border border-emerald-500/40 shadow-2xl shadow-black/90 flex flex-col overflow-hidden"
     >
-      {/* Header */}
+      {/* Header (Clean — No API key prompt!) */}
       <div className="px-4 py-3 bg-[#111827] border-b border-white/[0.08] flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
@@ -248,102 +425,24 @@ export default function TacticalAIChatbot({
           </div>
           <div className="min-w-0">
             <div className="text-xs font-extrabold text-white truncate">
-              {isAr ? "المساعد التكتيكي الذكي (EGY-SCOUT AI)" : "EGY-SCOUT AI Tactical Analyst"}
+              {isAr ? "المحلل التكتيكي الذكي وراسم الخطط (Llama-3.3-70B)" : "EGY-SCOUT AI Tactical Brain & Plan Drawer"}
             </div>
             <div className="text-[10px] text-emerald-400 truncate">
-              {apiKey.trim()
-                ? isAr
-                  ? "🟢 يعمل بمحرك Telemetry + مفتاح AI الخارجي"
-                  : "🟢 Active: Telemetry + External LLM Key"
-                : isAr
-                ? "🟢 يعمل مجاناً بمحرك القياس التكتيكي الحي (Telemetry NLU)"
-                : "🟢 Active: Built-in Grounded Telemetry NLU (Free)"}
+              {isAr
+                ? "🟢 متصل حياً ببيانات الفريقين (22 لاعباً) ومرسم الملعب التكتيكي"
+                : "🟢 Connected live to two-team telemetry & 22-player pitch canvas"}
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setShowKeyModal((v) => !v)}
-            title={isAr ? "إعداد مفتاح Gemini / Groq المجاني (اختياري)" : "Configure Free Gemini / Groq Key"}
-            className={`px-2 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-1 transition ${
-              apiKey.trim()
-                ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
-                : "bg-[#090D16] border-white/[0.1] text-slate-300 hover:border-emerald-400/50"
-            }`}
-          >
-            <KeyRound className="w-3.5 h-3.5" />
-            <span>{isAr ? "مفتاح AI مجاني" : "Free API Key"}</span>
-          </button>
-          <button
-            type="button"
-            onClick={onToggleOpen}
-            className="p-1.5 rounded-lg bg-[#090D16] hover:bg-white/[0.08] text-slate-400 hover:text-white transition"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onToggleOpen}
+          className="p-1.5 rounded-lg bg-[#090D16] hover:bg-white/[0.08] text-slate-400 hover:text-white transition"
+        >
+          <X className="w-4 h-4" />
+        </button>
       </div>
-
-      {/* Optional Free API Key Guide & Input Drawer */}
-      {showKeyModal && (
-        <div className="p-3.5 bg-[#0F172A] border-b border-emerald-500/30 space-y-2.5 text-xs">
-          <div className="flex items-center justify-between">
-            <span className="font-bold text-emerald-300">
-              {isAr
-                ? "🔑 كيف تحصل على مفتاح API مجاني 100% في 30 ثانية؟ (اختياري)"
-                : "🔑 How to get a 100% Free API Key in 30 seconds (Optional)"}
-            </span>
-            <button onClick={() => setShowKeyModal(false)} className="text-[11px] text-slate-400 hover:text-white">
-              {isAr ? "إغلاق" : "Close"}
-            </button>
-          </div>
-          <div className="text-[11px] text-slate-300 space-y-1 leading-relaxed">
-            <div>
-              {isAr
-                ? "الشات يعمل الآن بالفعل بدون مفتاح! ولكن إذا أردت ربطه بنموذج لغوي سحابي مجاني لكتابة صياغات أوسع:"
-                : "Chat already works out-of-the-box! To connect a free cloud LLM:"}
-            </div>
-            <div className="flex flex-wrap gap-2 pt-1">
-              <a
-                href="https://aistudio.google.com/app/apikey"
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-semibold hover:bg-emerald-500/30"
-              >
-                <span>1. مفتاح Google Gemini المجاني (AI Studio)</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
-              <a
-                href="https://console.groq.com/keys"
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-sky-500/20 border border-sky-500/40 text-sky-300 font-semibold hover:bg-sky-500/30"
-              >
-                <span>2. مفتاح Groq Llama-3.3-70B المجاني</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => handleSaveKey(e.target.value)}
-              placeholder={isAr ? "الصق المفتاح هنا (يبدأ بـ AIza... أو gsk_...)" : "Paste key (AIza... or gsk_...)"}
-              className="flex-1 bg-[#090D16] border border-white/[0.15] rounded-lg px-2.5 py-1.5 text-xs text-white"
-            />
-            <button
-              type="button"
-              onClick={() => setShowKeyModal(false)}
-              className="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-bold text-xs"
-            >
-              {isAr ? "حفظ" : "Save"}
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Messages Feed */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
@@ -353,7 +452,7 @@ export default function TacticalAIChatbot({
             className={`flex flex-col ${m.sender === "user" ? "items-end" : "items-start"} space-y-2`}
           >
             <div
-              className={`max-w-[92%] rounded-2xl p-3.5 leading-relaxed whitespace-pre-line ${
+              className={`max-w-[94%] rounded-2xl p-3.5 leading-relaxed ${
                 m.sender === "user"
                   ? "bg-emerald-500 text-slate-950 font-bold rounded-ee-none"
                   : "bg-[#111827] border border-white/[0.09] text-slate-100 rounded-es-none"
@@ -367,13 +466,16 @@ export default function TacticalAIChatbot({
               )}
               <div>{m.sender === "ai" ? renderFormattedMarkdown(m.text) : m.text}</div>
 
-              {/* Structured Moment Did / Did Not / Where & Why Evidence Cards inside Chat */}
+              {/* Live Drawn 22-Player Tactical Blueprint Canvas inside the Chat Message! */}
+              {m.aiBlueprint && <InlineBlueprintMiniCanvas blueprint={m.aiBlueprint} />}
+
+              {/* Structured Two-Team Moment Did / Did Not / Where & Why Evidence Cards */}
               {m.structuredCards && m.structuredCards.length > 0 && (
                 <div className="mt-3 space-y-2 border-t border-white/[0.08] pt-2.5">
                   {m.structuredCards.map((c, idx) => {
                     if (c.card_type === "moment_did_didnot") {
                       return (
-                        <div key={idx} className="rounded-xl bg-[#090D16] border border-emerald-500/30 p-2.5 space-y-1.5 text-[11px]">
+                        <div key={idx} className="rounded-xl bg-[#090D16] border border-emerald-500/30 p-2.5 space-y-1 text-[11px]">
                           <div className="font-bold text-emerald-300 flex items-center justify-between">
                             <span>{String(c.title_ar)}</span>
                             <span className="text-[10px] text-slate-400 tabular-nums">
@@ -392,17 +494,6 @@ export default function TacticalAIChatbot({
                         </div>
                       );
                     }
-                    if (c.card_type === "formation_blueprint") {
-                      return (
-                        <div key={idx} className="rounded-xl bg-[#090D16] border border-sky-500/30 p-2.5 space-y-1 text-[11px]">
-                          <div className="font-bold text-sky-300 flex items-center gap-1.5">
-                            <Compass className="w-3.5 h-3.5" />
-                            <span>{String(c.title_ar)}</span>
-                          </div>
-                          <div className="text-slate-300">{String(c.philosophy_ar)}</div>
-                        </div>
-                      );
-                    }
                     return null;
                   })}
                 </div>
@@ -416,6 +507,9 @@ export default function TacticalAIChatbot({
                       key={aIdx}
                       type="button"
                       onClick={() => {
+                        if (m.aiBlueprint && onAiBlueprintDrawn) {
+                          onAiBlueprintDrawn(m.aiBlueprint);
+                        }
                         if (onNavigateTab) onNavigateTab("studio");
                       }}
                       className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold flex items-center gap-1 transition"
@@ -451,8 +545,8 @@ export default function TacticalAIChatbot({
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
             <span>
               {isAr
-                ? "جاري تحليل الإحداثيات وخطوط التشكيل وحالة كل لاعب..."
-                : "Analyzing live coordinates, formations, and player states..."}
+                ? "Llama-3.3-70B يحلل بيانات الفريقين ويرسم الخطة التكتيكية..."
+                : "Llama-3.3-70B analyzing two-team telemetry & drawing tactical plan..."}
             </span>
           </div>
         )}
@@ -472,8 +566,8 @@ export default function TacticalAIChatbot({
           onChange={(e) => setQuestion(e.target.value)}
           placeholder={
             isAr
-              ? "اسأل عن أي لاعب (#14)، خطة (4-2-3-1)، غلط فين وليه، أو ماذا لو..."
-              : "Ask about any player (#14), formation (4-2-3-1), mistake, or What-If..."
+              ? "اسأل أي سؤال أو اطلب رسم أي خطة (مثال: ارسم 3-5-2 تيكي تاكا ضد 5-3-2)..."
+              : "Ask anything or request any tactical plan drawing..."
           }
           className="flex-1 bg-[#090D16] border border-white/[0.12] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
         />

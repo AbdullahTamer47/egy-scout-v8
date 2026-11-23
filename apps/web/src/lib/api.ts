@@ -509,6 +509,8 @@ export interface MomentStatePayload {
     headline_did_not_ar: string;
     headline_where_and_why_ar: string;
     focal_player: PlayerMomentState | null;
+    team_a_focal_player?: PlayerMomentState | null;
+    team_b_focal_player?: PlayerMomentState | null;
   };
   formations: Record<string, LiveTeamFormation>;
   passing_channels: PassingChannelItem[];
@@ -516,33 +518,70 @@ export interface MomentStatePayload {
   player_states: PlayerMomentState[];
 }
 
+export interface BlueprintNode {
+  team?: string;
+  slot: string;
+  role_ar: string;
+  player_label: string;
+  track_id: number | null;
+  jersey_number: number | null;
+  x_m: number;
+  y_m: number;
+  move_to_x_m: number;
+  move_to_y_m: number;
+  duty_ar: string;
+}
+
+export interface BlueprintLine {
+  team?: string;
+  line_type: string;
+  label_ar: string;
+  points: Array<{ slot: string; x_m: number; y_m: number }>;
+}
+
+export interface BlueprintPassingArrow {
+  team?: string;
+  from_slot?: string;
+  to_slot?: string;
+  from_x_m: number;
+  from_y_m: number;
+  to_x_m: number;
+  to_y_m: number;
+  kind?: "run" | "pass" | "press" | "freehand";
+  color?: string;
+  label_ar: string;
+}
+
+export interface BlueprintCustomZone {
+  x1_m: number;
+  y1_m: number;
+  x2_m: number;
+  y2_m: number;
+  color?: string;
+  label_ar: string;
+}
+
 export interface FormationBlueprintPayload {
   match_id: string;
   team: string;
   kit_colors: KitColors;
   formation_code: string;
+  opponent_formation_code?: string;
   title_ar: string;
   philosophy_ar: string;
   team_name: string;
   opponent_name: string;
   tactical_mode: string;
-  nodes: Array<{
-    slot: string;
-    role_ar: string;
-    player_label: string;
-    track_id: number | null;
-    jersey_number: number | null;
-    x_m: number;
-    y_m: number;
-    move_to_x_m: number;
-    move_to_y_m: number;
-    duty_ar: string;
-  }>;
-  lines: Array<{
-    line_type: string;
-    label_ar: string;
-    points: Array<{ slot: string; x_m: number; y_m: number }>;
-  }>;
+  opponent_tactical_mode?: string;
+  ai_provider?: string;
+  nodes: BlueprintNode[];
+  lines: BlueprintLine[];
+  passing_arrows?: BlueprintPassingArrow[];
+  opponent_nodes?: BlueprintNode[];
+  opponent_lines?: BlueprintLine[];
+  opponent_passing_arrows?: BlueprintPassingArrow[];
+  custom_arrows?: BlueprintPassingArrow[];
+  custom_zones?: BlueprintCustomZone[];
   tactical_zones: Array<{
     zone_id: string;
     label_ar: string;
@@ -563,6 +602,7 @@ export interface TacticalChatResponse {
   question: string;
   answer_ar: string;
   moment_summary: MomentStatePayload["moment_summary"];
+  ai_drawing_blueprint?: FormationBlueprintPayload | null;
   structured_cards: Array<Record<string, unknown>>;
   suggested_actions: Array<{
     action: string;

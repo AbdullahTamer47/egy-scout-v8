@@ -66,7 +66,7 @@ class RefereeShieldConfig:
 def extract_torso_crop(
     frame_bgr: np.ndarray,
     bbox: tuple[float, float, float, float] | list[float],
-    min_size: int = 8,
+    min_size: int = 4,
 ) -> Optional[np.ndarray]:
     if frame_bgr is None or frame_bgr.size == 0:
         return None
@@ -75,10 +75,11 @@ def extract_torso_crop(
     bw = max(1.0, x2 - x1)
     bh = max(1.0, y2 - y1)
 
-    tx1 = int(max(0, min(w - 1, round(x1 + 0.20 * bw))))
-    tx2 = int(max(tx1 + 1, min(w, round(x1 + 0.80 * bw))))
-    ty1 = int(max(0, min(h - 1, round(y1 + 0.15 * bh))))
-    ty2 = int(max(ty1 + 1, min(h, round(y1 + 0.58 * bh))))
+    pad_x = 0.18 if bw >= 16.0 else 0.05
+    tx1 = int(max(0, min(w - 1, round(x1 + pad_x * bw))))
+    tx2 = int(max(tx1 + 1, min(w, round(x1 + (1.0 - pad_x) * bw))))
+    ty1 = int(max(0, min(h - 1, round(y1 + 0.12 * bh))))
+    ty2 = int(max(ty1 + 1, min(h, round(y1 + 0.62 * bh))))
 
     crop = frame_bgr[ty1:ty2, tx1:tx2]
     if crop.shape[0] < min_size or crop.shape[1] < min_size:
@@ -213,12 +214,24 @@ class SigLIPThreeClassClusterer:
             for crop in crops:
                 resized = cv2.resize(crop, (32, 32), interpolation=cv2.INTER_AREA)
                 lab = cv2.cvtColor(resized, cv2.COLOR_BGR2LAB).astype(np.float32)
-                mean = lab.mean(axis=(0, 1)) / 255.0
-                std = lab.std(axis=(0, 1)) / 255.0
                 hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV).astype(np.float32)
-                h_mean = hsv[:, :, 0].mean() / 180.0
-                s_mean = hsv[:, :, 1].mean() / 255.0
-                v_mean = hsv[:, :, 2].mean() / 255.0
+                bgr_i = resized.astype(np.int32)
+                grass = ((hsv[:, :, 0] >= 24) & (hsv[:, :, 0] <= 98) & (hsv[:, :, 1] >= 25)) | (
+                    (bgr_i[:, :, 1] > bgr_i[:, :, 2] + 6) & (bgr_i[:, :, 1] > bgr_i[:, :, 0] + 6)
+                )
+                fg = ~grass
+                if int(fg.sum()) >= 16:
+                    mean = lab[fg].mean(axis=0) / 255.0
+                    std = lab[fg].std(axis=0) / 255.0
+                    h_mean = hsv[:, :, 0][fg].mean() / 180.0
+                    s_mean = hsv[:, :, 1][fg].mean() / 255.0
+                    v_mean = hsv[:, :, 2][fg].mean() / 255.0
+                else:
+                    mean = lab.mean(axis=(0, 1)) / 255.0
+                    std = lab.std(axis=(0, 1)) / 255.0
+                    h_mean = hsv[:, :, 0].mean() / 180.0
+                    s_mean = hsv[:, :, 1].mean() / 255.0
+                    v_mean = hsv[:, :, 2].mean() / 255.0
                 feats.append(np.concatenate([mean, std, [h_mean, s_mean, v_mean]]))
             return np.asarray(feats, dtype=np.float32)
 
@@ -274,14 +287,24 @@ class SigLIPThreeClassClusterer:
 
         counts = [(int((raw_labels == cid).sum()), cid) for cid in range(k)]
         counts.sort(reverse=True)
+        total_pts = max(1, len(proj))
 
         self._cluster_to_label = {}
         if k >= 3:
             team_cids = sorted([counts[0][1], counts[1][1]])
             self._cluster_to_label[team_cids[0]] = ("player", "team_a")
             self._cluster_to_label[team_cids[1]] = ("player", "team_b")
-            for _, cid in counts[2:]:
-                self._cluster_to_label[cid] = ("referee", "none")
+            c0_center = self._kmeans.cluster_centers_[team_cids[0]]
+            c1_center = self._kmeans.cluster_centers_[team_cids[1]]
+            for cnt_val, cid in counts[2:]:
+                # Only treat the 3rd cluster as referee outlier if its cardinality is realistically small (<= 18% of crops)
+                if cnt_val <= max(4, int(0.18 * total_pts)):
+                    self._cluster_to_label[cid] = ("referee", "none")
+                else:
+                    c_center = self._kmeans.cluster_centers_[cid]
+                    d0 = float(np.linalg.norm(c_center - c0_center))
+                    d1 = float(np.linalg.norm(c_center - c1_center))
+                    self._cluster_to_label[cid] = ("player", "team_a" if d0 <= d1 else "team_b")
         elif k == 2:
             self._cluster_to_label[0] = ("player", "team_a")
             self._cluster_to_label[1] = ("player", "team_b")
@@ -330,6 +353,8 @@ class ZeroRefereeLeakShield:
     ):
         self.config = config or RefereeShieldConfig()
         self.clusterer = clusterer
+        if self.clusterer is not None:
+            self.clusterer.config.min_team_conf = self.config.min_team_conf
 
     def _apply_layer3_touchline(
         self, x_m: Optional[float], y_m: Optional[float]
