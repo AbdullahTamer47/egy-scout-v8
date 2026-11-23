@@ -56,14 +56,14 @@ export default function HomePage() {
 
   return (
     <div dir={isAr ? "rtl" : "ltr"} className="min-h-screen flex bg-[#090D16] text-slate-100">
-      {/* Slim Pro Analytics Sidebar */}
-      <aside className="w-16 lg:w-56 shrink-0 bg-[#0C1220] border-e border-white/[0.08] flex flex-col justify-between py-4 px-2 lg:px-3">
+      {/* Slim Pro Analytics Sidebar (always shows labels from md:768px up) */}
+      <aside className="w-16 md:w-56 shrink-0 bg-[#0C1220] border-e border-white/[0.08] flex flex-col justify-between py-4 px-2 md:px-3">
         <div className="space-y-6">
           <div className="flex items-center gap-2.5 px-2">
             <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
               <Activity className="w-4 h-4" />
             </div>
-            <div className="hidden lg:block leading-tight">
+            <div className="hidden md:block leading-tight">
               <div className="text-sm font-extrabold tracking-tight text-white">EGY-SCOUT</div>
               <div className="text-[11px] text-slate-400">Tactical Studio</div>
             </div>
@@ -84,14 +84,14 @@ export default function HomePage() {
                   }`}
                 >
                   <span className="shrink-0">{item.icon}</span>
-                  <span className="hidden lg:inline truncate">{isAr ? item.ar : item.en}</span>
+                  <span className="hidden md:inline truncate">{isAr ? item.ar : item.en}</span>
                 </button>
               );
             })}
           </nav>
         </div>
 
-        <div className="hidden lg:block px-2 pt-4 border-t border-white/[0.06] text-[11px] text-slate-500">
+        <div className="hidden md:block px-2 pt-4 border-t border-white/[0.06] text-[11px] text-slate-500">
           {isAr ? "بيانات موثّقة • صفر تخمين" : "Verified Data • Zero Guesses"}
         </div>
       </aside>

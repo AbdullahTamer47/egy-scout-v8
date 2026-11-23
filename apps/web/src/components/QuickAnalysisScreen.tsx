@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Download, FileVideo, Loader2, Play, UploadCloud } from "lucide-react";
+import { Download, FileVideo, Globe, Link2, Loader2, Play, UploadCloud } from "lucide-react";
 import { API_BASE, apiFetch, UserRole } from "@/lib/api";
 
 interface Props {
@@ -26,13 +26,16 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
   const isAr = lang === "ar";
   const isReadOnly = role === "board" || role === "player";
 
+  const [sourceMode, setSourceMode] = useState<"upload" | "url">("upload");
+  const [importUrl, setImportUrl] = useState("");
+  const [maxDurationS, setMaxDurationS] = useState(45);
   const [file, setFile] = useState<File | null>(null);
   const [teamAName, setTeamAName] = useState("Team A");
   const [teamBName, setTeamBName] = useState("Team B");
   const [dragActive, setDragActive] = useState(false);
   const [running, setRunning] = useState(false);
   const [ingestingMatch, setIngestingMatch] = useState(false);
-  const [matchFormat, setMatchFormat] = useState<"11v11" | "6v6">("11v11");
+  const [matchFormat, setMatchFormat] = useState<"11v11" | "9v9" | "7v7" | "6v6" | "5v5">("11v11");
   const [autoFaceBlur, setAutoFaceBlur] = useState(false);
   const [exportingClip, setExportingClip] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -114,83 +117,157 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
     }
   };
 
+  const ingestFromUrl = async () => {
+    if (isReadOnly || !importUrl.trim()) return;
+    setIngestingMatch(true);
+    setErrorMsg("");
+    try {
+      const res = await apiFetch<LiveProofResponse>(
+        "/api/matches/ingest-url",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            url: importUrl.trim(),
+            team_a_name: teamAName.trim() || "Team A",
+            team_b_name: teamBName.trim() || "Team B",
+            match_format: matchFormat,
+            max_duration_s: maxDurationS,
+          }),
+        },
+        "club_demo_egypt",
+        role
+      );
+      setResult(res);
+      if (res.match_id && onMatchIngested) {
+        onMatchIngested(res.match_id);
+      }
+    } catch (e) {
+      setErrorMsg(String(e));
+    } finally {
+      setIngestingMatch(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-lg font-bold text-white">
-          {isAr ? (
-            <>
-              تحليل مقطع فيديو سريع <bdi dir="ltr">(5–10s)</bdi>
-            </>
-          ) : (
-            "Quick Video Clip Analysis (5–10s)"
-          )}
+          {isAr ? "مركز استيراد وتحليل مقاطع الفيديو" : "Video Ingestion & Quick Analysis Hub"}
         </h1>
         <p className="text-xs text-slate-400 mt-0.5">
-          {isAr ? (
-            <>
-              اسحب أي مقطع قصير لعزل اللاعبين والحكام وتصدير ملف التتبع <bdi dir="ltr">(Apache Parquet)</bdi> فوراً.
-            </>
-          ) : (
-            "Drop a short match clip to isolate players & officials and export Apache Parquet tracking immediately."
-          )}
+          {isAr
+            ? "ارفع ملف MP4 أو استورد رابط YouTube/Drive لعزل اللاعبين والحكام والمعايرة وتصدير Apache Parquet فوراً."
+            : "Upload an MP4 file or import a YouTube/Drive URL for 32-KP calibration, isolation, and Apache Parquet export."}
         </p>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
         <div className="xl:col-span-5 studio-panel p-5 space-y-4">
-          <div className="text-sm font-bold text-white">
-            {isAr ? "رفع مقطع للتحليل الفوري" : "Upload Clip for Instant Analysis"}
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-sm font-bold text-white">
+              {isAr ? "مركز الاستيراد الهجين (ملف أو رابط)" : "Hybrid Video Ingestion Hub"}
+            </div>
+            <div className="inline-flex bg-[#090D16] border border-white/[0.08] rounded-lg p-0.5 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setSourceMode("upload")}
+                className={`px-2.5 py-1 rounded-md font-semibold transition ${
+                  sourceMode === "upload" ? "bg-emerald-500 text-slate-950" : "text-slate-400 hover:text-white"
+                }`}
+              >
+                {isAr ? "ملف MP4" : "Upload MP4"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSourceMode("url")}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md font-semibold transition ${
+                  sourceMode === "url" ? "bg-emerald-500 text-slate-950" : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Link2 className="w-3 h-3" />
+                <span>{isAr ? "رابط YouTube/URL" : "YouTube / URL"}</span>
+              </button>
+            </div>
           </div>
 
-          <label
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragActive(true);
-            }}
-            onDragLeave={() => setDragActive(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragActive(false);
-              const f = e.dataTransfer.files?.[0];
-              if (f) setFile(f);
-            }}
-            className={`flex flex-col items-center justify-center gap-2.5 p-8 rounded-xl border-2 border-dashed transition cursor-pointer ${
-              dragActive
-                ? "border-emerald-400 bg-emerald-500/10"
-                : "border-white/[0.12] bg-[#090D16]/80 hover:border-emerald-500/50"
-            }`}
-          >
-            <UploadCloud className="w-8 h-8 text-emerald-400" />
-            <div className="text-xs font-semibold text-slate-200 text-center">
-              {file ? file.name : isAr ? "اسحب مقطع MP4 هنا أو اضغط للاختيار" : "Drop an MP4 clip here or click to browse"}
+          {sourceMode === "upload" ? (
+            <label
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragActive(true);
+              }}
+              onDragLeave={() => setDragActive(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragActive(false);
+                const f = e.dataTransfer.files?.[0];
+                if (f) setFile(f);
+              }}
+              className={`flex flex-col items-center justify-center gap-2.5 p-7 rounded-xl border-2 border-dashed transition cursor-pointer ${
+                dragActive
+                  ? "border-emerald-400 bg-emerald-500/10"
+                  : "border-white/[0.12] bg-[#090D16]/80 hover:border-emerald-500/50"
+              }`}
+            >
+              <UploadCloud className="w-8 h-8 text-emerald-400" />
+              <div className="text-xs font-semibold text-slate-200 text-center">
+                {file ? file.name : isAr ? "اسحب مقطع MP4 هنا أو اضغط للاختيار" : "Drop an MP4 clip here or click to browse"}
+              </div>
+              <div className="text-[11px] text-slate-500">
+                {isAr ? (
+                  <>
+                    معايرة 32 نقطة + <bdi dir="ltr">SAHI</bdi> للكرة + <bdi dir="ltr">SigLIP</bdi> + تصدير <bdi dir="ltr">Parquet</bdi>
+                  </>
+                ) : (
+                  "32-KP Pitch Homography + SAHI Ball + SigLIP + Parquet Export"
+                )}
+              </div>
+              <input
+                type="file"
+                accept="video/mp4,video/*"
+                className="hidden"
+                disabled={isReadOnly}
+                onChange={(e) => e.target.files?.[0] && setFile(e.target.files[0])}
+              />
+            </label>
+          ) : (
+            <div className="p-4 rounded-xl border border-white/[0.1] bg-[#090D16]/90 space-y-3 text-xs">
+              <div className="flex items-center gap-2 text-emerald-400 font-semibold">
+                <Globe className="w-4 h-4" />
+                <span>{isAr ? "استيراد تلقائي عبر yt-dlp (يوتيوب / درايف / رابط بث)" : "Auto-Import via yt-dlp (YouTube / Drive / Broadcast URL)"}</span>
+              </div>
+              <input
+                type="url"
+                dir="ltr"
+                value={importUrl}
+                disabled={isReadOnly}
+                onChange={(e) => setImportUrl(e.target.value)}
+                placeholder="https://www.youtube.com/watch?v=..."
+                className="w-full bg-[#111827] border border-white/[0.12] rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500/60"
+              />
+              <div className="flex items-center gap-3 text-[11px] text-slate-300">
+                <span>{isAr ? "مدة المقطع المستورد (ثانية):" : "Import window (seconds):"}</span>
+                <select
+                  value={maxDurationS}
+                  onChange={(e) => setMaxDurationS(Number(e.target.value))}
+                  className="bg-[#111827] border border-white/[0.14] rounded-md px-2.5 py-1 text-slate-100 tabular-nums"
+                >
+                  {[15, 30, 45, 90, 120].map((s) => (
+                    <option key={s} value={s}>{`${s}s`}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div className="text-[11px] text-slate-500">
-              {isAr ? (
-                <>
-                  <bdi dir="ltr">MP4</bdi> • مقاطع <bdi dir="ltr">5–10s</bdi> • تصدير <bdi dir="ltr">Parquet</bdi> تلقائي
-                </>
-              ) : (
-                "MP4 • 5–10s clips • automatic Parquet export"
-              )}
-            </div>
-            <input
-              type="file"
-              accept="video/mp4,video/*"
-              className="hidden"
-              disabled={isReadOnly}
-              onChange={(e) => e.target.files?.[0] && setFile(e.target.files[0])}
-            />
-          </label>
+          )}
 
           <div className="flex flex-wrap items-center justify-between gap-2 bg-[#090D16] border border-white/[0.06] rounded-lg px-3 py-2 text-xs">
-            <div className="flex items-center gap-1.5">
-              {(["11v11", "6v6"] as const).map((f) => (
+            <div className="flex flex-wrap items-center gap-1">
+              {(["11v11", "9v9", "7v7", "6v6", "5v5"] as const).map((f) => (
                 <button
                   key={f}
                   type="button"
                   onClick={() => setMatchFormat(f)}
-                  className={`px-2.5 py-1 rounded-md border tabular-nums font-semibold ${
+                  className={`px-2 py-1 rounded-md border tabular-nums font-semibold text-[11px] ${
                     matchFormat === f
                       ? "bg-emerald-500 text-slate-950 border-emerald-400"
                       : "bg-[#111827] border-white/[0.08] text-slate-300"
@@ -211,40 +288,63 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
             </label>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <input
-              type="text"
-              value={teamAName}
-              disabled={isReadOnly}
-              onChange={(e) => setTeamAName(e.target.value)}
-              placeholder={isAr ? "اسم الفريق الأول" : "Home Team Name"}
-              className="bg-[#090D16] border border-white/[0.1] rounded-lg px-2.5 py-1.5 text-slate-200 disabled:opacity-50"
-            />
-            <input
-              type="text"
-              value={teamBName}
-              disabled={isReadOnly}
-              onChange={(e) => setTeamBName(e.target.value)}
-              placeholder={isAr ? "اسم الفريق الثاني" : "Away Team Name"}
-              className="bg-[#090D16] border border-white/[0.1] rounded-lg px-2.5 py-1.5 text-slate-200 disabled:opacity-50"
-            />
+          <div className="grid grid-cols-2 gap-2.5 text-xs">
+            <label className="space-y-1">
+              <span className="block text-[11px] text-slate-400 font-medium">
+                {isAr ? "الفريق الأول (صاحب الأرض)" : "Team A (Home)"}
+              </span>
+              <input
+                type="text"
+                value={teamAName}
+                disabled={isReadOnly}
+                onChange={(e) => setTeamAName(e.target.value)}
+                placeholder={isAr ? "مثال: الأهلي" : "Home Team Name"}
+                className="w-full bg-[#090D16] border border-white/[0.12] rounded-lg px-2.5 py-1.5 text-slate-100 disabled:opacity-50"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="block text-[11px] text-slate-400 font-medium">
+                {isAr ? "الفريق الثاني (الضيف)" : "Team B (Away)"}
+              </span>
+              <input
+                type="text"
+                value={teamBName}
+                disabled={isReadOnly}
+                onChange={(e) => setTeamBName(e.target.value)}
+                placeholder={isAr ? "مثال: إنبي" : "Away Team Name"}
+                className="w-full bg-[#090D16] border border-white/[0.12] rounded-lg px-2.5 py-1.5 text-slate-100 disabled:opacity-50"
+              />
+            </label>
           </div>
 
           <div className="flex flex-wrap gap-2.5">
-            <button
-              disabled={running || ingestingMatch || !file || isReadOnly}
-              onClick={ingestAsStudioMatch}
-              className="w-full inline-flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 disabled:border disabled:border-white/[0.08] text-slate-950 font-bold text-xs py-2.5 px-4 rounded-lg transition"
-            >
-              {ingestingMatch ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileVideo className="w-4 h-4" />}
-              {ingestingMatch
-                ? isAr ? "جاري المعالجة وفتح الاستوديو..." : "Building Match & Opening Studio..."
-                : isAr ? "معالجة كمباراة كاملة وفتح الاستوديو" : "Analyze & Open in Broadcast Studio"}
-            </button>
+            {sourceMode === "url" ? (
+              <button
+                disabled={running || ingestingMatch || !importUrl.trim() || isReadOnly}
+                onClick={ingestFromUrl}
+                className="w-full inline-flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-slate-800/90 disabled:text-slate-300/75 disabled:border disabled:border-white/[0.12] text-slate-950 font-bold text-xs py-2.5 px-4 rounded-lg transition"
+              >
+                {ingestingMatch ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+                {ingestingMatch
+                  ? isAr ? "جاري التحميل والمعالجة وفتح الاستوديو..." : "Downloading, Analyzing & Opening Studio..."
+                  : isAr ? "استيراد من الرابط وفتح في الاستوديو" : "Import URL & Open in Broadcast Studio"}
+              </button>
+            ) : (
+              <button
+                disabled={running || ingestingMatch || !file || isReadOnly}
+                onClick={ingestAsStudioMatch}
+                className="w-full inline-flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-slate-800/90 disabled:text-slate-300/75 disabled:border disabled:border-white/[0.12] text-slate-950 font-bold text-xs py-2.5 px-4 rounded-lg transition"
+              >
+                {ingestingMatch ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileVideo className="w-4 h-4" />}
+                {ingestingMatch
+                  ? isAr ? "جاري المعالجة وفتح الاستوديو..." : "Building Match & Opening Studio..."
+                  : isAr ? "معالجة كمباراة كاملة وفتح الاستوديو" : "Analyze & Open in Broadcast Studio"}
+              </button>
+            )}
             <button
               disabled={running || ingestingMatch || !file || isReadOnly}
               onClick={() => runClipAnalysis(true)}
-              className="flex-1 inline-flex items-center justify-center gap-2 bg-[#090D16] hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40 border border-white/[0.12] text-slate-200 font-semibold text-xs py-2 px-3 rounded-lg transition"
+              className="flex-1 inline-flex items-center justify-center gap-2 bg-[#111827] hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 border border-white/[0.14] text-slate-200 font-semibold text-xs py-2 px-3 rounded-lg transition"
             >
               {running ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" /> : <UploadCloud className="w-3.5 h-3.5 text-emerald-400" />}
               {running ? (isAr ? "جاري التحليل..." : "Analyzing...") : isAr ? "فحص سريع (Parquet)" : "Quick Frame Proof"}
@@ -252,7 +352,7 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
             <button
               disabled={running || ingestingMatch || isReadOnly}
               onClick={() => runClipAnalysis(false)}
-              className="inline-flex items-center justify-center gap-2 bg-[#090D16] hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40 border border-white/[0.12] text-slate-200 font-semibold text-xs py-2 px-3 rounded-lg transition"
+              className="flex-1 inline-flex items-center justify-center gap-2 bg-[#111827] hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 border border-emerald-500/35 text-emerald-300 font-semibold text-xs py-2 px-3 rounded-lg transition"
             >
               {running ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" /> : <Play className="w-3.5 h-3.5 text-emerald-400" />}
               {running ? (isAr ? "جاري التشغيل..." : "Running...") : isAr ? "تشغيل من عينة الفيديو" : "Run Sample Clip"}

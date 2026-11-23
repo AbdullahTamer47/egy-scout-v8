@@ -233,7 +233,7 @@ def api_export_club_report(
     <div class="kpi"><div>طاقم التحكيم المعزول</div><div class="v">{ba['after']['unique_official_tracks']}</div></div>
     <div class="kpi"><div>ثبات الدور بالمسار</div><div class="v">{ba['after']['track_role_stability_pct']}%</div></div>
     <div class="kpi"><div>سقف السرعة الفيزيائي</div><div class="v" dir="ltr">&le; {ba['max_speed_cap_kmh']} km/h</div></div>
-    <div class="kpi"><div>أهداف موثّقة بالمقطع</div><div class="v">0 (مقطع تكتيكي)</div></div>
+    <div class="kpi"><div>أهداف موثّقة (لوحة النتيجة)</div><div class="v">{len(mb.get('verified_goals', []))}</div></div>
   </div>
   <h3>ملخص ما بين الشوطين الموثّق (Grounded Coach Brief)</h3>
   <div class="grid3">{brief_html}</div>
@@ -302,3 +302,104 @@ def api_download_custom_match_parquet(match_id: str) -> FileResponse:
         media_type="application/octet-stream",
         filename=f"{clean_id}_v8.parquet",
     )
+
+
+@router.post("/api/matches/ingest-url")
+def api_ingest_match_from_url(
+    payload: dict[str, Any],
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    """Hybrid Ingestion Hub (Sec 9.5): import from YouTube / Drive / Broadcast URL via yt-dlp."""
+    ctx.require("run:live_proof")
+    from apps.api.main import service
+
+    try:
+        return service.ingest_match_from_url(
+            url=str(payload.get("url", "")),
+            team_a_name=str(payload.get("team_a_name", "Team A")),
+            team_b_name=str(payload.get("team_b_name", "Team B")),
+            match_format=str(payload.get("match_format", "11v11")),
+            max_duration_s=int(payload.get("max_duration_s", 45)),
+            tenant_id=ctx.tenant_id,
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/api/matches/{match_id}/phase0-eval")
+def api_phase0_eval(
+    match_id: str,
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    """Run real Phase-0 ground-truth benchmark evaluation against annotated Egyptian frames."""
+    ctx.require("read:matches")
+    from apps.api.main import service
+
+    try:
+        return service.get_phase0_evaluation(match_id)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/api/matches/{match_id}/opponent-dossier")
+def api_opponent_dossier(
+    match_id: str,
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    """Grounded Pre-Match Opponent Dossier (Sec 11.3) strictly backed by telemetry & playbook."""
+    ctx.require("read:tactics")
+    from apps.api.main import service
+
+    try:
+        return service.get_opponent_dossier(ctx.tenant_id, match_id)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/api/scouting/players/{player_id}/dossier")
+def api_player_dossier(
+    player_id: str,
+    match_id: str = "m2_ahly_enppi",
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    """Full Evidence-First Player Dossier with /10 position breakdown & clip playlist."""
+    ctx.require("read:scouting")
+    from apps.api.main import service
+
+    try:
+        return service.get_player_dossier(ctx.tenant_id, player_id, match_id=match_id)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/api/matches/{match_id}/package-hls")
+def api_package_hls(
+    match_id: str,
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    """Transcode match MP4 to GOP-aligned HLS (keyint=15) for instant-scrub streaming."""
+    ctx.require("read:matches")
+    from apps.api.main import service
+
+    try:
+        return service.package_match_hls(match_id)
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/api/hls/{match_id}/{filename}")
+def api_serve_hls_file(match_id: str, filename: str) -> FileResponse:
+    """Serve GOP-aligned HLS playlist (.m3u8) and MPEG-TS segments (.ts)."""
+    from apps.api.main import service
+
+    try:
+        clean_mid = service._validate_id(match_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    fpath = service.data_paths.outputs / "hls" / clean_mid / filename
+    if not fpath.is_file():
+        raise HTTPException(status_code=404, detail="HLS asset not found")
+    media = "application/vnd.apple.mpegurl" if filename.endswith(".m3u8") else "video/MP2T"
+    return FileResponse(str(fpath), media_type=media)

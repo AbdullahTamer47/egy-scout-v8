@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Bookmark, Crosshair, Film, Play, RotateCcw, ShieldAlert, Trash2, Upload, UserCheck } from "lucide-react";
+import { AlertTriangle, Bookmark, Crosshair, FileText, Film, Play, RotateCcw, ShieldAlert, Trash2, Upload, UserCheck, X } from "lucide-react";
+import { EChartsPlayerRadar, EChartsVaepScatter } from "@/components/TacticalCharts";
 import {
   API_BASE,
   apiFetch,
@@ -9,6 +10,7 @@ import {
   frameImageUrl,
   MatchupPlanPayload,
   matchVideoUrl,
+  PlayerDossierPayload,
   ScoutingPlayer,
   ScoutingResponse,
   ShortlistItem,
@@ -107,6 +109,25 @@ export default function FairScoutingScreen({ lang, matchId, role }: Props) {
   const [shortlist, setShortlist] = useState<ShortlistItem[]>([]);
   const [benchState, setBenchState] = useState<BenchStatePayload | null>(null);
   const [exportingClip, setExportingClip] = useState(false);
+  const [dossier, setDossier] = useState<PlayerDossierPayload | null>(null);
+  const [loadingDossier, setLoadingDossier] = useState(false);
+
+  const openPlayerDossier = async (playerId: string) => {
+    setLoadingDossier(true);
+    try {
+      const res = await apiFetch<PlayerDossierPayload>(
+        `/api/scouting/players/${encodeURIComponent(playerId)}/dossier?match_id=${encodeURIComponent(matchId)}`,
+        {},
+        "club_demo_egypt",
+        role
+      );
+      setDossier(res);
+    } catch {
+      // ignore fetch error
+    } finally {
+      setLoadingDossier(false);
+    }
+  };
 
   // Interactive 4-Point Homography Calibration state (normalized 0..1 coordinates over match image)
   const [fmt, setFmt] = useState<"11v11" | "9v9" | "7v7" | "6v6" | "5v5">("11v11");
@@ -338,13 +359,7 @@ export default function FairScoutingScreen({ lang, matchId, role }: Props) {
                   <th className="py-3 px-3">{isAr ? "المسافة المقطوعة" : "In-Frame Dist"}</th>
                   <th className="py-3 px-3">{isAr ? "متوسط السرعة" : "Avg Speed"}</th>
                   <th className="py-3 px-3">
-                    {isAr ? (
-                      <>
-                        أقصى سرعة <bdi dir="ltr">(≤ 36)</bdi>
-                      </>
-                    ) : (
-                      "Max Speed"
-                    )}
+                    {isAr ? "أقصى سرعة (كم/س)" : "Max Speed (km/h)"}
                   </th>
                   <th className="py-3 px-3">{isAr ? "لقطة الإثبات" : "Evidence"}</th>
                 </tr>
@@ -480,33 +495,40 @@ export default function FairScoutingScreen({ lang, matchId, role }: Props) {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-            <div className="lg:col-span-4 studio-panel p-4 flex flex-col items-center">
-              <div className="text-xs font-semibold text-slate-300 mb-2">
-                {isAr ? (
-                  <>
-                    رادار المقارنة العادلة <bdi dir="ltr">(PAdj + VAEP + xT)</bdi>
-                  </>
-                ) : (
-                  "Fair Scouting Radar (PAdj + VAEP + xT)"
-                )}
-              </div>
-              <SvgRadarChart players={comparedBench} />
-              {comparedBench.length > 0 && (
-                <div className="w-full flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 mt-3 pt-2.5 border-t border-white/[0.06] text-[11px]">
-                  {comparedBench.map((p, idx) => (
-                    <span key={p.player_id} className="inline-flex items-center gap-1.5 text-slate-200 font-medium">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: RADAR_COLORS[idx % RADAR_COLORS.length] }}
-                      />
-                      <span>{p.display_name}</span>
-                    </span>
-                  ))}
+            <div className="lg:col-span-5 space-y-4">
+              <div className="studio-panel p-4">
+                <div className="text-xs font-semibold text-slate-300 mb-1">
+                  {isAr ? (
+                    <>
+                      رادار المقارنة العادلة <bdi dir="ltr">(Apache ECharts • PAdj + VAEP + xT)</bdi>
+                    </>
+                  ) : (
+                    "Fair Scouting Radar (Apache ECharts • PAdj + VAEP + xT)"
+                  )}
                 </div>
-              )}
+                <EChartsPlayerRadar players={comparedBench} lang={lang} />
+              </div>
+
+              <div className="studio-panel p-4">
+                <div className="text-xs font-semibold text-slate-300 mb-1">
+                  {isAr ? (
+                    <>
+                      مصفوفة الخطورة والتأثير <bdi dir="ltr">(VAEP/90 × xT/90)</bdi> — اضغط لفتح الملف
+                    </>
+                  ) : (
+                    "Threat vs Value Quadrant (VAEP/90 × xT/90) — Click for Dossier"
+                  )}
+                </div>
+                <EChartsVaepScatter
+                  players={data.benchmark_players}
+                  selectedIds={selectedBenchIds}
+                  lang={lang}
+                  onSelectPlayer={(pid) => openPlayerDossier(pid)}
+                />
+              </div>
             </div>
 
-            <div className="lg:col-span-8 space-y-4">
+            <div className="lg:col-span-7 space-y-4">
               <div className="studio-panel overflow-x-auto">
                 <table className="w-full text-xs text-start border-collapse tabular-nums">
                   <thead>
@@ -518,7 +540,7 @@ export default function FairScoutingScreen({ lang, matchId, role }: Props) {
                       <th className="py-3 px-2">xT/90</th>
                       <th className="py-3 px-2">PAdj Def</th>
                       <th className="py-3 px-2">HIR</th>
-                      <th className="py-3 px-2" dir="ltr">D2→PL</th>
+                      <th className="py-3 px-2">{isAr ? "جاهزية الإيقاع" : "Pace Fit"}</th>
                       {!isReadOnly && <th className="py-3 px-2">CRM</th>}
                     </tr>
                   </thead>
@@ -528,10 +550,19 @@ export default function FairScoutingScreen({ lang, matchId, role }: Props) {
                       return (
                         <tr key={p.player_id} className="border-b border-white/[0.05]">
                           <td className="py-2.5 px-4">
-                            <div className="font-bold text-white">{p.display_name}</div>
-                            <div className="text-[11px] text-slate-400">
-                              {isAr ? p.archetype_ar : p.archetype_en} • {p.team_name}
-                            </div>
+                            <button
+                              type="button"
+                              onClick={() => openPlayerDossier(p.player_id)}
+                              className="text-start group"
+                            >
+                              <div className="font-bold text-white group-hover:text-emerald-400 transition inline-flex items-center gap-1.5">
+                                <span>{p.display_name}</span>
+                                <FileText className="w-3 h-3 text-emerald-400/70" />
+                              </div>
+                              <div className="text-[11px] text-slate-400">
+                                {isAr ? p.archetype_ar : p.archetype_en} • {p.team_name}
+                              </div>
+                            </button>
                           </td>
                           <td className="py-2.5 px-2 text-slate-300">{p.minutes_analyzed}</td>
                           <td className="py-2.5 px-2 font-bold text-emerald-400">{p.rating_10}/10</td>
@@ -900,6 +931,107 @@ export default function FairScoutingScreen({ lang, matchId, role }: Props) {
                     ))}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Evidence-First Player Dossier Modal (Sec 11.2, 15.1, 15.3) */}
+      {(dossier || loadingDossier) && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0C1220] border border-white/[0.14] rounded-2xl max-w-2xl w-full max-h-[86vh] overflow-y-auto p-5 space-y-4 shadow-2xl">
+            {loadingDossier || !dossier ? (
+              <div className="py-12 text-center text-xs text-slate-300">
+                {isAr ? "جاري تحميل ملف اللاعب الكشفي..." : "Loading player dossier..."}
+              </div>
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-3 border-b border-white/[0.08] pb-3">
+                  <div>
+                    <div className="text-[11px] text-emerald-400 font-semibold">
+                      {dossier.player.position} • {isAr ? dossier.player.archetype_ar : dossier.player.archetype_en}
+                    </div>
+                    <h3 className="text-lg font-extrabold text-white mt-0.5">{dossier.player.display_name}</h3>
+                    <div className="text-xs text-slate-400">
+                      <bdi dir="ltr">{dossier.player.team_name}</bdi> •{" "}
+                      <bdi dir="ltr">{dossier.player.minutes_analyzed}</bdi>{" "}
+                      {isAr ? "دقيقة محلّلة" : "min analyzed"}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {dossier.player.rating_10 !== null && (
+                      <div className="text-center px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40">
+                        <div className="text-[10px] text-emerald-300">{isAr ? "التقييم الموزون" : "Weighted"}</div>
+                        <div dir="ltr" className="text-xl font-black text-emerald-400 tabular-nums">
+                          {dossier.player.rating_10}/10
+                        </div>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setDossier(null)}
+                      className="p-1.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.14] text-slate-300"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {dossier.rating_breakdown.length > 0 && (
+                  <div className="space-y-2 text-xs">
+                    <div className="font-bold text-slate-200">
+                      {isAr ? "تفكيك التقييم من 10 حسب أوزان المركز" : "Position-Weighted /10 Breakdown"}
+                    </div>
+                    <div className="space-y-2">
+                      {dossier.rating_breakdown.map((b) => (
+                        <div key={b.metric} className="space-y-1">
+                          <div className="flex items-center justify-between text-[11px] tabular-nums">
+                            <span className="text-slate-300 font-medium">
+                              {b.metric} <span className="text-slate-500">({b.weight_pct}%)</span>
+                            </span>
+                            <span dir="ltr" className="text-emerald-300 font-bold">
+                              {b.raw} • {b.score_10}/10
+                            </span>
+                          </div>
+                          <div className="h-1.5 bg-white/[0.07] rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-emerald-500 to-sky-400 rounded-full"
+                              style={{ width: `${Math.min(100, (b.score_10 / 10) * 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="bg-[#090D16] border border-emerald-500/20 rounded-xl p-3 space-y-1.5">
+                    <div className="font-bold text-emerald-400">{isAr ? "نقاط القوة الموثّقة بالأرقام" : "Data-Grounded Strengths"}</div>
+                    {(isAr ? dossier.strengths_ar : dossier.strengths_en).length > 0 ? (
+                      <ul className="space-y-1 text-slate-300 list-disc list-inside">
+                        {(isAr ? dossier.strengths_ar : dossier.strengths_en).map((s, i) => (
+                          <li key={i}>{s}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="text-slate-500">{isAr ? "لا توجد ميزة فوق عتبة النخبة في العينة." : "No metric above elite threshold."}</div>
+                    )}
+                  </div>
+                  <div className="bg-[#090D16] border border-amber-500/20 rounded-xl p-3 space-y-1.5">
+                    <div className="font-bold text-amber-400">{isAr ? "نقاط للمراجعة والمتابعة" : "Watchouts & Risks"}</div>
+                    {(isAr ? dossier.watchouts_ar : dossier.watchouts_en).length > 0 ? (
+                      <ul className="space-y-1 text-slate-300 list-disc list-inside">
+                        {(isAr ? dossier.watchouts_ar : dossier.watchouts_en).map((w, i) => (
+                          <li key={i}>{w}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="text-slate-500">{isAr ? "أداء متوازن بدون مؤشرات خطر رقمية." : "Balanced metrics — no statistical red flags."}</div>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

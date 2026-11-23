@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import Hls from "hls.js";
 import {
   ArrowUpRight,
   ChevronLeft,
@@ -8,12 +9,14 @@ import {
   Circle,
   Download,
   EyeOff,
+  FileText,
   Film,
   Ghost,
   Layers,
   Link2,
   Pause,
   Play,
+  Radio,
   RotateCcw,
   Ruler,
   Sparkles,
@@ -23,6 +26,7 @@ import {
   Undo2,
   Video,
 } from "lucide-react";
+import { EChartsMatchMomentum } from "@/components/TacticalCharts";
 import TacticalTwinCanvas, { SetPieceSimState } from "@/components/TacticalTwinCanvas";
 import {
   API_BASE,
@@ -30,6 +34,7 @@ import {
   frameImageUrl,
   matchVideoUrl,
   MomentsAndBriefPayload,
+  OpponentDossierPayload,
   PositioningAnalysisPayload,
   TimelineBall,
   TimelineFrame,
@@ -347,10 +352,13 @@ function evalInstantMetrics(
   return { xg: Number(xg.toFixed(3)), boxControlPct: Number(boxControlPct.toFixed(1)) };
 }
 
-/** Downscaled HSV green-turf alpha matte keeping white socks/boots & sunlit ankles above rings. */
+/** Downscaled HSV green-turf alpha matte keeping players' bodies, green/yellow kits & sunlit ankles above rings. */
 function buildGreenTurfMask(
   source: HTMLVideoElement | HTMLImageElement,
-  maskCanvas: HTMLCanvasElement
+  maskCanvas: HTMLCanvasElement,
+  players: RenderPlayer[] = [],
+  vw = 1280,
+  vh = 720
 ) {
   const mw = maskCanvas.width;
   const mh = maskCanvas.height;
@@ -375,15 +383,38 @@ function buildGreenTurfMask(
       if (hue < 0) hue += 360;
     }
     const isTurf =
-      hue >= 62 &&
-      hue <= 160 &&
-      sat >= 0.22 &&
-      max >= 0.16 &&
-      g > r * 1.12 &&
+      hue >= 64 &&
+      hue <= 158 &&
+      sat >= 0.20 &&
+      max >= 0.14 &&
+      g > r * 1.10 &&
       g > b * 1.12;
     d[i + 3] = isTurf ? 255 : 0;
   }
   mctx.putImageData(imgData, 0, 0);
+
+  // Foreground Player Silhouette Protection: keep players' torsos/legs strictly opaque ABOVE ground rings
+  // even when wearing green/lime/yellow kits (e.g. ENPPI / Goalkeeper)!
+  if (players.length > 0 && vw > 0 && vh > 0) {
+    const sx = mw / vw;
+    const sy = mh / vh;
+    mctx.save();
+    mctx.globalCompositeOperation = "destination-out";
+    mctx.fillStyle = "#000000";
+    for (const p of players) {
+      if (p.role !== "player" && p.role !== "goalkeeper") continue;
+      const [x1, y1, x2, y2] = p.bbox;
+      const bw = Math.max(8, x2 - x1);
+      const bh = Math.max(16, y2 - y1);
+      // Punch out inner torso + legs (middle 54% width, top 93% height) so AR never bleeds over kits/legs
+      const px = (x1 + bw * 0.23) * sx;
+      const py = (y1 + bh * 0.04) * sy;
+      const pw = bw * 0.54 * sx;
+      const ph = bh * 0.89 * sy;
+      mctx.fillRect(px, py, pw, ph);
+    }
+    mctx.restore();
+  }
 }
 
 export default function BroadcastStudioScreen({ lang, matchId, role }: Props) {
@@ -435,6 +466,72 @@ export default function BroadcastStudioScreen({ lang, matchId, role }: Props) {
   const [recordingAr, setRecordingAr] = useState(false);
   const [exportingMp4, setExportingMp4] = useState(false);
   const [exportNote, setExportNote] = useState("");
+  const [hlsActive, setHlsActive] = useState(false);
+  const [loadingHls, setLoadingHls] = useState(false);
+  const [opponentDossier, setOpponentDossier] = useState<OpponentDossierPayload | null>(null);
+  const [showDossier, setShowDossier] = useState(false);
+  const hlsRef = useRef<Hls | null>(null);
+
+  const enableGopHlsStream = async () => {
+    const video = videoRef.current;
+    if (!video || loadingHls) return;
+    setLoadingHls(true);
+    setExportNote("");
+    try {
+      const res = await apiFetch<{ hls_url: string; segments: number; keyint: number }>(
+        `/api/matches/${encodeURIComponent(matchId)}/package-hls`,
+        { method: "POST" },
+        "club_demo_egypt",
+        role
+      );
+      const srcUrl = `${API_BASE}${res.hls_url}`;
+      const curT = video.currentTime || tlStartRef.current;
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      if (Hls.isSupported()) {
+        const hls = new Hls({ lowLatencyMode: false, maxBufferLength: 20 });
+        hls.loadSource(srcUrl);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.currentTime = curT;
+        });
+        hlsRef.current = hls;
+        setHlsActive(true);
+        setExportNote(
+          isAr
+            ? `✓ تم تفعيل بث HLS السريع (${res.segments} شرائح • keyint=${res.keyint})`
+            : `✓ GOP-Aligned HLS active (${res.segments} segments • keyint=${res.keyint})`
+        );
+      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = srcUrl;
+        video.currentTime = curT;
+        setHlsActive(true);
+      }
+    } catch (e) {
+      setExportNote(String(e));
+    } finally {
+      setLoadingHls(false);
+    }
+  };
+
+  const toggleOpponentDossier = async () => {
+    if (showDossier) {
+      setShowDossier(false);
+      return;
+    }
+    setShowDossier(true);
+    try {
+      const d = await apiFetch<OpponentDossierPayload>(
+        `/api/matches/${encodeURIComponent(matchId)}/opponent-dossier`,
+        {},
+        "club_demo_egypt",
+        role
+      );
+      setOpponentDossier(d);
+    } catch {}
+  };
 
   // High-frequency refs for 60FPS render loop
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -872,11 +969,11 @@ export default function BroadcastStudioScreen({ lang, matchId, role }: Props) {
 
               gctx.restore();
 
-              // Apply Green-Turf Chroma Occlusion Mask (cached per timestamp so paused frames do 0 GPU readbacks!)
+              // Apply Green-Turf Chroma Occlusion Mask + Player Torso Protection (cached per timestamp!)
               if (st.turfOcclusion) {
                 const maskKey = `${vw}x${vh}:${hasVideoFrame ? "v" : "i"}:${tCur.toFixed(2)}`;
                 if (maskKey !== lastMaskKeyRef.current) {
-                  buildGreenTurfMask(sourceEl, maskCanvas);
+                  buildGreenTurfMask(sourceEl, maskCanvas, smoothedList, vw, vh);
                   if (!video?.seeking) {
                     lastMaskKeyRef.current = maskKey;
                   }
@@ -1758,11 +1855,75 @@ export default function BroadcastStudioScreen({ lang, matchId, role }: Props) {
                   className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#090D16] border border-white/[0.1] hover:border-emerald-500/50 text-slate-200 text-[11px] font-semibold disabled:opacity-50 whitespace-nowrap"
                 >
                   {exportingMp4 ? <Download className="w-3 h-3 animate-bounce text-emerald-400" /> : <Film className="w-3 h-3 text-emerald-400" />}
-                  <span>{exportingMp4 ? (isAr ? "تصدير..." : "Exporting...") : isAr ? "تصدير MP4" : "Export MP4"}</span>
+                  <span>{exportingMp4 ? (isAr ? "تصدير..." : "Exporting...") : isAr ? "تصدير AR MP4" : "Export AR MP4"}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={loadingHls}
+                  onClick={enableGopHlsStream}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold whitespace-nowrap transition ${
+                    hlsActive
+                      ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-300"
+                      : "bg-[#090D16] border-white/[0.1] hover:border-emerald-500/50 text-slate-200"
+                  }`}
+                >
+                  <Radio className={`w-3 h-3 ${hlsActive ? "text-emerald-400" : "text-sky-400"}`} />
+                  <span>{loadingHls ? "HLS..." : hlsActive ? "HLS Active" : isAr ? "بث HLS سريع" : "GOP HLS"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleOpponentDossier}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold whitespace-nowrap transition ${
+                    showDossier
+                      ? "bg-sky-500/20 border-sky-400/50 text-sky-300"
+                      : "bg-[#090D16] border-white/[0.1] hover:border-sky-400/50 text-slate-200"
+                  }`}
+                >
+                  <FileText className="w-3 h-3 text-sky-400" />
+                  <span>{isAr ? "ملف الخصم" : "Opponent Dossier"}</span>
                 </button>
               </div>
             </div>
             {exportNote && <div className="text-[11px] text-emerald-400 px-1">{exportNote}</div>}
+            {showDossier && opponentDossier && (
+              <div className="mt-2 p-3.5 rounded-xl bg-[#090D16] border border-sky-500/30 space-y-2.5 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-bold text-sky-300">
+                    {isAr ? "ملخص تحليل الخصم من اللقطات المحلّلة" : "Grounded Opponent Analysis Dossier"}
+                  </div>
+                  {opponentDossier.scoreboard_latest && (
+                    <span dir="ltr" className="px-2 py-0.5 rounded bg-white/[0.06] text-slate-200 font-bold tabular-nums">
+                      Score: {opponentDossier.scoreboard_latest}
+                    </span>
+                  )}
+                </div>
+                <p className="text-slate-300 leading-relaxed">
+                  {isAr ? opponentDossier.summary_ar : opponentDossier.summary_en}
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  <div className="bg-[#0C1220] border border-white/[0.06] rounded-lg p-2.5 space-y-1">
+                    <div className="font-semibold text-emerald-400 text-[11px]">
+                      {isAr ? "الأنماط الهجومية المرصودة" : "Observed Attacking Patterns"}
+                    </div>
+                    {opponentDossier.attacking_patterns.slice(0, 3).map((ev, idx) => (
+                      <div key={idx} className="text-[11px] text-slate-300">
+                        • <b dir="ltr">{ev.time_s.toFixed(1)}s</b> — {isAr ? ev.title_ar : ev.title_en}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="bg-[#0C1220] border border-white/[0.06] rounded-lg p-2.5 space-y-1">
+                    <div className="font-semibold text-amber-400 text-[11px]">
+                      {isAr ? "ثغرات التحول الدفاعي" : "Defensive Transition Vulnerabilities"}
+                    </div>
+                    {opponentDossier.defensive_transitions.slice(0, 3).map((ev, idx) => (
+                      <div key={idx} className="text-[11px] text-slate-300">
+                        • <b dir="ltr">{ev.time_s.toFixed(1)}s</b> — {isAr ? ev.title_ar : ev.title_en}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1933,64 +2094,35 @@ export default function BroadcastStudioScreen({ lang, matchId, role }: Props) {
               </p>
             </div>
             {momentsBrief && (
-              <span className="text-[11px] px-2.5 py-1 rounded-full bg-white/[0.05] text-slate-300">
-                {isAr ? "0 أهداف مسجلة بالمقطع التجريبي" : "0 verified goals in clip"}
+              <span className="text-[11px] px-2.5 py-1 rounded-full bg-white/[0.05] text-slate-300 tabular-nums">
+                {momentsBrief.verified_goals.length > 0
+                  ? isAr
+                    ? `${momentsBrief.verified_goals.length} أهداف موثّقة (لوحة النتيجة)`
+                    : `${momentsBrief.verified_goals.length} Scoreboard-Verified Goals`
+                  : isAr
+                  ? `فحص لوحة النتيجة: 0 أهداف بالمقطع${momentsBrief.scoreboard_latest ? ` (${momentsBrief.scoreboard_latest})` : ""}`
+                  : `Scoreboard Verified: 0 Goals${momentsBrief.scoreboard_latest ? ` (${momentsBrief.scoreboard_latest})` : ""}`}
               </span>
             )}
           </div>
 
-          {/* Clickable Match Momentum Bars */}
+          {/* Interactive Apache ECharts Oracle Match Momentum (Click to Seek!) */}
           {timelineMeta.frames.length > 0 && (
             <div dir="ltr" className="bg-[#090D16] border border-white/[0.06] rounded-lg p-2.5">
-              <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1.5">
+              <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
                 <span>{timelineMeta.teamAName}</span>
-                <span>{isAr ? "خط السيطرة الميدانية (تليميتري كالمان)" : "Field Tilt Momentum"}</span>
+                <span>{isAr ? "مخطط زخم المباراة التفاعلي (Apache ECharts)" : "Interactive Oracle Momentum (Apache ECharts)"}</span>
                 <span>{timelineMeta.teamBName}</span>
               </div>
-              <div className="h-14 flex items-center gap-[1px] overflow-hidden">
-                {timelineMeta.frames
-                  .filter((_, idx) => idx % 2 === 0)
-                  .map((fr) => {
-                    const m = fr.momentum ?? 0;
-                    const hPct = Math.max(8, Math.min(100, Math.abs(m)));
-                    const pos = m >= 0;
-                    const active = Math.abs(fr.time_s - hudTimeS) <= 0.35;
-                    return (
-                      <button
-                        key={fr.frame_id}
-                        type="button"
-                        onClick={() => seekToTime(fr.time_s)}
-                        title={`${fr.time_s.toFixed(1)}s (${m > 0 ? "+" : ""}${m})`}
-                        className="flex-1 h-full flex flex-col justify-center items-center group"
-                      >
-                        <div className="w-full h-1/2 flex items-end">
-                          {pos && (
-                            <div
-                              className="w-full rounded-t-xs transition-opacity group-hover:opacity-100"
-                              style={{
-                                height: `${hPct}%`,
-                                backgroundColor: active ? "#10B981" : data?.kit_colors?.team_a_hex || "#EF4444",
-                                opacity: active ? 1 : 0.65,
-                              }}
-                            />
-                          )}
-                        </div>
-                        <div className="w-full h-1/2 flex items-start">
-                          {!pos && (
-                            <div
-                              className="w-full rounded-b-xs transition-opacity group-hover:opacity-100"
-                              style={{
-                                height: `${hPct}%`,
-                                backgroundColor: active ? "#10B981" : data?.kit_colors?.team_b_hex || "#38BDF8",
-                                opacity: active ? 1 : 0.65,
-                              }}
-                            />
-                          )}
-                        </div>
-                      </button>
-                    );
-                  })}
-              </div>
+              <EChartsMatchMomentum
+                frames={timelineMeta.frames}
+                currentTimeS={hudTimeS}
+                teamAName={timelineMeta.teamAName}
+                teamBName={timelineMeta.teamBName}
+                teamAHex={data?.kit_colors?.team_a_hex || "#EF4444"}
+                teamBHex={data?.kit_colors?.team_b_hex || "#38BDF8"}
+                onSeek={seekToTime}
+              />
             </div>
           )}
 
@@ -2020,7 +2152,9 @@ export default function BroadcastStudioScreen({ lang, matchId, role }: Props) {
           {momentsBrief && momentsBrief.pose_assessments.length > 0 && (
             <div className="border-t border-white/[0.06] pt-3 space-y-1.5 text-[11px]">
               <div className="font-semibold text-slate-300">
-                {isAr ? "تقييم وضعية الجسم وفحص المساحات (Resolution Gate ≥ 75px):" : "Event-Triggered Torso Pose & Head-Scan Gate:"}
+                {isAr
+                  ? "تقييم وضعية الجذع (YOLO11-Pose) — فحص مسح الرأس مفعّل للقطات القريبة (+75px):"
+                  : "Event-Triggered Torso Pose (YOLO11-Pose) — Head Scanning enabled >= 75px:"}
               </div>
               <div className="flex flex-wrap gap-2">
                 {momentsBrief.pose_assessments.map((pa) => (
@@ -2030,6 +2164,11 @@ export default function BroadcastStudioScreen({ lang, matchId, role }: Props) {
                     <span>{pa.torso_orientation === "open_to_pitch" ? (isAr ? "جسم مفتوح" : "Open Torso") : isAr ? "مغلق للخط" : "Closed"}</span>
                     <span className="mx-1 text-slate-500">|</span>
                     <span dir="ltr" className="text-slate-400">{`${pa.bbox_height_px}px`}</span>
+                    {pa.pose_engine === "yolo11n-pose" && (
+                      <span className="ms-1.5 px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 text-[9px] font-bold">
+                        YOLO11-Pose
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>

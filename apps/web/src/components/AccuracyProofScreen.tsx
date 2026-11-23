@@ -9,6 +9,7 @@ import {
   DetectionRow,
   frameImageUrl,
   MatchBenchmarkPayload,
+  Phase0EvalPayload,
   QASheetTrack,
   RosterPlayer,
   trackCropUrl,
@@ -134,10 +135,12 @@ export default function AccuracyProofScreen({ lang, matchId, role }: Props) {
   const [splitPct, setSplitPct] = useState(50);
   const [draggingSplit, setDraggingSplit] = useState(false);
   const [data, setData] = useState<BeforeAfterPayload | null>(null);
+  const [loadingHero, setLoadingHero] = useState(true);
   const [benchmark, setBenchmark] = useState<MatchBenchmarkPayload | null>(null);
+  const [phase0Eval, setPhase0Eval] = useState<Phase0EvalPayload | null>(null);
   const [qaTracks, setQaTracks] = useState<QASheetTrack[]>([]);
   const [officialRoster, setOfficialRoster] = useState<RosterPlayer[]>([]);
-  const [rosterText, setRosterText] = useState("1 - محمد الشناوي (GK) (C)\n10 - إمام عاشور\n9 - وسام أبو علي\n--- احتياط ---\n14 - حسين الشحات");
+  const [rosterText, setRosterText] = useState("");
   const [parsedCount, setParsedCount] = useState<number | null>(null);
   const [autoMatchedCount, setAutoMatchedCount] = useState<number | null>(null);
   const [saveToast, setSaveToast] = useState("");
@@ -147,23 +150,53 @@ export default function AccuracyProofScreen({ lang, matchId, role }: Props) {
   const beforeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const afterCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  // Match-aware default lineup placeholder (never shows Al Ahly roster on ENPPI × Mokawloon!)
+  useEffect(() => {
+    if (matchId === "m2_ahly_enppi" || matchId === "m1_ahly_sekka") {
+      setRosterText("1 - محمد الشناوي (GK) (C)\n10 - إمام عاشور\n9 - وسام أبو علي\n--- احتياط ---\n14 - حسين الشحات");
+    } else {
+      setRosterText("");
+    }
+  }, [matchId]);
+
+  // Decoupled fast-first fetches: Before/After hero renders in <200ms without EVER waiting on Phase-0 eval!
   useEffect(() => {
     let alive = true;
     setErrorMsg("");
-    setQaTracks([]);
-    Promise.all([
-      apiFetch<BeforeAfterPayload>(`/api/matches/${matchId}/before-after?frame_id=${frameId}`, {}, "club_demo_egypt", role),
-      apiFetch<{ official_roster?: RosterPlayer[]; tracks: QASheetTrack[] }>(`/api/matches/${matchId}/qa-sheet`, {}, "club_demo_egypt", role),
-      apiFetch<MatchBenchmarkPayload>(`/api/matches/${matchId}/benchmark`, {}, "club_demo_egypt", role).catch(() => null),
-    ])
-      .then(([ba, qa, bm]) => {
+    setLoadingHero(true);
+
+    apiFetch<BeforeAfterPayload>(`/api/matches/${matchId}/before-after?frame_id=${frameId}`, {}, "club_demo_egypt", role)
+      .then((ba) => {
         if (!alive) return;
         setData(ba);
+        setLoadingHero(false);
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setErrorMsg(String(e));
+        setLoadingHero(false);
+      });
+
+    apiFetch<{ official_roster?: RosterPlayer[]; tracks: QASheetTrack[] }>(`/api/matches/${matchId}/qa-sheet`, {}, "club_demo_egypt", role)
+      .then((qa) => {
+        if (!alive) return;
         setQaTracks(qa.tracks.slice(0, 12));
         setOfficialRoster(qa.official_roster || []);
-        setBenchmark(bm);
       })
-      .catch((e) => alive && setErrorMsg(String(e)));
+      .catch(() => {});
+
+    apiFetch<MatchBenchmarkPayload>(`/api/matches/${matchId}/benchmark`, {}, "club_demo_egypt", role)
+      .then((bm) => {
+        if (alive) setBenchmark(bm);
+      })
+      .catch(() => {});
+
+    apiFetch<Phase0EvalPayload>(`/api/matches/${matchId}/phase0-eval`, {}, "club_demo_egypt", role)
+      .then((p0) => {
+        if (alive) setPhase0Eval(p0);
+      })
+      .catch(() => {});
+
     return () => {
       alive = false;
     };
@@ -211,13 +244,18 @@ export default function AccuracyProofScreen({ lang, matchId, role }: Props) {
       };
     }
     try {
-      await apiFetch(
+      const saveRes = await apiFetch<{ active_learning_samples_saved?: number }>(
         `/api/matches/${matchId}/lineup`,
         { method: "POST", body: JSON.stringify({ official_roster: roster, track_overrides: overrides }) },
         "club_demo_egypt",
         role
       );
-      setSaveToast(isAr ? "تم حفظ تأكيدات الهوية بنجاح" : "Verified identities saved");
+      const alSaved = saveRes.active_learning_samples_saved ?? 0;
+      setSaveToast(
+        isAr
+          ? `تم حفظ التأكيدات (+${alSaved} عينة لدولاب التعلم النشط)`
+          : `Verified identities saved (+${alSaved} Active-Learning samples)`
+      );
       setTimeout(() => setSaveToast(""), 2600);
     } catch (e) {
       setSaveToast(String(e));
@@ -269,25 +307,44 @@ export default function AccuracyProofScreen({ lang, matchId, role }: Props) {
         <div className="studio-panel p-3 text-xs text-red-300 border-red-500/30">{errorMsg}</div>
       )}
 
-      {/* Hero Stage: 70% Interactive Before/After Slider + 30% Clean Metrics Panel */}
-      {data && (
+      {/* Hero Stage: 70% Interactive Before/After Slider + 30% Clean Metrics Panel (Instant Skeleton -> Frame) */}
+      {loadingHero && !data ? (
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start animate-pulse">
+          <div className="xl:col-span-8 studio-panel p-3">
+            <div className="w-full aspect-video rounded-lg bg-white/[0.04] flex items-center justify-center text-xs text-slate-400">
+              {isAr ? "جاري تحميل فريم المقارنة قبل / بعد..." : "Loading Before / After comparison frame..."}
+            </div>
+          </div>
+          <div className="xl:col-span-4 grid grid-cols-2 gap-3">
+            {[1, 2, 3, 4].map((k) => (
+              <div key={k} className="studio-panel p-3.5 h-24 bg-white/[0.03]" />
+            ))}
+          </div>
+        </div>
+      ) : data && (
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
           <div className="xl:col-span-8 studio-panel p-3 space-y-2.5">
-            <div dir="ltr" className="flex items-center justify-between text-xs px-1 gap-2">
-              <span className="text-red-400 font-semibold">
-                {isAr ? "قبل: تجميع ثنائي (تسرب الحكم)" : "BEFORE: Legacy 2-Class"}
+            <div className="flex items-center justify-between text-xs px-1 gap-2" dir="ltr">
+              <span dir={isAr ? "rtl" : "ltr"} className="text-red-400 font-semibold">
+                {isAr ? "يسار — قبل: تجميع ثنائي (تسرب الحكم)" : "BEFORE: Legacy 2-Class"}
               </span>
-              <span className="text-slate-400 tabular-nums">
+              <span dir={isAr ? "rtl" : "ltr"} className="text-slate-400 tabular-nums">
                 {isAr ? (
                   <>
-                    اسحب للمقارنة • فريم <bdi dir="ltr">#{data.frame_id}</bdi>
+                    فريم <bdi dir="ltr">#{data.frame_id}</bdi> • اسحب للمقارنة
                   </>
                 ) : (
                   `Drag to compare • Frame #${data.frame_id}`
                 )}
               </span>
-              <span className="text-emerald-400 font-semibold">
-                {isAr ? "بعد: درع V8 المعزول" : "AFTER: V8 Isolation Shield"}
+              <span dir={isAr ? "rtl" : "ltr"} className="text-emerald-400 font-semibold">
+                {isAr ? (
+                  <>
+                    يمين — بعد: درع <bdi dir="ltr">V8</bdi> المعزول
+                  </>
+                ) : (
+                  "AFTER: V8 Isolation Shield"
+                )}
               </span>
             </div>
 
@@ -412,12 +469,12 @@ export default function AccuracyProofScreen({ lang, matchId, role }: Props) {
             </div>
           </div>
           <div className="studio-panel p-4">
-            <div className="text-[11px] text-slate-400">{isAr ? "تغطية تتبع الكرة (كالمان)" : "Kalman Ball Coverage"}</div>
+            <div className="text-[11px] text-slate-400">{isAr ? "تغطية تتبع الكرة (بترميم كالمان)" : "Kalman Ball Coverage"}</div>
             <div dir="ltr" className="text-xl font-bold text-amber-400 tabular-nums mt-1 inline-block">
               {`${benchmark.ball_kalman_coverage_pct}%`}
             </div>
             <div className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
-              {isAr ? `${benchmark.ball_clean_detections} رصدة نظيفة / ${benchmark.ball_raw_detections}` : `${benchmark.ball_clean_detections} clean / ${benchmark.ball_raw_detections} raw`}
+              {isAr ? `رصدات نظيفة: ${benchmark.ball_clean_detections} • تغطية بعد الترميم` : `${benchmark.ball_clean_detections} clean obs • inpainted coverage`}
             </div>
           </div>
           <div className="studio-panel p-4">
@@ -430,16 +487,94 @@ export default function AccuracyProofScreen({ lang, matchId, role }: Props) {
             </div>
           </div>
           <div className="studio-panel p-4">
-            <div className="text-[11px] text-slate-400">{isAr ? "اتجاه الهجوم المكتشف" : "Inferred Attack Direction"}</div>
-            <div dir="ltr" className="text-xl font-bold text-emerald-300 mt-1 inline-block">
-              {benchmark.team_a_attacks_right ? "Team A ▶ (105m)" : "◀ Team A (0m)"}
+            <div className="text-[11px] text-slate-400">{isAr ? "حراس المرمى وأرقام القمصان" : "Goalkeepers & Jerseys"}</div>
+            <div dir="ltr" className="text-xl font-bold text-emerald-300 mt-1 inline-block tabular-nums">
+              {`GK: ${benchmark.goalkeepers_count ?? "—"} • OCR: ${benchmark.jerseys_detected_count ?? 0}`}
             </div>
             <div className="text-[11px] text-slate-500 mt-0.5">
-              {benchmark.direction_source === "goalkeeper_position"
-                ? isAr ? "مؤكّد بموقع حارس المرمى" : "Verified via GK box"
-                : isAr ? "مؤكّد بمركز انتشار الفريق" : "Verified via team centroid"}
+              {benchmark.team_a_attacks_right
+                ? isAr ? "اتجاه الهجوم: نحو اليمين (105م)" : "Attack Direction: Right (105m)"
+                : isAr ? "اتجاه الهجوم: نحو اليسار (0م)" : "Attack Direction: Left (0m)"}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Honest Phase-0 Structural & Ground-Truth Audit (Zero self-comparison against unverified prelabels!) */}
+      {phase0Eval?.available && phase0Eval.after && phase0Eval.before && (
+        <div className="studio-panel p-4 space-y-3 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="font-bold text-white">
+              {phase0Eval.verified_human_gt
+                ? isAr
+                  ? `بوابة القياس الحقيقية — المرحلة 0 (${phase0Eval.annotated_frames} فريم معلَّم يدوياً)`
+                  : `Phase-0 Human Ground-Truth Gate (${phase0Eval.annotated_frames} Verified Frames)`
+                : isAr
+                ? `مؤشرات التحسن الفعلي — المرحلة 0 (${phase0Eval.annotated_frames} فريم بانتظار المراجعة البشرية)`
+                : `Phase-0 Structural Improvement Audit (${phase0Eval.annotated_frames} Pre-labeled Frames)`}
+            </div>
+            <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-[11px] tabular-nums">
+              {isAr
+                ? `دولاب التعلم النشط: ${phase0Eval.active_learning_queue_size ?? 0} عينة مؤكدة`
+                : `Active-Learning Queue: ${phase0Eval.active_learning_queue_size ?? 0} verified`}
+            </span>
+          </div>
+
+          {phase0Eval.verified_human_gt ? (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 tabular-nums">
+              <div className="bg-[#090D16] border border-white/[0.06] rounded-lg p-3">
+                <div className="text-[11px] text-slate-400">{isAr ? "دقة الحكام (الهدف 95%+)" : "Referee Acc (Gate 95%+)"}</div>
+                <div dir="ltr" className="text-base font-bold text-emerald-400 mt-0.5 inline-block">
+                  {`${((phase0Eval.before.referee_accuracy ?? 0) * 100).toFixed(1)}% → ${((phase0Eval.after.referee_accuracy ?? 0) * 100).toFixed(1)}%`}
+                </div>
+              </div>
+              <div className="bg-[#090D16] border border-white/[0.06] rounded-lg p-3">
+                <div className="text-[11px] text-slate-400">{isAr ? "دقة الفريقين (الهدف 97%+)" : "Team Acc (Gate 97%+)"}</div>
+                <div dir="ltr" className="text-base font-bold text-sky-400 mt-0.5 inline-block">
+                  {`${((phase0Eval.before.team_accuracy ?? 0) * 100).toFixed(1)}% → ${((phase0Eval.after.team_accuracy ?? 0) * 100).toFixed(1)}%`}
+                </div>
+              </div>
+              <div className="bg-[#090D16] border border-white/[0.06] rounded-lg p-3">
+                <div className="text-[11px] text-slate-400">{isAr ? "معدل تسرب الحكام" : "Referee Leakage Rate"}</div>
+                <div dir="ltr" className="text-base font-bold text-amber-400 mt-0.5 inline-block">
+                  {`${((phase0Eval.before.referee_leakage_rate ?? 0) * 100).toFixed(1)}% → ${((phase0Eval.after.referee_leakage_rate ?? 0) * 100).toFixed(1)}%`}
+                </div>
+              </div>
+              <div className="bg-[#090D16] border border-white/[0.06] rounded-lg p-3">
+                <div className="text-[11px] text-slate-400">{isAr ? "ثبات الدور بالمسار" : "Track Role Stability"}</div>
+                <div dir="ltr" className="text-base font-bold text-white mt-0.5 inline-block">
+                  {`${(phase0Eval.before.track_role_stability * 100).toFixed(1)}% → ${(phase0Eval.after.track_role_stability * 100).toFixed(1)}%`}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 tabular-nums">
+              <div className="bg-[#090D16] border border-white/[0.06] rounded-lg p-3">
+                <div className="text-[11px] text-slate-400">{isAr ? "مسارات الحكام (قبل ← بعد)" : "Official Tracks (Before → After)"}</div>
+                <div dir="ltr" className="text-base font-bold text-emerald-400 mt-0.5 inline-block">
+                  {`${phase0Eval.before.official_tracks ?? 0} → ${phase0Eval.after.official_tracks ?? 0}`}
+                </div>
+              </div>
+              <div className="bg-[#090D16] border border-white/[0.06] rounded-lg p-3">
+                <div className="text-[11px] text-slate-400">{isAr ? "ثبات الدور على كامل المسار" : "Track Role Stability"}</div>
+                <div dir="ltr" className="text-base font-bold text-sky-400 mt-0.5 inline-block">
+                  {`${(phase0Eval.before.track_role_stability * 100).toFixed(1)}% → ${(phase0Eval.after.track_role_stability * 100).toFixed(1)}%`}
+                </div>
+              </div>
+              <div className="bg-[#090D16] border border-white/[0.06] rounded-lg p-3">
+                <div className="text-[11px] text-slate-400">{isAr ? "سقف حراس المرمى الواقعي" : "Goalkeeper Cap (Max 2)"}</div>
+                <div dir="ltr" className="text-base font-bold text-amber-400 mt-0.5 inline-block">
+                  {`${phase0Eval.after.goalkeeper_tracks ?? 1} GK`}
+                </div>
+              </div>
+              <div className="bg-[#090D16] border border-white/[0.06] rounded-lg p-3">
+                <div className="text-[11px] text-slate-400">{isAr ? "دمج المسارات المتقطعة (Re-ID)" : "Re-ID Track Consolidation"}</div>
+                <div dir="ltr" className="text-base font-bold text-white mt-0.5 inline-block">
+                  {`${phase0Eval.before.total_tracks ?? 0} → ${phase0Eval.after.total_tracks ?? 0}`}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -448,13 +583,7 @@ export default function AccuracyProofScreen({ lang, matchId, role }: Props) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-bold text-white">
-              {isAr ? (
-                <>
-                  ورقة التأكيد السريع للهويات <bdi dir="ltr">(2-Minute QA Sheet)</bdi>
-                </>
-              ) : (
-                "2-Minute Identity QA Sheet"
-              )}
+              {isAr ? "ورقة التأكيد السريع للهويات" : "2-Minute Identity QA Sheet"}
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
               {isAr
@@ -508,7 +637,7 @@ export default function AccuracyProofScreen({ lang, matchId, role }: Props) {
                       setQaTracks(qaRefreshed.tracks.slice(0, 12));
                     } catch {}
                   }}
-                  className="text-[11px] text-emerald-400 hover:underline font-semibold"
+                  className="px-2.5 py-1 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-[11px] text-emerald-300 font-semibold transition"
                 >
                   {isAr ? "تحليل وتطبيق القائمة" : "Parse & Apply Sheet"}
                 </button>
@@ -518,7 +647,8 @@ export default function AccuracyProofScreen({ lang, matchId, role }: Props) {
               value={rosterText}
               disabled={isReadOnly}
               onChange={(e) => setRosterText(e.target.value)}
-              rows={7}
+              rows={4}
+              placeholder={isAr ? "الصق قائمة التشكيلة الرسمية هنا (مثال: 10 - اسم اللاعب)..." : "Paste official match scoresheet here (e.g. 10 - Player Name)..."}
               className="w-full bg-[#090D16] border border-white/[0.1] rounded-lg p-3 text-xs leading-relaxed text-slate-200 disabled:opacity-60"
             />
             {parsedCount !== null && (

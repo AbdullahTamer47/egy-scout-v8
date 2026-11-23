@@ -60,7 +60,18 @@ def recommend_matchup_plan(
             if available
             else 0.0
         )
-        fit_score = round(min(96.0, avg_rating * 6.5 + pos_coverage * 22.0 + counter_hits * 6.0), 1)
+        # Weight by actual squad profile traits matching each tactical system (prevents identical tie scores)
+        avg_vaep = sum(float(p.get("vaep_per90") or 0.0) for p in available[:11]) / max(1, min(11, len(available)))
+        avg_padj = sum(float(p.get("padj_defensive_actions_per90") or 0.0) for p in available[:11]) / max(1, min(11, len(available)))
+        avg_hir = sum(float(p.get("hir_distance_m_per90") or 0.0) for p in available[:11]) / max(1, min(11, len(available)))
+        trait_bonus = (
+            (avg_padj * 0.55 + avg_vaep * 9.5 + 1.8)
+            if fname == "4-2-3-1"
+            else (avg_hir / 160.0 + avg_vaep * 8.5)
+            if fname == "4-3-3"
+            else (avg_padj * 0.35 + avg_hir / 260.0)
+        )
+        fit_score = round(min(96.0, avg_rating * 6.2 + pos_coverage * 20.0 + counter_hits * 5.5 + trait_bonus), 1)
         ranked_formations.append(
             {
                 "formation": fname,

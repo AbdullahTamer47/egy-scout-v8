@@ -283,6 +283,8 @@ export interface MatchBenchmarkPayload {
   max_observed_speed_kmh: number;
   max_speed_cap_kmh: number;
   speed_cap_compliant: boolean;
+  goalkeepers_count?: number;
+  jerseys_detected_count?: number;
   team_a_attacks_right: boolean;
   team_a_goal_x: number;
   team_b_goal_x: number;
@@ -292,6 +294,7 @@ export interface MatchBenchmarkPayload {
 export interface MomentsAndBriefPayload {
   match_id: string;
   verified_goals: Array<Record<string, unknown>>;
+  scoreboard_latest?: string | null;
   events: Array<{
     frame_id: number;
     time_s: number;
@@ -312,6 +315,7 @@ export interface MomentsAndBriefPayload {
     head_scanning_enabled: boolean;
     head_scan_count: number | null;
     gate_note: string;
+    pose_engine?: string;
   }>;
   coach_brief: Array<{
     id: string;
@@ -410,4 +414,67 @@ export interface ScoutingResponse {
   benchmark_source_badge_ar: string;
   benchmark_source_badge_en: string;
   benchmark_players: ScoutingPlayer[];
+}
+
+export interface Phase0EvalPayload {
+  available: boolean;
+  verified_human_gt?: boolean;
+  match_id: string;
+  annotated_frames?: number;
+  total_prelabels?: number;
+  verified_persons?: number;
+  active_learning_queue_size?: number;
+  before?: {
+    referee_accuracy?: number;
+    referee_leakage_rate?: number;
+    team_accuracy?: number;
+    track_role_stability: number;
+    official_tracks?: number;
+    goalkeeper_tracks?: number;
+    total_tracks?: number;
+    gate_referee_pass?: boolean;
+    gate_team_pass?: boolean;
+  };
+  after?: {
+    referee_accuracy?: number;
+    referee_leakage_rate?: number;
+    team_accuracy?: number;
+    track_role_stability: number;
+    official_tracks?: number;
+    goalkeeper_tracks?: number;
+    total_tracks?: number;
+    gate_referee_pass?: boolean;
+    gate_team_pass?: boolean;
+  };
+}
+
+export interface OpponentDossierPayload {
+  match_id: string;
+  team_a_name: string;
+  team_b_name: string;
+  grounded_source: string;
+  summary_ar: string;
+  summary_en: string;
+  vulnerabilities: PositioningAnalysisPayload["diagnoses"];
+  attacking_patterns: MomentsAndBriefPayload["events"];
+  defensive_transitions: MomentsAndBriefPayload["events"];
+  coach_brief: MomentsAndBriefPayload["coach_brief"];
+  scoreboard_latest?: string | null;
+  verified_goals: Array<Record<string, unknown>>;
+}
+
+export interface PlayerDossierPayload {
+  player: ScoutingPlayer;
+  is_video_track: boolean;
+  rating_breakdown: Array<{
+    metric: string;
+    weight_pct: number;
+    score_10: number;
+    raw: string;
+  }>;
+  strengths_ar: string[];
+  strengths_en: string[];
+  watchouts_ar: string[];
+  watchouts_en: string[];
+  evidence_clips: ScoutingPlayer["evidence_clips"];
 }

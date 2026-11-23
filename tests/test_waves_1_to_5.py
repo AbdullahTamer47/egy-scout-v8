@@ -179,6 +179,33 @@ class TestWaves1To5(unittest.TestCase):
             if cell["cell_type"] == "code":
                 ast.parse("".join(cell["source"]), filename=f"colab_l4_cell_{i}")
 
+        # Verify new V8 Pro endpoints: Phase-0 Ground-Truth Eval, Opponent Dossier, Player Dossier
+        p0 = client.get("/api/matches/m2_ahly_enppi/phase0-eval")
+        self.assertEqual(p0.status_code, 200)
+        self.assertTrue(p0.json()["available"])
+        self.assertGreater(p0.json()["annotated_frames"], 0)
+
+        od = client.get("/api/matches/m2_ahly_enppi/opponent-dossier")
+        self.assertEqual(od.status_code, 200)
+        self.assertIn("summary_ar", od.json())
+
+        sc = client.get("/api/scouting/players?match_id=m2_ahly_enppi")
+        self.assertEqual(sc.status_code, 200)
+        first_pid = sc.json()["benchmark_players"][0]["player_id"]
+        pdos = client.get(f"/api/scouting/players/{first_pid}/dossier?match_id=m2_ahly_enppi")
+        self.assertEqual(pdos.status_code, 200)
+        self.assertGreater(len(pdos.json()["rating_breakdown"]), 0)
+
+    def test_v8_upgraded_cv_engines_scoreboard_gk_cap_and_pitch_calib(self) -> None:
+        from services.cv_worker.stages.events_spotting import parse_scoreboard_text
+        from services.cv_worker.stages.pitch_calib import FIFA_KEYPOINTS
+        from services.cv_worker.lazy_engines.video_export import resolve_ffmpeg_binary
+
+        self.assertEqual(FIFA_KEYPOINTS.shape, (32, 2))
+        self.assertEqual(parse_scoreboard_text(["AHL", "2", "-", "1", "ENP", "67:14"]), (2, 1))
+        self.assertEqual(parse_scoreboard_text(["0-0", "12:05"]), (0, 0))
+        self.assertIsNotNone(resolve_ffmpeg_binary())
+
 
 if __name__ == "__main__":
     unittest.main()

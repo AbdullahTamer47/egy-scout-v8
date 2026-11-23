@@ -189,19 +189,20 @@ class SigLIPThreeClassClusterer:
     def _ensure_siglip_loaded(self) -> None:
         if self._sports_tc is not None or self._features_model is not None:
             return
-        SportsTC = _try_import_sports_team_classifier()
-        if SportsTC is not None:
-            self._sports_tc = SportsTC(device=self.device, batch_size=self.batch_size)
-            return
+        import os
+
+        hf_cache = get_repo_root() / ".cache" / "hf"
+        hf_cache.mkdir(parents=True, exist_ok=True)
+        os.environ.setdefault("HF_HOME", str(hf_cache))
 
         import torch
-        from transformers import AutoProcessor, SiglipVisionModel
+        from transformers import AutoImageProcessor, SiglipVisionModel
 
         self._features_model = SiglipVisionModel.from_pretrained(
             self.config.siglip_model_name
         ).to(self.device)
         self._features_model.eval()
-        self._processor = AutoProcessor.from_pretrained(self.config.siglip_model_name)
+        self._processor = AutoImageProcessor.from_pretrained(self.config.siglip_model_name)
 
     def extract_embeddings(self, crops: list[np.ndarray]) -> np.ndarray:
         if not crops:
@@ -542,6 +543,8 @@ class ZeroRefereeLeakShield:
         main_ref_candidates: list[tuple[float, int, Any]] = []
         top_ar_candidates: list[tuple[float, int, Any]] = []
         bot_ar_candidates: list[tuple[float, int, Any]] = []
+        left_gk_candidates: list[tuple[float, int, Any, str]] = []
+        right_gk_candidates: list[tuple[float, int, Any, str]] = []
 
         for track_id, idxs in out.groupby("track_id").groups.items():
             tid = int(track_id)
@@ -585,10 +588,12 @@ class ZeroRefereeLeakShield:
             total_role_w = sum(role_scores.values()) or 1.0
             locked_role_conf = round(role_scores[best_role] / total_role_w, 4)
 
-            # Spatial penalty-box GK separation
+            # Spatial penalty-box GK candidate (strictly stitched & capped to max 1 per goal end!)
             gk_end = self._is_goalkeeper_track(grp)
+            has_detector_gk = bool((grp["source_layer"] == "layer1_detector_gk").any())
             if gk_end is not None and (
                 best_role in ("referee", "goalkeeper")
+                or has_detector_gk
                 or float(grp["team_conf"].mean()) < self.config.min_team_conf
             ):
                 goal_x = 0.0 if gk_end == "left" else self.config.pitch_length_m
@@ -597,13 +602,36 @@ class ZeroRefereeLeakShield:
                     if team_x_medians
                     else ("team_a" if gk_end == "left" else "team_b")
                 )
-                out.loc[idxs, "role"] = "goalkeeper"
-                out.loc[idxs, "team"] = gk_team
+                med_x = float(grp["x_m"].dropna().median()) if grp["x_m"].notna().any() else goal_x
+                goal_prox = 1.0 / (1.5 + abs(med_x - goal_x))
+                det_gk_boost = 2.6 if has_detector_gk else (1.5 if best_role == "goalkeeper" else 0.8)
+                gk_score = float(np.sqrt(max(1, len(grp)))) * goal_prox * det_gk_boost
+                if gk_end == "left":
+                    left_gk_candidates.append((gk_score, tid, idxs, gk_team))
+                else:
+                    right_gk_candidates.append((gk_score, tid, idxs, gk_team))
+                # Temporarily mark as normal player (or unassigned if no team) until canonical GK winner is picked
+                fallback_team = (
+                    max(team_scores.items(), key=lambda kv: kv[1])[0] if team_scores else gk_team
+                )
+                out.loc[idxs, "role"] = "player" if fallback_team in ("team_a", "team_b") else "unassigned"
+                out.loc[idxs, "team"] = fallback_team if fallback_team in ("team_a", "team_b") else "none"
                 out.loc[idxs, "on_pitch"] = True
-                out.loc[idxs, "role_conf"] = max(0.90, float(locked_role_conf))
-                out.loc[idxs, "team_conf"] = 0.90
-                out.loc[idxs, "source_layer"] = "layer4_spatial_gk_box"
+                out.loc[idxs, "role_conf"] = float(locked_role_conf)
+                out.loc[idxs, "team_conf"] = float(grp["team_conf"].mean()) if team_scores else 0.5
+                out.loc[idxs, "source_layer"] = "layer4_temporal_vote"
                 continue
+            elif best_role == "goalkeeper":
+                # Detector predicted goalkeeper outside penalty box -> downgrade to outfield player unless strong
+                if team_scores:
+                    best_role = "player"
+                else:
+                    out.loc[idxs, "role"] = "unassigned"
+                    out.loc[idxs, "team"] = "none"
+                    out.loc[idxs, "role_conf"] = float(locked_role_conf)
+                    out.loc[idxs, "team_conf"] = 0.0
+                    out.loc[idxs, "source_layer"] = "layer4_unassigned_low_conf"
+                    continue
 
             if best_role == "referee":
                 has_detector_ref = bool((grp["source_layer"] == "layer1_detector_referee").any())
@@ -716,5 +744,39 @@ class ZeroRefereeLeakShield:
             source_layer="layer4_verified_touchline_ar",
             is_ar=True,
         )
+
+        # Canonical stitching of Goalkeepers: strictly max 1 left-end GK + max 1 right-end GK (<= 2 per match!)
+        def _promote_and_stitch_gk(cands: list[tuple[float, int, Any, str]]) -> None:
+            if not cands:
+                return
+            cands.sort(key=lambda x: x[0], reverse=True)
+            used_frames: set[int] = set()
+            promoted: list[tuple[int, int, Any, set[int], str]] = []
+            for _, tid, idxs, gk_team in cands:
+                fids = set(int(f) for f in out.loc[idxs, "frame_id"].tolist())
+                if fids & used_frames:
+                    continue  # Strictly <= 1 goalkeeper at this goal end per frame
+                promoted.append((min(fids), tid, idxs, fids, gk_team))
+                used_frames.update(fids)
+            if not promoted:
+                return
+            canonical_tid = min(promoted, key=lambda x: (x[0], x[1]))[1]
+            canonical_team = promoted[0][4]
+            for _, _, idxs, _, _ in promoted:
+                out.loc[idxs, "role"] = "goalkeeper"
+                out.loc[idxs, "team"] = canonical_team
+                out.loc[idxs, "on_pitch"] = True
+                out.loc[idxs, "role_conf"] = 0.94
+                out.loc[idxs, "team_conf"] = 0.92
+                out.loc[idxs, "source_layer"] = "layer4_spatial_gk_box"
+            for _, tid, idxs, fids, _ in promoted:
+                if tid == canonical_tid:
+                    continue
+                existing = out.loc[out["track_id"] == canonical_tid]
+                if not existing["frame_id"].isin(fids).any() and bool((existing["role"] == "goalkeeper").all()):
+                    out.loc[idxs, "track_id"] = np.int32(canonical_tid)
+
+        _promote_and_stitch_gk(left_gk_candidates)
+        _promote_and_stitch_gk(right_gk_candidates)
 
         return out

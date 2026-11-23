@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { Box, Compass, Eye, RotateCcw } from "lucide-react";
+import ThreePitchTwin from "@/components/ThreePitchTwin";
 import { TimelineBall } from "@/lib/api";
 import { hexToRgba, RenderPlayer } from "@/lib/broadcastRenderer";
 
@@ -342,23 +343,38 @@ export default function TacticalTwinCanvas({
         </div>
       </div>
 
-      {/* Twin Canvas */}
+      {/* Twin Canvas: 2D Tactical Pitch Control Board OR Real Three.js 3D WebGL Stadium / Player-POV */}
       <div className="relative rounded-lg overflow-hidden border border-white/[0.08] bg-[#071A14]">
-        <canvas
-          ref={canvasRef}
-          width={440}
-          height={285}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={() => {
-            draggingGhostRef.current = false;
-            orbitingRef.current.active = false;
-          }}
-          className={`w-full block ${
-            viewMode === "2d" ? "cursor-grab active:cursor-grabbing" : "cursor-move"
-          }`}
-        />
+        {viewMode === "2d" ? (
+          <canvas
+            ref={canvasRef}
+            width={440}
+            height={285}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={() => {
+              draggingGhostRef.current = false;
+              orbitingRef.current.active = false;
+            }}
+            className="w-full block cursor-grab active:cursor-grabbing"
+          />
+        ) : (
+          <ThreePitchTwin
+            mode={viewMode}
+            players={players}
+            ball={ball}
+            fallbackBallXY={fallbackBallXY}
+            attackGoalX={attackGoalX}
+            teamAHex={teamAHex}
+            teamBHex={teamBHex}
+            selectedDefId={selectedDefId}
+            ghostDx={ghostDx}
+            ghostDy={ghostDy}
+            chainIds={chainIds}
+            setPieceSim={setPieceSim}
+          />
+        )}
 
         {/* Box Control HUD Chip in corner */}
         {!isCloseUp && (
