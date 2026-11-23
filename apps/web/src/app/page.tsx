@@ -334,15 +334,29 @@ export default function HomePage() {
                 <span>{isAr ? "🤖 المساعد التكتيكي الذكي" : "🤖 AI Tactical Chat"}</span>
               </button>
 
-              <a
-                href={`${API_BASE}/api/matches/${encodeURIComponent(matchId)}/export-report`}
-                target="_blank"
-                rel="noreferrer"
-                className="hidden sm:inline-flex items-center gap-1.5 bg-[#111827] hover:bg-slate-800 border border-white/[0.1] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-400 transition"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                {isAr ? "تقرير النادي" : "Club Report"}
-              </a>
+              <div className="hidden sm:inline-flex items-center bg-[#111827] border border-white/[0.1] rounded-lg overflow-hidden text-xs">
+                <a
+                  href={`${API_BASE}/api/matches/${encodeURIComponent(matchId)}/export-report?audience=${role === "player" ? "player" : "admin"}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 hover:bg-slate-800 px-2.5 py-1.5 font-semibold text-emerald-400 transition"
+                  title={isAr ? "تقرير النادي الكامل للإدارة والجهاز الفني" : "Full Club Technical Report"}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  {isAr ? "تقرير النادي" : "Club Report"}
+                </a>
+                {role !== "player" && (
+                  <a
+                    href={`${API_BASE}/api/matches/${encodeURIComponent(matchId)}/export-report?audience=player`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="border-s border-white/[0.08] hover:bg-slate-800 px-2 py-1.5 text-[11px] font-semibold text-sky-300 transition"
+                    title={isAr ? "نسخة اللاعب فقط (ملاحظات الإدارة والمخاطر مخفية تلقائياً)" : "Player-Safe Redacted Report"}
+                  >
+                    {isAr ? "نسخة اللاعب" : "Player PDF"}
+                  </a>
+                )}
+              </div>
 
               <select
                 value={role}

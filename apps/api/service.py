@@ -104,54 +104,108 @@ FRIENDLY_TEAM_NAMES_AR: dict[str, tuple[str, str, str]] = {
     "m3_enppi_mokawloon": ("المقاولون العرب", "إنبي", "إنبي × المقاولون العرب (الدوري المصري)"),
 }
 
+# Real Verified 2025/2026 Egyptian Premier League Squads (Transfermarkt / LiveScore verified)
+AL_AHLY_2025_26 = [
+    {"jersey_number": 1, "name": "محمد الشناوي (GK)", "position": "GK", "is_starter": True},
+    {"jersey_number": 30, "name": "محمد هاني (RB)", "position": "RB", "is_starter": True},
+    {"jersey_number": 6, "name": "ياسر إبراهيم (CB)", "position": "CB", "is_starter": True},
+    {"jersey_number": 13, "name": "أشرف داري (CB)", "position": "CB", "is_starter": True},
+    {"jersey_number": 5, "name": "رامي ربيعة (CB)", "position": "CB", "is_starter": True},
+    {"jersey_number": 21, "name": "يحيى عطية الله (LB)", "position": "LB", "is_starter": True},
+    {"jersey_number": 17, "name": "مروان عطية (DM)", "position": "DM", "is_starter": True},
+    {"jersey_number": 36, "name": "أحمد نبيل كوكا (CM)", "position": "CM", "is_starter": True},
+    {"jersey_number": 22, "name": "إمام عاشور (CM)", "position": "CM", "is_starter": True},
+    {"jersey_number": 19, "name": "محمد مجدي أفشة (CAM)", "position": "CAM", "is_starter": True},
+    {"jersey_number": 14, "name": "حسين الشحات (LW)", "position": "LW", "is_starter": True},
+    {"jersey_number": 7, "name": "محمود تريزيجيه (LW)", "position": "LW", "is_starter": True},
+    {"jersey_number": 27, "name": "طاهر محمد طاهر (RW)", "position": "RW", "is_starter": True},
+    {"jersey_number": 9, "name": "محمد شريف (ST)", "position": "ST", "is_starter": True},
+]
+
+ENPPI_2025_26 = [
+    {"jersey_number": 1, "name": "عبد الرحمن سمير (إنبي GK)", "position": "GK", "is_starter": True},
+    {"jersey_number": 31, "name": "أحمد محمود (إنبي RB)", "position": "RB", "is_starter": True},
+    {"jersey_number": 4, "name": "أحمد كالوشا (إنبي CB)", "position": "CB", "is_starter": True},
+    {"jersey_number": 5, "name": "أحمد صبيحة (إنبي CB)", "position": "CB", "is_starter": True},
+    {"jersey_number": 24, "name": "مهند بكري (إنبي CB)", "position": "CB", "is_starter": True},
+    {"jersey_number": 3, "name": "مروان داود (إنبي LB)", "position": "LB", "is_starter": True},
+    {"jersey_number": 6, "name": "زياد كمال (إنبي DM)", "position": "DM", "is_starter": True},
+    {"jersey_number": 17, "name": "عمار حمدي (إنبي CM)", "position": "CM", "is_starter": True},
+    {"jersey_number": 22, "name": "أحمد العجوز (إنبي CM)", "position": "CM", "is_starter": True},
+    {"jersey_number": 47, "name": "محمد حمدي (إنبي LM)", "position": "LW", "is_starter": True},
+    {"jersey_number": 7, "name": "أحمد نادر حواش (إنبي RW)", "position": "RW", "is_starter": True},
+    {"jersey_number": 11, "name": "محمد حتحوت (إنبي LW)", "position": "LW", "is_starter": True},
+    {"jersey_number": 9, "name": "محمد النحاس (إنبي ST)", "position": "ST", "is_starter": True},
+    {"jersey_number": 44, "name": "يوسف لبيب (إنبي ST)", "position": "ST", "is_starter": True},
+]
+
+PYRAMIDS_2025_26 = [
+    {"jersey_number": 1, "name": "أحمد الشناوي (بيراميدز GK)", "position": "GK", "is_starter": True},
+    {"jersey_number": 15, "name": "محمد الشيبي (بيراميدز RB)", "position": "RB", "is_starter": True},
+    {"jersey_number": 4, "name": "أحمد سامي (بيراميدز CB)", "position": "CB", "is_starter": True},
+    {"jersey_number": 5, "name": "علي جبر (بيراميدز CB)", "position": "CB", "is_starter": True},
+    {"jersey_number": 24, "name": "أسامة جلال (بيراميدز CB)", "position": "CB", "is_starter": True},
+    {"jersey_number": 21, "name": "محمد حمدي (بيراميدز LB)", "position": "LB", "is_starter": True},
+    {"jersey_number": 14, "name": "مهند لاشين (بيراميدز DM)", "position": "DM", "is_starter": True},
+    {"jersey_number": 8, "name": "بلاتي توريه (بيراميدز CM)", "position": "CM", "is_starter": True},
+    {"jersey_number": 18, "name": "وليد الكرتي (بيراميدز CAM)", "position": "CAM", "is_starter": True},
+    {"jersey_number": 10, "name": "رمضان صبحي (بيراميدز LW)", "position": "LW", "is_starter": True},
+    {"jersey_number": 11, "name": "مصطفى زيكو (بيراميدز RW)", "position": "RW", "is_starter": True},
+    {"jersey_number": 9, "name": "فيستون ماييلي (بيراميدز ST)", "position": "ST", "is_starter": True},
+]
+
+AL_MASRY_2025_26 = [
+    {"jersey_number": 1, "name": "عصام ثروت (المصري GK)", "position": "GK", "is_starter": True},
+    {"jersey_number": 7, "name": "كريم العراقي (المصري RB)", "position": "RB", "is_starter": True},
+    {"jersey_number": 2, "name": "باهر المحمدي (المصري CB)", "position": "CB", "is_starter": True},
+    {"jersey_number": 5, "name": "خالد صبحي (المصري CB)", "position": "CB", "is_starter": True},
+    {"jersey_number": 3, "name": "محمد شكري (المصري LB)", "position": "LB", "is_starter": True},
+    {"jersey_number": 6, "name": "محمد مخلوف (المصري DM)", "position": "DM", "is_starter": True},
+    {"jersey_number": 14, "name": "محمود حمادة (المصري CM)", "position": "CM", "is_starter": True},
+    {"jersey_number": 30, "name": "عبد الرحيم دغموم (المصري CAM)", "position": "CAM", "is_starter": True},
+    {"jersey_number": 11, "name": "محمد الشامي (المصري RW)", "position": "RW", "is_starter": True},
+    {"jersey_number": 10, "name": "كريم بامبو (المصري LW)", "position": "LW", "is_starter": True},
+    {"jersey_number": 9, "name": "صلاح محسن (المصري ST)", "position": "ST", "is_starter": True},
+]
+
+EL_GAISH_2025_26 = [
+    {"jersey_number": 1, "name": "عمر رضوان (طلائع الجيش GK)", "position": "GK", "is_starter": True},
+    {"jersey_number": 3, "name": "عمرو طارق (طلائع الجيش CB)", "position": "CB", "is_starter": True},
+    {"jersey_number": 5, "name": "خالد سطوحي (طلائع الجيش CB)", "position": "CB", "is_starter": True},
+    {"jersey_number": 12, "name": "محمود البدري (طلائع الجيش LB)", "position": "LB", "is_starter": True},
+    {"jersey_number": 2, "name": "أحمد متعب (طلائع الجيش RB)", "position": "RB", "is_starter": True},
+    {"jersey_number": 6, "name": "وليد بن بلة (طلائع الجيش DM)", "position": "DM", "is_starter": True},
+    {"jersey_number": 8, "name": "حسام الدين السويسي (طلائع الجيش CM)", "position": "CM", "is_starter": True},
+    {"jersey_number": 10, "name": "محمود عبد العزيز (طلائع الجيش CAM)", "position": "CAM", "is_starter": True},
+    {"jersey_number": 14, "name": "إسلام محارب (طلائع الجيش LW)", "position": "LW", "is_starter": True},
+    {"jersey_number": 11, "name": "محمود أبو جودة (طلائع الجيش RW)", "position": "RW", "is_starter": True},
+    {"jersey_number": 9, "name": "إسماعيل أورو أجورو (طلائع الجيش ST)", "position": "ST", "is_starter": True},
+]
+
+
+def _tag_team(squad: list[dict[str, Any]], team_key: str) -> list[dict[str, Any]]:
+    return [{**p, "team": team_key} for p in squad]
+
+
 DEFAULT_MATCH_ROSTERS: dict[str, list[dict[str, Any]]] = {
-    "m2_ahly_enppi": [
-        {"jersey_number": 1, "name": "محمد الشناوي (GK)", "position": "GK", "team": "team_a", "is_starter": True},
-        {"jersey_number": 21, "name": "علي معلول (LB)", "position": "LB", "team": "team_a", "is_starter": True},
-        {"jersey_number": 24, "name": "محمد عبد المنعم (CB)", "position": "CB", "team": "team_a", "is_starter": True},
-        {"jersey_number": 6, "name": "ياسر إبراهيم (CB)", "position": "CB", "team": "team_a", "is_starter": True},
-        {"jersey_number": 30, "name": "محمد هاني (RB)", "position": "RB", "team": "team_a", "is_starter": True},
-        {"jersey_number": 13, "name": "مروان عطية (CDM)", "position": "CDM", "team": "team_a", "is_starter": True},
-        {"jersey_number": 8, "name": "أليو ديانج (CM)", "position": "CM", "team": "team_a", "is_starter": True},
-        {"jersey_number": 22, "name": "إمام عاشور (CM)", "position": "CM", "team": "team_a", "is_starter": True},
-        {"jersey_number": 19, "name": "محمد مجدي أفشة (CAM)", "position": "CAM", "team": "team_a", "is_starter": True},
-        {"jersey_number": 14, "name": "حسين الشحات (LW)", "position": "LW", "team": "team_a", "is_starter": True},
-        {"jersey_number": 10, "name": "بيرسي تاو (RW)", "position": "RW", "team": "team_a", "is_starter": True},
-        {"jersey_number": 9, "name": "وسام أبو علي (ST)", "position": "ST", "team": "team_a", "is_starter": True},
-        {"jersey_number": 29, "name": "عبد العزيز البلعوطي (إنبي GK)", "position": "GK", "team": "team_b", "is_starter": True},
-        {"jersey_number": 4, "name": "أحمد كالوشا (إنبي CB)", "position": "CB", "team": "team_b", "is_starter": True},
-        {"jersey_number": 5, "name": "أحمد صبيحة (إنبي CB)", "position": "CB", "team": "team_b", "is_starter": True},
-        {"jersey_number": 12, "name": "علي فوزي (إنبي RB)", "position": "RB", "team": "team_b", "is_starter": True},
-        {"jersey_number": 17, "name": "مودي ناصر (إنبي CM)", "position": "CM", "team": "team_b", "is_starter": True},
-        {"jersey_number": 11, "name": "رفيق كابو (إنبي FW)", "position": "ST", "team": "team_b", "is_starter": True},
-        {"jersey_number": 7, "name": "أحمد أمين أوفا (إنبي ST)", "position": "ST", "team": "team_b", "is_starter": True},
-    ],
+    "m2_ahly_enppi": _tag_team(AL_AHLY_2025_26, "team_a") + _tag_team(ENPPI_2025_26, "team_b"),
+    "custom_1795438320857": _tag_team(AL_AHLY_2025_26, "team_a") + _tag_team(EL_GAISH_2025_26, "team_b"),
+    "custom_1795439012452": _tag_team(PYRAMIDS_2025_26, "team_a") + _tag_team(AL_MASRY_2025_26, "team_b"),
     "m1_ahly_sekka": [
-        {"jersey_number": 1, "name": "مصطفى شوبير (الأهلي GK)", "position": "GK", "team": "team_b", "is_starter": True},
-        {"jersey_number": 24, "name": "محمد عبد المنعم (الأهلي CB)", "position": "CB", "team": "team_b", "is_starter": True},
-        {"jersey_number": 5, "name": "رامي ربيعة (الأهلي CB)", "position": "CB", "team": "team_b", "is_starter": True},
-        {"jersey_number": 21, "name": "علي معلول (الأهلي LB)", "position": "LB", "team": "team_b", "is_starter": True},
-        {"jersey_number": 30, "name": "محمد هاني (الأهلي RB)", "position": "RB", "team": "team_b", "is_starter": True},
-        {"jersey_number": 13, "name": "مروان عطية (الأهلي CDM)", "position": "CDM", "team": "team_b", "is_starter": True},
-        {"jersey_number": 19, "name": "محمد مجدي أفشة (الأهلي CAM)", "position": "CAM", "team": "team_b", "is_starter": True},
-        {"jersey_number": 14, "name": "حسين الشحات (الأهلي LW)", "position": "LW", "team": "team_b", "is_starter": True},
-        {"jersey_number": 7, "name": "محمود كهربا (الأهلي ST)", "position": "ST", "team": "team_b", "is_starter": True},
-        {"jersey_number": 4, "name": "مدافع السكة الحديد #4", "position": "CB", "team": "team_a", "is_starter": True},
-        {"jersey_number": 6, "name": "ارتكاز السكة الحديد #6", "position": "CDM", "team": "team_a", "is_starter": True},
-        {"jersey_number": 9, "name": "مهاجم السكة الحديد #9", "position": "ST", "team": "team_a", "is_starter": True},
-    ],
+        {"jersey_number": 1, "name": "حارس السكة الحديد (GK)", "position": "GK", "team": "team_a", "is_starter": True},
+        {"jersey_number": 4, "name": "مدافع السكة الحديد #4 (CB)", "position": "CB", "team": "team_a", "is_starter": True},
+        {"jersey_number": 5, "name": "مدافع السكة الحديد #5 (CB)", "position": "CB", "team": "team_a", "is_starter": True},
+        {"jersey_number": 6, "name": "ارتكاز السكة الحديد #6 (DM)", "position": "DM", "team": "team_a", "is_starter": True},
+        {"jersey_number": 9, "name": "مهاجم السكة الحديد #9 (ST)", "position": "ST", "team": "team_a", "is_starter": True},
+    ] + _tag_team(AL_AHLY_2025_26, "team_b"),
     "m3_enppi_mokawloon": [
         {"jersey_number": 18, "name": "محمود أبو السعود (المقاولون GK)", "position": "GK", "team": "team_a", "is_starter": True},
         {"jersey_number": 2, "name": "أمير عابد (المقاولون RB)", "position": "RB", "team": "team_a", "is_starter": True},
         {"jersey_number": 20, "name": "أحمد علاء (المقاولون CB)", "position": "CB", "team": "team_a", "is_starter": True},
         {"jersey_number": 15, "name": "جوزيف أوشايا (المقاولون LB)", "position": "LB", "team": "team_a", "is_starter": True},
-        {"jersey_number": 10, "name": "محمد سالم (المقاولون FW)", "position": "ST", "team": "team_a", "is_starter": True},
-        {"jersey_number": 29, "name": "عبد العزيز البلعوطي (إنبي GK)", "position": "GK", "team": "team_b", "is_starter": True},
-        {"jersey_number": 4, "name": "أحمد كالوشا (إنبي CB)", "position": "CB", "team": "team_b", "is_starter": True},
-        {"jersey_number": 12, "name": "علي فوزي (إنبي RB)", "position": "RB", "team": "team_b", "is_starter": True},
-        {"jersey_number": 11, "name": "رفيق كابو (إنبي FW)", "position": "ST", "team": "team_b", "is_starter": True},
-        {"jersey_number": 7, "name": "أحمد أمين أوفا (إنبي ST)", "position": "ST", "team": "team_b", "is_starter": True},
-    ],
+        {"jersey_number": 6, "name": "عمر فتحي (المقاولون DM)", "position": "DM", "team": "team_a", "is_starter": True},
+        {"jersey_number": 10, "name": "محمد سالم (المقاولون ST)", "position": "ST", "team": "team_a", "is_starter": True},
+    ] + _tag_team(ENPPI_2025_26, "team_b"),
 }
 
 
@@ -482,18 +536,33 @@ class ScoutV8Service:
                 except OSError:
                     pass
 
+    def _load_qa_lineup(self, tenant_id: str, match_id: str) -> dict[str, Any]:
+        """Load QA lineup & overrides from SQLite first, migrating legacy JSON seamlessly."""
+        row = self.sqlite_store.get_qa_lineup(tenant_id, match_id)
+        if row is not None:
+            return row
+        p = self._tenant_dir(tenant_id) / f"{match_id}_lineup.json"
+        if p.is_file():
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                self.sqlite_store.save_qa_lineup(tenant_id, match_id, data)
+                return data
+            except Exception:
+                pass
+        return {"official_roster": [], "track_overrides": {}}
+
+    def _save_qa_lineup(self, tenant_id: str, match_id: str, data: dict[str, Any]) -> None:
+        self.sqlite_store.save_qa_lineup(tenant_id, match_id, data)
+        p = self._tenant_dir(tenant_id) / f"{match_id}_lineup.json"
+        p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
     def get_match_timeline(self, match_id: str, tenant_id: str = "club_demo_egypt") -> dict[str, Any]:
         """Return enriched per-frame tracking timeline with Kalman ball arc, velocities & momentum."""
         mid = self._validate_id(match_id)
         meta = self._get_match_meta(mid)
         _, v8_df = self.get_legacy_and_v8_frames(mid)
 
-        lineup_path = self._tenant_dir(tenant_id) / f"{mid}_lineup.json"
-        saved_lineup = (
-            json.loads(lineup_path.read_text(encoding="utf-8"))
-            if lineup_path.is_file()
-            else {"official_roster": [], "track_overrides": {}}
-        )
+        saved_lineup = self._load_qa_lineup(tenant_id, mid)
         overrides = saved_lineup.get("track_overrides", {})
 
         all_fids = sorted(int(f) for f in v8_df["frame_id"].unique().tolist())
@@ -795,12 +864,7 @@ class ScoutV8Service:
         legacy_df, v8_df = self.get_legacy_and_v8_frames(match_id)
         fid, avail = self._pick_best_tactical_frame(v8_df, frame_id, match_id=match_id)
 
-        lineup_path = self._tenant_dir(tenant_id) / f"{match_id}_lineup.json"
-        saved_lineup = (
-            json.loads(lineup_path.read_text(encoding="utf-8"))
-            if lineup_path.is_file()
-            else {"official_roster": [], "track_overrides": {}}
-        )
+        saved_lineup = self._load_qa_lineup(tenant_id, match_id)
         overrides = saved_lineup.get("track_overrides", {})
 
         b_sub = legacy_df[legacy_df["frame_id"] == fid]
@@ -902,12 +966,7 @@ class ScoutV8Service:
         near_tids = set(int(x) for x in near_frame_df["track_id"].unique() if int(x) >= 0)
 
         tracks = build_match_track_metadata(v8_df)
-        lineup_path = self._tenant_dir(tenant_id) / f"{match_id}_lineup.json"
-        saved_lineup = (
-            json.loads(lineup_path.read_text(encoding="utf-8"))
-            if lineup_path.is_file()
-            else {"official_roster": [], "track_overrides": {}}
-        )
+        saved_lineup = self._load_qa_lineup(tenant_id, match_id)
         official_roster = saved_lineup.get("official_roster") or DEFAULT_MATCH_ROSTERS.get(match_id, [])
         overrides = saved_lineup.get("track_overrides", {})
         ta_ar = meta.get("team_a_name_ar", meta["team_a_name"])
@@ -1015,12 +1074,9 @@ class ScoutV8Service:
                 merged_map[(t_key, j_key)] = {**r, "team": t_key}
         roster = list(merged_map.values()) if merged_map else list(default_roster)
 
-        lineup_path = self._tenant_dir(tenant_id) / f"{match_id}_lineup.json"
-        saved_lineup = (
-            json.loads(lineup_path.read_text(encoding="utf-8"))
-            if lineup_path.is_file()
-            else {"official_roster": roster, "track_overrides": {}}
-        )
+        saved_lineup = self._load_qa_lineup(tenant_id, match_id)
+        if not saved_lineup.get("official_roster"):
+            saved_lineup["official_roster"] = roster
         overrides: dict[str, Any] = dict(saved_lineup.get("track_overrides", {}))
 
         roster_a = [r for r in roster if r.get("team", "team_a") == "team_a"]
@@ -1099,8 +1155,7 @@ class ScoutV8Service:
         self, tenant_id: str, match_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
         self._validate_id(match_id)
-        p = self._tenant_dir(tenant_id) / f"{match_id}_lineup.json"
-        p.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._save_qa_lineup(tenant_id, match_id, payload)
 
         # Sec 18.4 Active-Learning Flywheel: persist anonymized verified role/jersey corrections
         al_count = 0
@@ -1578,12 +1633,7 @@ class ScoutV8Service:
         roster = parse_scoresheet_text(raw_text)
         roster_by_num = {p.jersey_number: p for p in roster}
 
-        lineup_path = self._tenant_dir(tenant_id) / f"{mid}_lineup.json"
-        saved = (
-            json.loads(lineup_path.read_text(encoding="utf-8"))
-            if lineup_path.is_file()
-            else {"official_roster": [], "track_overrides": {}}
-        )
+        saved = self._load_qa_lineup(tenant_id, mid)
         saved["official_roster"] = [p.to_dict() for p in roster]
         overrides = saved.setdefault("track_overrides", {})
 
@@ -1602,7 +1652,7 @@ class ScoutV8Service:
                 }
                 auto_matched += 1
 
-        lineup_path.write_text(json.dumps(saved, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._save_qa_lineup(tenant_id, mid, saved)
         return {
             "status": "applied",
             "match_id": mid,
@@ -1614,16 +1664,26 @@ class ScoutV8Service:
         }
 
     def get_shortlist(self, tenant_id: str) -> list[dict[str, Any]]:
-        p = self._tenant_dir(tenant_id) / "shortlist.json"
-        if p.is_file():
-            return json.loads(p.read_text(encoding="utf-8"))
-        return []
+        rows = self.sqlite_store.list_shortlist(tenant_id)
+        if not rows:
+            # One-time seamless migration from legacy shortlist.json if present
+            p = self._tenant_dir(tenant_id) / "shortlist.json"
+            if p.is_file():
+                try:
+                    legacy = json.loads(p.read_text(encoding="utf-8"))
+                    for it in legacy:
+                        pid = str(it.get("player_id") or "").strip()
+                        if pid:
+                            self.sqlite_store.upsert_shortlist(tenant_id, pid, it)
+                    rows = self.sqlite_store.list_shortlist(tenant_id)
+                except Exception:
+                    return []
+        return rows
 
     def upsert_shortlist_item(self, tenant_id: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
         pid = str(payload.get("player_id", "")).strip()
         if not pid:
             raise ValueError("player_id is required")
-        items = self.get_shortlist(tenant_id)
         updated = {
             "player_id": pid,
             "display_name": str(payload.get("display_name", pid)),
@@ -1634,17 +1694,10 @@ class ScoutV8Service:
             "status": str(payload.get("status", "watch")),  # watch | priority | shortlist
             "note": str(payload.get("note", "")),
         }
-        items = [it for it in items if it.get("player_id") != pid]
-        items.insert(0, updated)
-        p = self._tenant_dir(tenant_id) / "shortlist.json"
-        p.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
-        return items
+        return self.sqlite_store.upsert_shortlist(tenant_id, pid, updated)
 
     def delete_shortlist_item(self, tenant_id: str, player_id: str) -> list[dict[str, Any]]:
-        items = [it for it in self.get_shortlist(tenant_id) if it.get("player_id") != player_id]
-        p = self._tenant_dir(tenant_id) / "shortlist.json"
-        p.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
-        return items
+        return self.sqlite_store.delete_shortlist(tenant_id, player_id)
 
     def get_bench_state(self, tenant_id: str, match_id: str) -> dict[str, Any]:
         mid = self._validate_id(match_id)
@@ -1652,25 +1705,44 @@ class ScoutV8Service:
         fmt = setup.get("match_format", "11v11")
         age = setup.get("age_group", "senior")
         p = self._tenant_dir(tenant_id) / f"{mid}_bench.json"
-        if p.is_file():
+        saved_state = self.sqlite_store.get_bench_state(tenant_id, mid)
+        if saved_state is None and p.is_file():
             saved_state = json.loads(p.read_text(encoding="utf-8"))
-            if saved_state.get("match_format") == fmt and saved_state.get("age_group") == age:
-                return saved_state
+            self.sqlite_store.save_bench_state(tenant_id, mid, saved_state)
+        if saved_state and saved_state.get("match_format") == fmt and saved_state.get("age_group") == age:
+            return saved_state
 
         meta = self._get_match_meta(mid)
         cfg = MatchSetupConfig.from_format(fmt, age, match_id=mid)
         n_starters = cfg.players_per_side
         mgr = BenchSubstitutionManager(cfg)
-        mgr.set_starting_lineup(
-            "team_a",
-            [f"{meta['team_a_name']} #{i}" for i in range(1, n_starters + 1)],
-            [f"{meta['team_a_name']} Sub {i}" for i in range(n_starters + 1, n_starters + 6)],
-        )
-        mgr.set_starting_lineup(
-            "team_b",
-            [f"{meta['team_b_name']} #{i}" for i in range(1, n_starters + 1)],
-            [f"{meta['team_b_name']} Sub {i}" for i in range(n_starters + 1, n_starters + 6)],
-        )
+
+        # Prefer verified match roster names (2025/2026 squads or uploaded scoresheet) over generic placeholders
+        saved_lineup = self._load_qa_lineup(tenant_id, mid)
+        roster_all = saved_lineup.get("official_roster") or DEFAULT_MATCH_ROSTERS.get(mid, [])
+        def _team_lists(team_key: str, fallback_label: str) -> tuple[list[str], list[str]]:
+            team_entries = [r for r in roster_all if r.get("team", "team_a") == team_key]
+            starters_r = [
+                f"#{r.get('jersey_number')} {r.get('name')} ({r.get('position', 'CM')})"
+                for r in team_entries if r.get("is_starter", True)
+            ]
+            subs_r = [
+                f"#{r.get('jersey_number')} {r.get('name')} ({r.get('position', 'CM')})"
+                for r in team_entries if not r.get("is_starter", True)
+            ]
+            # Pad or slice cleanly to match_format starter count
+            starters = starters_r[:n_starters]
+            while len(starters) < n_starters:
+                starters.append(f"{fallback_label} #{len(starters) + 1}")
+            bench = subs_r + starters_r[n_starters:]
+            while len(bench) < 5:
+                bench.append(f"{fallback_label} Sub {len(bench) + 1}")
+            return starters, bench[:7]
+
+        ta_start, ta_bench = _team_lists("team_a", meta.get("team_a_name_ar", meta["team_a_name"]))
+        tb_start, tb_bench = _team_lists("team_b", meta.get("team_b_name_ar", meta["team_b_name"]))
+        mgr.set_starting_lineup("team_a", ta_start, ta_bench)
+        mgr.set_starting_lineup("team_b", tb_start, tb_bench)
         state = {
             "match_id": mid,
             "match_format": cfg.match_format,
@@ -1684,6 +1756,7 @@ class ScoutV8Service:
             "bench": {k: sorted(v) for k, v in mgr.bench.items()},
             "events": [],
         }
+        self.sqlite_store.save_bench_state(tenant_id, mid, state)
         p.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
         return state
 
@@ -1692,6 +1765,7 @@ class ScoutV8Service:
         p = self._tenant_dir(tenant_id) / f"{mid}_bench.json"
         action = str(payload.get("action", "substitute"))
         if action == "reset":
+            self.sqlite_store.delete_bench_state(tenant_id, mid)
             if p.is_file():
                 p.unlink()
             return self.get_bench_state(tenant_id, mid)
@@ -1745,6 +1819,7 @@ class ScoutV8Service:
             "bench": {k: sorted(v) for k, v in mgr.bench.items()},
             "events": events,
         }
+        self.sqlite_store.save_bench_state(tenant_id, mid, new_state)
         p.write_text(json.dumps(new_state, ensure_ascii=False, indent=2), encoding="utf-8")
         return new_state
 
@@ -2077,6 +2152,73 @@ class ScoutV8Service:
             **dir_info,
         }
 
+    def get_match_window_df(
+        self,
+        match_id: str,
+        start_s: Optional[float] = None,
+        end_s: Optional[float] = None,
+    ) -> tuple[pd.DataFrame, bool]:
+        """Windowed Parquet reader using PyArrow predicate pushdown when slicing a time range."""
+        mid = self._validate_id(match_id)
+        meta = self._get_match_meta(mid)
+        fps = float(meta.get("fps") or 25.0)
+        custom_pq = Path(meta["v8_parquet_path"]) if meta.get("v8_parquet_path") else (self.data_paths.outputs / "custom_matches" / mid / "v8.parquet")
+        std_pq = self.data_paths.outputs / "v8_4_parquet" / f"{mid}_v8.parquet"
+        legacy_pq = self.data_paths.outputs / "v8_runs" / f"{mid}_v8.parquet"
+        pq_path = custom_pq if custom_pq.is_file() else (std_pq if std_pq.is_file() else (legacy_pq if legacy_pq.is_file() else None))
+
+        if pq_path is not None and (start_s is not None or end_s is not None):
+            try:
+                import pyarrow.parquet as pq
+
+                filters = []
+                if start_s is not None:
+                    filters.append(("frame_id", ">=", max(0, int(start_s * fps))))
+                if end_s is not None:
+                    filters.append(("frame_id", "<=", max(1, int(end_s * fps))))
+                tbl = pq.read_table(str(pq_path), filters=filters)
+                return tbl.to_pandas(), True
+            except Exception:
+                pass
+
+        _, full_df = self.get_legacy_and_v8_frames(mid)
+        if start_s is not None and "time_s" in full_df.columns:
+            full_df = full_df[full_df["time_s"] >= float(start_s)]
+        if end_s is not None and "time_s" in full_df.columns:
+            full_df = full_df[full_df["time_s"] <= float(end_s)]
+        return full_df, False
+
+    def get_advanced_match_metrics(
+        self,
+        tenant_id: str,
+        match_id: str,
+        start_s: Optional[float] = None,
+        end_s: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Compute free open-formula OBV, xPass, CxP & Defensive Responsibility with windowed Parquet pushdown."""
+        from packages.tactics_engine.event_models import analyze_match_advanced_events
+
+        mid = self._validate_id(match_id)
+        meta = self._get_match_meta(mid)
+        df_win, pushdown_used = self.get_match_window_df(mid, start_s=start_s, end_s=end_s)
+        qa = self.get_qa_sheet(tenant_id, mid)
+        vnames = {int(t["track_id"]): str(t["verified_name"]) for t in qa["tracks"] if t.get("verified_name")}
+        if vnames and not df_win.empty:
+            df_win = df_win.copy()
+            df_win["verified_name"] = df_win["track_id"].map(vnames)
+
+        dir_info = self._infer_attack_direction(df_win)
+        res = analyze_match_advanced_events(
+            df_win,
+            team_a_name=meta.get("team_a_name_ar", meta["team_a_name"]),
+            team_b_name=meta.get("team_b_name_ar", meta["team_b_name"]),
+            team_a_attacks_right=bool(dir_info.get("team_a_attacks_right", True)),
+        )
+        res["match_id"] = mid
+        res["windowed_parquet_pushdown"] = pushdown_used
+        res["rows_scanned"] = int(len(df_win))
+        return res
+
     def ingest_match_from_url(
         self,
         url: str,
@@ -2085,25 +2227,56 @@ class ScoutV8Service:
         match_format: str = "11v11",
         max_duration_s: int = 45,
         tenant_id: str = "club_demo_egypt",
+        official_roster_text: str = "",
     ) -> dict[str, Any]:
-        """Hybrid Ingestion Hub (Sec 9.5): download YouTube/Drive/Broadcast URL via yt-dlp and ingest."""
+        """Hybrid Ingestion Hub (Sec 9.5 + V9.5): YouTube/Drive via yt-dlp OR Live Stream (RTSP / .m3u8) via local ffmpeg."""
+        import subprocess
+        from services.cv_worker.lazy_engines.video_export import resolve_ffmpeg_binary
+
         dl_dir = self.data_paths.cache / "url_downloads"
         dl_dir.mkdir(parents=True, exist_ok=True)
         tmp_mp4 = dl_dir / f"import_{int(time.time() * 1000)}.mp4"
-        download_video_from_url(url, tmp_mp4, max_duration_s=max_duration_s)
+
+        clean_url = url.strip()
+        low_url = clean_url.lower()
+        is_live_stream = low_url.startswith(("rtsp://", "rtmp://")) or ".m3u8" in low_url
+        if is_live_stream:
+            exe = resolve_ffmpeg_binary()
+            if not exe:
+                raise RuntimeError("ffmpeg binary required for RTSP/m3u8 live stream capture")
+            dur = max(5, min(60, int(max_duration_s)))
+            subprocess.run(
+                [
+                    exe, "-y", "-i", clean_url, "-t", str(dur),
+                    "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-an",
+                    str(tmp_mp4),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=max(30, dur + 25),
+            )
+        else:
+            download_video_from_url(clean_url, tmp_mp4, max_duration_s=max_duration_s)
+
         raw_bytes = tmp_mp4.read_bytes()
         try:
             tmp_mp4.unlink()
         except OSError:
             pass
-        return self.ingest_custom_match(
+        res = self.ingest_custom_match(
             video_bytes=raw_bytes,
-            filename=f"url_import_{int(time.time())}.mp4",
+            filename=f"{'live_stream' if is_live_stream else 'url_import'}_{int(time.time())}.mp4",
             team_a_name=team_a_name,
             team_b_name=team_b_name,
             match_format=match_format,
             tenant_id=tenant_id,
         )
+        if official_roster_text.strip() and res.get("match_id"):
+            try:
+                res["roster_applied"] = self.apply_scoresheet_to_match(tenant_id, res["match_id"], official_roster_text)
+            except Exception:
+                pass
+        return res
 
     def get_phase0_evaluation(self, match_id: str) -> dict[str, Any]:
         """Run honest Phase 0 benchmark evaluation (cached in memory; never compares legacy to its own unverified prelabels!)."""
@@ -2384,24 +2557,25 @@ class ScoutV8Service:
             ordered_tr = gk_tr + out_tr
 
             out_r: list[dict[str, Any]] = []
-            for idx in range(11):
+            for idx in range(max(11, len(ordered_ro))):
                 ro = ordered_ro[idx] if idx < len(ordered_ro) else None
                 tr = ordered_tr[idx] if idx < len(ordered_tr) else None
-                # Prefer official GK at slot 0 over an outfield track
                 if idx == 0 and ro is not None:
                     out_r.append(
                         {
                             "track_id": gk_tr[0]["track_id"] if gk_tr else None,
                             "jersey_number": ro.get("jersey_number", 1),
                             "verified_name": ro.get("name"),
+                            "position": ro.get("position", "GK"),
                         }
                     )
-                else:
+                elif ro is not None or tr is not None:
                     out_r.append(
                         {
                             "track_id": tr["track_id"] if tr else None,
                             "jersey_number": (ro.get("jersey_number") if ro else None) or (tr.get("jersey_number") if tr else (idx + 1)),
                             "verified_name": (ro.get("name") if ro else None) or (tr.get("verified_name") if tr else None),
+                            "position": (ro.get("position") if ro else None) or ("GK" if tr and tr.get("role") == "goalkeeper" else "CM"),
                         }
                     )
             return out_r
@@ -2637,17 +2811,31 @@ class ScoutV8Service:
             opponent_tactical_mode=final_style_b,
         )
 
-        # Apply direct custom AI coordinates for ALL 11 players of Team A (supports ANY crazy/innovative geometry!)
+        # Apply direct custom AI coordinates for ALL 11 players using POSITION-AWARE squad matching (zero LB-at-CB!)
+        from packages.tactics_engine.moment_analyzer import _assign_roster_by_position
+
         def _merge_ai_nodes(
             ai_list: Any, base_nodes: list[dict[str, Any]], team_key: str
         ) -> list[dict[str, Any]]:
             if not isinstance(ai_list, list) or len(ai_list) < 6:
                 return base_nodes
+            valid_raw = [nd for nd in ai_list[:11] if isinstance(nd, dict)]
+            ai_slots = [str(nd.get("slot") or f"P{i+1}")[:8] for i, nd in enumerate(valid_raw)]
+            roster_pool = [
+                {
+                    "verified_name": bn.get("player_label"),
+                    "jersey_number": bn.get("jersey_number"),
+                    "track_id": bn.get("track_id"),
+                    "position": bn.get("slot"),
+                }
+                for bn in base_nodes
+            ]
+            pos_matched = _assign_roster_by_position(ai_slots, roster_pool)
+
             merged: list[dict[str, Any]] = []
-            for idx, raw_nd in enumerate(ai_list[:11]):
-                if not isinstance(raw_nd, dict):
-                    continue
+            for idx, raw_nd in enumerate(valid_raw):
                 base_nd = base_nodes[idx] if idx < len(base_nodes) else {}
+                matched = pos_matched[idx] if idx < len(pos_matched) and pos_matched[idx] else {}
                 xm = float(np.clip(float(raw_nd.get("x_m", base_nd.get("x_m", 52.5))), 3.0, 102.0))
                 ym = float(np.clip(float(raw_nd.get("y_m", base_nd.get("y_m", 34.0))), 4.0, 64.0))
                 mx = float(np.clip(float(raw_nd.get("move_to_x_m", xm)), 3.0, 102.0))
@@ -2660,11 +2848,11 @@ class ScoutV8Service:
                 merged.append(
                     {
                         "team": team_key,
-                        "slot": str(raw_nd.get("slot") or base_nd.get("slot") or f"P{idx+1}")[:8],
+                        "slot": ai_slots[idx],
                         "role_ar": str(raw_nd.get("role_ar") or base_nd.get("role_ar") or "دور تكتيكي حر"),
-                        "player_label": str(base_nd.get("player_label") or raw_nd.get("slot") or f"لاعب {idx+1}"),
-                        "track_id": base_nd.get("track_id"),
-                        "jersey_number": base_nd.get("jersey_number") or (idx + 1),
+                        "player_label": str(matched.get("verified_name") or base_nd.get("player_label") or ai_slots[idx]),
+                        "track_id": matched.get("track_id") if matched else base_nd.get("track_id"),
+                        "jersey_number": matched.get("jersey_number") or base_nd.get("jersey_number") or (idx + 1),
                         "x_m": round(xm, 1),
                         "y_m": round(ym, 1),
                         "move_to_x_m": round(mx, 1),
@@ -2672,7 +2860,6 @@ class ScoutV8Service:
                         "duty_ar": str(raw_nd.get("duty_ar") or base_nd.get("duty_ar") or "واجب تكتيكي مبتكر"),
                     }
                 )
-            # Always guarantee a full 11-player squad per team (pad any omitted slots from base_nodes)
             while len(merged) < len(base_nodes):
                 merged.append(base_nodes[len(merged)])
             return merged if len(merged) >= 6 else base_nodes

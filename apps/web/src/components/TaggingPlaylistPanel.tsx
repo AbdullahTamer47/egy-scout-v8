@@ -35,6 +35,7 @@ interface Props {
   role: UserRole;
   currentTimeSec: number;
   selectedPlayerLabel?: string;
+  boardSlidePng?: string | null;
   onJumpToTag: (startSec: number, endSec: number) => void;
   onStartPresentMode: (tags: ClipTagItem[]) => void;
   quickTagSignal?: number;
@@ -46,6 +47,7 @@ export default function TaggingPlaylistPanel({
   role,
   currentTimeSec,
   selectedPlayerLabel = "",
+  boardSlidePng = null,
   onJumpToTag,
   onStartPresentMode,
   quickTagSignal = 0,
@@ -60,10 +62,13 @@ export default function TaggingPlaylistPanel({
   const [filterPlaylist, setFilterPlaylist] = useState<string>("ALL");
   const [note, setNote] = useState<string>("");
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [exportingMerged, setExportingMerged] = useState<boolean>(false);
+  const [muxingVoice, setMuxingVoice] = useState<boolean>(false);
 
   // Coach Voiceover Recorder
   const [recording, setRecording] = useState<boolean>(false);
   const [voiceUrl, setVoiceUrl] = useState<string | null>(null);
+  const [voiceBlob, setVoiceBlob] = useState<Blob | null>(null);
   const mediaRecRef = useRef<MediaRecorder | null>(null);
   const voiceChunksRef = useRef<Blob[]>([]);
   const xmlInputRef = useRef<HTMLInputElement | null>(null);
@@ -177,6 +182,7 @@ export default function TaggingPlaylistPanel({
       };
       rec.onstop = () => {
         const blob = new Blob(voiceChunksRef.current, { type: "audio/webm" });
+        setVoiceBlob(blob);
         const url = URL.createObjectURL(blob);
         setVoiceUrl(url);
         stream.getTracks().forEach((tr) => tr.stop());
@@ -186,6 +192,72 @@ export default function TaggingPlaylistPanel({
       setRecording(true);
     } catch {
       setStatusMsg(isAr ? "تعذّر الوصول إلى المايكروفون في المتصفح." : "Microphone permission unavailable.");
+    }
+  };
+
+  const handleMuxVoiceoverMp4 = async () => {
+    if (!voiceBlob || muxingVoice) return;
+    setMuxingVoice(true);
+    try {
+      const fd = new FormData();
+      fd.append("start_s", String(Math.max(0, currentTimeSec - preRoll)));
+      fd.append("end_s", String(currentTimeSec + postRoll));
+      fd.append("auto_face_blur", "false");
+      fd.append("voiceover", voiceBlob, "coach_voiceover.webm");
+      const res = await fetch(`${API_BASE}/api/matches/${encodeURIComponent(matchId)}/export-clip-with-audio`, {
+        method: "POST",
+        headers: { "X-Tenant-Id": "club_demo_egypt", "X-User-Role": role },
+        body: fd,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const outBlob = await res.blob();
+      const url = URL.createObjectURL(outBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `egy-scout-voiced-${matchId}.mp4`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatusMsg(isAr ? "✅ تم دمج التعليق الصوتي مع رسوم البث في ملف MP4 واحد!" : "✅ Muxed voiceover into MP4!");
+    } catch (e) {
+      setStatusMsg(String(e));
+    } finally {
+      setMuxingVoice(false);
+    }
+  };
+
+  const handleExportMergedPlaylistMp4 = async () => {
+    if (visibleTags.length === 0 || exportingMerged) return;
+    setExportingMerged(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/matches/${encodeURIComponent(matchId)}/tags/export-playlist-mp4`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Tenant-Id": "club_demo_egypt",
+          "X-User-Role": role,
+        },
+        body: JSON.stringify({
+          playlist_name: filterPlaylist,
+          board_slide_png_data_url: boardSlidePng || "",
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const outBlob = await res.blob();
+      const url = URL.createObjectURL(outBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `egy-scout-lecture-${matchId}.mp4`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatusMsg(
+        isAr
+          ? `✅ تم تصدير محاضرة غرفة الملابس كاملة (${visibleTags.length} لقطات${boardSlidePng ? " + شريحة المرسم" : ""}) كفيديو MP4 واحد!`
+          : "✅ Merged lecture MP4 downloaded!"
+      );
+    } catch (e) {
+      setStatusMsg(String(e));
+    } finally {
+      setExportingMerged(false);
     }
   };
 
@@ -218,15 +290,43 @@ export default function TaggingPlaylistPanel({
           </button>
 
           {voiceUrl && (
-            <a
-              href={voiceUrl}
-              download={`egy-scout-voiceover-${matchId}.webm`}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>{isAr ? "تحميل الصوت" : "Save Audio"}</span>
-            </a>
+            <>
+              <button
+                type="button"
+                disabled={muxingVoice}
+                onClick={handleMuxVoiceoverMp4}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/40 text-rose-200 font-bold"
+              >
+                <Film className="w-3.5 h-3.5" />
+                <span>{muxingVoice ? (isAr ? "جاري الدمج..." : "Muxing...") : isAr ? "🎬 دمج الصوت في MP4" : "🎬 Mux MP4"}</span>
+              </button>
+              <a
+                href={voiceUrl}
+                download={`egy-scout-voiceover-${matchId}.webm`}
+                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-bold"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>{isAr ? "الصوت فقط" : "Audio"}</span>
+              </a>
+            </>
           )}
+
+          <button
+            type="button"
+            disabled={visibleTags.length === 0 || exportingMerged}
+            onClick={handleExportMergedPlaylistMp4}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 disabled:opacity-40 border border-indigo-400/40 text-indigo-200 font-bold"
+            title={isAr ? "تصدير كل لقطات القائمة + شريحة المرسم في فيديو محاضرة MP4 واحد" : "Export Merged Lecture MP4"}
+          >
+            <Film className="w-3.5 h-3.5" />
+            <span>
+              {exportingMerged
+                ? isAr ? "جاري تجميع المحاضرة..." : "Merging..."
+                : isAr
+                ? `🎬 تصدير المحاضرة MP4${boardSlidePng ? " (+شريحة)" : ""}`
+                : "🎬 Export Lecture MP4"}
+            </span>
+          </button>
 
           <a
             href={`${API_BASE}/api/matches/${encodeURIComponent(matchId)}/tags/export-xml`}

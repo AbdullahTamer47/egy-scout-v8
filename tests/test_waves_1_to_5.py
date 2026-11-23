@@ -331,6 +331,140 @@ class TestWaves1To5(unittest.TestCase):
         self.assertEqual(portal.status_code, 200)
         self.assertIn("إمام عاشور", portal.text)
 
+    def test_v9_5_free_pro_studio_and_data_integrity(self):
+        """Verify V9.5 100%-free features & strict football data integrity invariants."""
+        import numpy as np
+        import pandas as pd
+        from fastapi.testclient import TestClient
+        from apps.api.main import app
+        from packages.scouting_core.fair_engine import import_external_scouting_csv
+        from packages.tactics_engine.moment_analyzer import build_formation_blueprint
+        from services.cv_worker.stages.one_euro import smooth_tracks_one_euro
+
+        # 1. Casiez 2012 One-Euro Filter reduces jitter while preserving signal
+        rng = np.random.default_rng(42)
+        n = 40
+        true_x = np.linspace(20.0, 28.0, n)  # realistic 5 m/s (18 km/h) run over 1.6s
+        noisy_x = true_x + rng.normal(0.0, 0.45, n)
+        df_jitter = pd.DataFrame({
+            "frame_id": np.arange(n),
+            "time_s": np.arange(n) / 25.0,
+            "track_id": [101] * n,
+            "role": ["player"] * n,
+            "team": ["team_a"] * n,
+            "x_m": noisy_x,
+            "y_m": np.full(n, 34.0) + rng.normal(0.0, 0.45, n),
+            "x1": noisy_x * 10,
+            "y1": np.full(n, 200.0),
+            "x2": noisy_x * 10 + 30,
+            "y2": np.full(n, 280.0),
+        })
+        df_smooth = smooth_tracks_one_euro(df_jitter, fps=25.0)
+        raw_err = float(np.std(df_jitter["x_m"].to_numpy() - true_x))
+        smooth_err = float(np.std(df_smooth["x_m"].to_numpy() - true_x))
+        self.assertLess(smooth_err, raw_err)
+        self.assertLess(float(np.std(np.diff(df_smooth["x_m"]))), float(np.std(np.diff(df_jitter["x_m"]))))
+
+        # 2. Position-Aware Roster Mapping & Verified 2025/2026 Squads (NO LB-at-CB, NO CM-at-ST, NO stale names)
+        client = TestClient(app)
+        bp_resp = client.get("/api/matches/m2_ahly_enppi/formation-blueprint?formation_a=4-2-3-1&formation_b=4-4-2")
+        self.assertEqual(bp_resp.status_code, 200)
+        bp = bp_resp.json()
+        nodes_a = {n["slot"]: n["player_label"] for n in bp["nodes"]}
+        nodes_b = {n["slot"]: n["player_label"] for n in bp["opponent_nodes"]}
+        self.assertIn("الشناوي", nodes_a["GK"])
+        self.assertIn("سمير", nodes_b["GK"])
+        self.assertIn("شريف", nodes_a["ST"])
+        # Left-back must never be placed in CB slot
+        for cb_slot in ("LCB", "RCB", "CB1", "CB2"):
+            if cb_slot in nodes_a:
+                self.assertNotIn("عطية الله", nodes_a[cb_slot])
+                self.assertNotIn("هاني", nodes_a[cb_slot])
+        # Outdated 2023/2024 names must not leak into 2025/2026 default squad
+        all_names_blob = " ".join(list(nodes_a.values()) + list(nodes_b.values()))
+        for stale in ("علي معلول", "بيرسي تاو", "أليو ديانج", "كهربا"):
+            self.assertNotIn(stale, all_names_blob)
+
+        # 3. Head-to-Head Scouting Isolation (NO Morocco WC 2022 players unless explicit opt-in)
+        h2h_default = client.get("/api/scouting/compare?match_id=m2_ahly_enppi")
+        self.assertEqual(h2h_default.status_code, 200)
+        default_players = h2h_default.json()["players"]
+        self.assertGreaterEqual(len(default_players), 2)
+        for p in default_players:
+            self.assertNotIn("Amrabat", p["display_name"])
+            self.assertNotIn("Hakimi", p["display_name"])
+            self.assertNotEqual(p.get("source_type"), "statsbomb_external")
+
+        # 4. Auto-Detecting Catapult GPS & Wyscout CSV Importer
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cat_path = Path(tmpdir) / "catapult.csv"
+            cat_path.write_text(
+                "Player Name,Position Name,Total Distance (m),Max Velocity (km/h),High Speed Running (m),Accelerations\n"
+                "Emam Ashour,CM,11240,32.6,820,42\n"
+                "Mohamed Sherif,ST,9850,33.4,910,36\n",
+                encoding="utf-8",
+            )
+            cat_res = import_external_scouting_csv(cat_path)
+            self.assertEqual(len(cat_res), 2)
+            self.assertEqual(cat_res[0].data_source, "Catapult / STATSports GPS")
+            self.assertGreater(cat_res[0].max_speed_kmh, 30.0)
+
+            wy_path = Path(tmpdir) / "wyscout.csv"
+            wy_path.write_text(
+                "Player,Pos,xG,Accurate passes, %,Minutes played,Progressive passes per 90\n"
+                "Marwan Attia,DM,0.12,89.4,90,7.5\n",
+                encoding="utf-8",
+            )
+            wy_res = import_external_scouting_csv(wy_path)
+            self.assertEqual(len(wy_res), 1)
+            self.assertEqual(wy_res[0].data_source, "Wyscout Export")
+
+        # 5. Open-Formula OBV / xPass / CxP / Defensive Responsibility + Windowed Parquet Predicate Pushdown
+        adv_resp = client.get("/api/matches/m2_ahly_enppi/advanced-metrics?start_s=50&end_s=58")
+        self.assertEqual(adv_resp.status_code, 200)
+        adv = adv_resp.json()
+        self.assertTrue(adv["windowed_parquet_pushdown"])
+        self.assertIn("team_a", adv["team_summary"])
+        self.assertIn("net_obv", adv["team_summary"]["team_a"])
+        self.assertIn("expected_pass_pct", adv["team_summary"]["team_a"])
+        self.assertIn("defensive_responsibility_alerts", adv)
+        self.assertIn("top_obv_players", adv)
+
+        # 6. Role-Aware Club Report (admin vs player audience redaction)
+        rep_admin = client.get("/api/matches/m2_ahly_enppi/export-report?audience=admin")
+        rep_player = client.get("/api/matches/m2_ahly_enppi/export-report?audience=player")
+        self.assertEqual(rep_admin.status_code, 200)
+        self.assertEqual(rep_player.status_code, 200)
+        self.assertIn("نسخة اللاعب", rep_player.text)
+        self.assertIn("المخاطرة الداخلية", rep_admin.text)
+        self.assertNotIn("المخاطرة الداخلية", rep_player.text)
+
+        # 7. Full SQLite Bench Persistence with Verified 2025/2026 Player Names
+        bench_resp = client.get("/api/matches/m2_ahly_enppi/bench-state")
+        self.assertEqual(bench_resp.status_code, 200)
+        on_pitch_a = " ".join(bench_resp.json()["on_pitch"]["team_a"])
+        self.assertIn("الشناوي", on_pitch_a)
+
+        # 8. Free Local ffmpeg Merged Locker-Room Lecture MP4 Export
+        tag_resp = client.post(
+            "/api/matches/m2_ahly_enppi/tags",
+            json={"category": "transition", "label_ar": "تحول سريع اختباري", "label_en": "Test Transition", "time_s": 53.0, "pre_roll_s": 1.5, "post_roll_s": 1.5},
+        )
+        self.assertEqual(tag_resp.status_code, 200)
+        tmp_tag_id = tag_resp.json()["tag"]["id"]
+        try:
+            mp4_resp = client.post(
+                "/api/matches/m2_ahly_enppi/tags/export-playlist-mp4",
+                json={"tag_ids": [tmp_tag_id]},
+            )
+            self.assertEqual(mp4_resp.status_code, 200)
+            self.assertEqual(mp4_resp.headers.get("content-type"), "video/mp4")
+            self.assertGreater(len(mp4_resp.content), 5000)
+        finally:
+            client.delete(f"/api/matches/m2_ahly_enppi/tags/{tmp_tag_id}")
+
 
 if __name__ == "__main__":
     unittest.main()

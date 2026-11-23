@@ -1038,13 +1038,14 @@ export default function FairScoutingScreen({ lang, matchId, role, onJumpToClip }
         </div>
       )}
 
-      {/* V9.0 Head-to-Head Comparison, Multi-Match Progression, Opponent Scouting & Mobile Player Portal */}
+      {/* V9.0 Head-to-Head Comparison (Defaults strictly to THIS match's real players — external WC benchmark opt-in only!) */}
       {data && (
         <HeadToHeadComparisonPanel
           lang={lang}
           matchId={matchId}
           role={role}
-          pool={[...(data.benchmark_players || []), ...(data.video_tracks || [])]}
+          matchPlayers={data.video_tracks || []}
+          benchmarkPlayers={data.benchmark_players || []}
           onJumpToClip={onJumpToClip}
         />
       )}

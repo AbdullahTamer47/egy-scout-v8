@@ -161,12 +161,14 @@ def api_innovation_simulate(
 def api_export_club_report(
     match_id: str,
     club_name: str = "EGY-SCOUT Club Dossier",
+    audience: str = "admin",
     ctx: TenantContext = Depends(get_tenant_context),
 ) -> HTMLResponse:
-    """Generate a printable White-Label HTML club dossier (ready for Save-as-PDF)."""
+    """Generate a printable Role-Aware White-Label HTML club dossier (audience='admin' vs 'player')."""
     ctx.require("read:reports")
     from apps.api.main import service
 
+    is_player_view = (audience.lower().strip() == "player") or (ctx.role == "player")
     ba = service.get_before_after(match_id, frame_id=1250)
     sc = service.get_scouting_data(ctx.tenant_id, match_id=match_id)
     pos = service.get_positioning_analysis(match_id, frame_id=1250)
@@ -174,19 +176,17 @@ def api_export_club_report(
 
     safe_club = html_lib.escape(club_name)
     safe_match = html_lib.escape(f"{ba['team_a_name']} vs {ba['team_b_name']} ({match_id})")
+    aud_badge = "نسخة اللاعب المبسّطة (ملاحظات الإدارة والمخاطر الداخلية مخفية تلقائياً)" if is_player_view else "نسخة الإدارة والجهاز الفني الكاملة (Full Technical & Risk Dossier)"
 
     brief_html = "".join(
         f"<div class='card'><h4>{html_lib.escape(b['title_ar'])}</h4><p>{html_lib.escape(b['detail_ar'])}</p></div>"
         for b in mb.get("coach_brief", [])
     )
     def _opt_li(o: dict[str, Any]) -> str:
-        return (
-            f"<li><b>{html_lib.escape(o['title_ar'])}:</b> "
-            f"{html_lib.escape(o['action_ar'])} "
-            f"<em>(المخاطرة: {html_lib.escape(o['risk_ar'])})</em></li>"
-        )
+        risk_part = "" if is_player_view else f" <em>(المخاطرة الداخلية: {html_lib.escape(o['risk_ar'])})</em>"
+        return f"<li><b>{html_lib.escape(o['title_ar'])}:</b> {html_lib.escape(o['action_ar'])}{risk_part}</li>"
 
-    diag_html = "".join(
+    diag_html = "" if is_player_view else "".join(
         f"<div class='card'><h4>{html_lib.escape(d['title_ar'])}</h4><p>{html_lib.escape(d['evidence_ar'])}</p>"
         f"<ul>{''.join(_opt_li(o) for o in d['options'])}</ul></div>"
         for d in pos.get("diagnoses", [])
@@ -228,7 +228,7 @@ def api_export_club_report(
     </div>
     <button class="btn no-print" onclick="window.print()">طباعة / حفظ PDF</button>
   </div>
-  <div class="badge">شارة الشفافية (Sec 17.4): قياسات فيديو بث تكتيكي مقاسة داخل الكادر فقط (In-Frame Metrics • عزل الحكام + معايرة PnLCalib/4-Point) — صفر تقييمات مخترعة من 10 للمقاطع القصيرة.</div>
+  <div class="badge">🛡️ {html_lib.escape(aud_badge)} — قياسات فيديو بث تكتيكي مقاسة داخل الكادر فقط (In-Frame Metrics • عزل الحكام + تنعيم One-Euro).</div>
   <div class="kpis">
     <div class="kpi"><div>طاقم التحكيم المعزول</div><div class="v">{ba['after']['unique_official_tracks']}</div></div>
     <div class="kpi"><div>ثبات الدور بالمسار</div><div class="v">{ba['after']['track_role_stability_pct']}%</div></div>
@@ -267,6 +267,7 @@ async def api_ingest_custom_match(
     team_a_name: str = Form(default="Team A"),
     team_b_name: str = Form(default="Team B"),
     match_format: str = Form(default="11v11"),
+    official_roster_text: str = Form(default=""),
     ctx: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
     ctx.require("run:live_proof")
@@ -274,7 +275,7 @@ async def api_ingest_custom_match(
 
     try:
         raw = await file.read()
-        return service.ingest_custom_match(
+        res = service.ingest_custom_match(
             video_bytes=raw,
             filename=file.filename or "custom_clip.mp4",
             team_a_name=team_a_name,
@@ -282,6 +283,12 @@ async def api_ingest_custom_match(
             match_format=match_format,
             tenant_id=ctx.tenant_id,
         )
+        if official_roster_text.strip() and res.get("match_id"):
+            try:
+                res["roster_applied"] = service.apply_scoresheet_to_match(ctx.tenant_id, res["match_id"], official_roster_text)
+            except Exception:
+                pass
+        return res
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -321,6 +328,7 @@ def api_ingest_match_from_url(
             match_format=str(payload.get("match_format", "11v11")),
             max_duration_s=int(payload.get("max_duration_s", 45)),
             tenant_id=ctx.tenant_id,
+            official_roster_text=str(payload.get("official_roster_text", "")),
         )
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))

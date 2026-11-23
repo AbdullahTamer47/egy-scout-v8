@@ -282,6 +282,9 @@ def refine_match_locally(
 
     vpath = resolve_project_path(video_path)
     yolo = get_football_yolo()
+    from services.cv_worker.stages.one_euro import smooth_tracks_one_euro
+    df = smooth_tracks_one_euro(df, min_cutoff=1.2, beta=0.04, max_speed_ms=10.0)
+
     ocr_reader = get_local_easyocr() if (run_ocr or run_scoreboard_ocr) else None
 
     yolo_role_votes: dict[int, dict[str, float]] = defaultdict(lambda: defaultdict(float))
@@ -772,6 +775,10 @@ def ingest_clip_with_football_yolo(
         if team_rgbs["team_b"]
         else "#38BDF8",
     }
+
+    # Apply exact Casiez 2012 One-Euro physical smoothing before saving Parquet (zero speed spikes/jitter!)
+    from services.cv_worker.stages.one_euro import smooth_tracks_one_euro
+    v8_df = smooth_tracks_one_euro(v8_df, min_cutoff=1.2, beta=0.04, max_speed_ms=10.0)
 
     ocr_reader = get_local_easyocr()
     scoreboard_info = scan_video_scoreboard_goals(video_path, ocr_reader=ocr_reader, sample_stride_s=2.0, max_samples=15)

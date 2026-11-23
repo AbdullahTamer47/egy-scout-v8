@@ -9,12 +9,15 @@
 """
 from __future__ import annotations
 
+import base64
 import html as html_lib
+import time
 import xml.etree.ElementTree as ET
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse
 
 from apps.api.rbac import TenantContext, get_tenant_context
 from packages.tactics_engine.plan_validator import validate_tactical_plan
@@ -203,14 +206,20 @@ def api_import_sportscode_xml(
 def api_scouting_compare(
     match_id: str = "m2_ahly_enppi",
     player_ids: str = "",
+    include_external_benchmark: bool = False,
     ctx: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
-    """Compare 2 to 4 players Head-to-Head with position-fair radar & evidence clips."""
+    """Compare 2 to 4 REAL players of the active match Head-to-Head (zero unrelated WC players unless opted in!)."""
     ctx.require("read:scouting")
     from apps.api.main import service
 
     sc = service.get_scouting_data(ctx.tenant_id, match_id=match_id)
-    pool = sc.get("benchmark_players", []) + sc.get("video_tracks", [])
+    # Default STRICTLY to the active match's REAL players (video_tracks) — never show Morocco WC 2022 inside Al Ahly x ENPPI!
+    pool = list(sc.get("video_tracks", []))
+    if include_external_benchmark:
+        pool.extend(sc.get("benchmark_players", []))
+    elif len(pool) < 2:
+        pool.extend(sc.get("benchmark_players", []))
     by_id = {str(p["player_id"]): p for p in pool}
 
     wanted = [x.strip() for x in player_ids.split(",") if x.strip()]
@@ -471,3 +480,137 @@ def api_view_player_share_portal(token: str) -> HTMLResponse:
 </body>
 </html>"""
     return HTMLResponse(content=page)
+
+
+# ---------- V9.5 100% Free Local FFmpeg Media Pipelines (Voiceover Mux, Merged Playlist MP4 + Slides, WebM->MP4/GIF) ----------
+@router.post("/api/matches/{match_id}/export-clip-with-audio")
+async def api_export_clip_with_audio(
+    match_id: str,
+    start_s: float = Form(default=50.0),
+    end_s: float = Form(default=56.0),
+    auto_face_blur: bool = Form(default=False),
+    voiceover: Optional[UploadFile] = File(default=None),
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> FileResponse:
+    """Export Sequential-Reveal AR MP4 clip and optionally mux coach voiceover audio directly inside via free ffmpeg."""
+    ctx.require("read:matches")
+    from apps.api.main import service
+    from services.cv_worker.lazy_engines.video_export import mux_audio_into_mp4
+
+    try:
+        clip_p = service.export_clip_mp4(
+            tenant_id=ctx.tenant_id,
+            match_id=match_id,
+            start_s=float(start_s),
+            end_s=float(end_s),
+            auto_face_blur=bool(auto_face_blur),
+        )
+        if voiceover is not None:
+            raw_audio = await voiceover.read()
+            if raw_audio:
+                audio_p = clip_p.with_suffix(".voice.webm")
+                audio_p.write_bytes(raw_audio)
+                muxed_p = clip_p.with_name(f"{clip_p.stem}_voiced.mp4")
+                mux_audio_into_mp4(clip_p, audio_p, muxed_p)
+                try:
+                    audio_p.unlink()
+                except OSError:
+                    pass
+                return FileResponse(str(muxed_p), media_type="video/mp4", filename=muxed_p.name)
+        return FileResponse(str(clip_p), media_type="video/mp4", filename=clip_p.name)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/api/matches/{match_id}/tags/export-playlist-mp4")
+def api_export_playlist_merged_mp4(
+    match_id: str,
+    payload: dict[str, Any],
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> FileResponse:
+    """Merge ALL tagged playlist clips + optional Tactical Board PNG slides into ONE Locker-Room Lecture MP4."""
+    ctx.require("read:matches")
+    from apps.api.main import service
+    from services.cv_worker.lazy_engines.video_export import export_playlist_merged_mp4
+
+    playlist_filter = str(payload.get("playlist_name") or "ALL")
+    tags = _get_store().list_tags(ctx.tenant_id, match_id)
+    if playlist_filter != "ALL":
+        tags = [t for t in tags if t.get("playlist_name") == playlist_filter]
+    if not tags:
+        raise HTTPException(status_code=400, detail="No tagged clips found for this playlist")
+
+    vpath = service.get_video_path(match_id)
+    out_dir = service.data_paths.outputs / "playlists"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    slide_paths: list[Path] = []
+
+    # Optional Tactical Board PNG slide embedded as data URL
+    slide_b64 = str(payload.get("board_slide_png_data_url") or "")
+    if slide_b64.startswith("data:image/png;base64,"):
+        sp = out_dir / f"slide_{int(time.time() * 1000)}.png"
+        sp.write_bytes(base64.b64decode(slide_b64.split(",", 1)[1]))
+        slide_paths.append(sp)
+
+    segments = [(float(t["start_s"]), float(t["end_s"]), str(t["label_en"])) for t in tags]
+    out_mp4 = out_dir / f"{match_id}_locker_room_{int(time.time())}.mp4"
+    try:
+        export_playlist_merged_mp4(vpath, segments, out_mp4, slide_png_paths=slide_paths)
+        return FileResponse(str(out_mp4), media_type="video/mp4", filename=out_mp4.name)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        for sp in slide_paths:
+            try:
+                sp.unlink()
+            except OSError:
+                pass
+
+
+@router.post("/api/plans/convert-video")
+async def api_convert_animated_board_video(
+    file: UploadFile = File(...),
+    target_format: str = Form(default="mp4"),
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> FileResponse:
+    """Convert Animated Tactical Board WebM -> WhatsApp-ready H.264 MP4 or Palette GIF via free local ffmpeg."""
+    ctx.require("read:tactics")
+    from apps.api.main import service
+    from services.cv_worker.lazy_engines.video_export import convert_webm_to_mp4_or_gif
+
+    fmt = "gif" if target_format.lower().strip() == "gif" else "mp4"
+    tmp_dir = service.data_paths.outputs / "board_exports"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    ts = int(time.time() * 1000)
+    in_webm = tmp_dir / f"board_{ts}.webm"
+    out_p = tmp_dir / f"egy_scout_plan_{ts}.{fmt}"
+    try:
+        in_webm.write_bytes(await file.read())
+        convert_webm_to_mp4_or_gif(in_webm, out_p, target_format=fmt)
+        media = "image/gif" if fmt == "gif" else "video/mp4"
+        return FileResponse(str(out_p), media_type=media, filename=out_p.name)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        try:
+            in_webm.unlink()
+        except OSError:
+            pass
+
+
+# ---------- V9.5 Open-Formula OBV, xPass, CxP & Defensive Responsibility (with Windowed Parquet Pushdown) ----------
+@router.get("/api/matches/{match_id}/advanced-metrics")
+def api_match_advanced_metrics(
+    match_id: str,
+    start_s: Optional[float] = None,
+    end_s: Optional[float] = None,
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    """Compute free open-formula OBV, xPass, CxP & Defensive Responsibility strictly from pitch coordinates."""
+    ctx.require("read:tactics")
+    from apps.api.main import service
+
+    try:
+        return service.get_advanced_match_metrics(ctx.tenant_id, match_id, start_s=start_s, end_s=end_s)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc))

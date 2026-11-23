@@ -86,6 +86,45 @@ interface TelestratorDrawing {
   x2: number;
   y2: number;
   metersEst?: number;
+  fromTrackId?: number;
+  toTrackId?: number;
+}
+
+interface AdvancedMetricsPayload {
+  passes_detected: number;
+  carries_detected: number;
+  windowed_parquet_pushdown?: boolean;
+  rows_scanned?: number;
+  team_summary: Record<
+    string,
+    {
+      team_name: string;
+      passes_attempted: number;
+      passes_completed: number;
+      pass_accuracy_pct: number;
+      expected_pass_pct: number;
+      cxp_above_expected_pct: number;
+      net_obv: number;
+    }
+  >;
+  top_obv_players: Array<{
+    track_id: number;
+    team_name: string;
+    label: string;
+    obv_total: number;
+    passes_completed: number;
+    passes_attempted: number;
+    xpass_avg_pct: number;
+    cxp_pct: number;
+  }>;
+  defensive_responsibility_alerts: Array<{
+    time_s: number;
+    defender_label: string;
+    gap_m: number;
+    responsibility_pct: number;
+    note_ar: string;
+    note_en: string;
+  }>;
 }
 
 /** Adaptive One-Euro style EMA smoothing factor (rock-steady when slow, responsive on sprints). */
@@ -450,6 +489,9 @@ export default function BroadcastStudioScreen({
   const [presentQueue, setPresentQueue] = useState<ClipTagItem[] | null>(null);
   const [presentIdx, setPresentIdx] = useState<number>(0);
   const [drillSeedNote, setDrillSeedNote] = useState<string | null>(null);
+  const [boardSlidePng, setBoardSlidePng] = useState<string | null>(null);
+  const [advMetrics, setAdvMetrics] = useState<AdvancedMetricsPayload | null>(null);
+  const studioContainerRef = useRef<HTMLDivElement | null>(null);
   const [selectedTeamAId, setSelectedTeamAId] = useState<number | null>(null);
   const [selectedTeamBId, setSelectedTeamBId] = useState<number | null>(null);
 
@@ -754,6 +796,24 @@ export default function BroadcastStudioScreen({
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presentQueue]);
+
+  // Fetch free open-formula OBV, xPass, CxP & Defensive Responsibility metrics per match
+  useEffect(() => {
+    let alive = true;
+    apiFetch<AdvancedMetricsPayload>(
+      `/api/matches/${encodeURIComponent(matchId)}/advanced-metrics`,
+      {},
+      "club_demo_egypt",
+      role
+    )
+      .then((res) => {
+        if (alive) setAdvMetrics(res);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [matchId, role]);
 
   // Fullscreen Locker-Room Present Mode auto-seek on slide change
   useEffect(() => {
@@ -1144,12 +1204,30 @@ export default function BroadcastStudioScreen({
                 drawTacticalChainWall(ctx, chainPlayers, vw, vh, true);
               }
 
-              // User-drawn 3D Arrows & Laser Tapes
+              // User-drawn 3D Arrows & Laser Tapes (Motion-Tracked when anchored to player track_ids!)
               for (const d of [...st.drawings, ...(st.activeDraft ? [st.activeDraft] : [])]) {
+                let ax1 = d.x1;
+                let ay1 = d.y1;
+                let ax2 = d.x2;
+                let ay2 = d.y2;
+                let mEst = d.metersEst;
+                const pFrom = d.fromTrackId !== undefined ? smoothedList.find((p) => p.track_id === d.fromTrackId) : undefined;
+                const pTo = d.toTrackId !== undefined ? smoothedList.find((p) => p.track_id === d.toTrackId) : undefined;
+                if (pFrom) {
+                  ax1 = (pFrom.bbox[0] + pFrom.bbox[2]) * 0.5;
+                  ay1 = pFrom.bbox[3];
+                }
+                if (pTo) {
+                  ax2 = (pTo.bbox[0] + pTo.bbox[2]) * 0.5;
+                  ay2 = pTo.bbox[3];
+                }
+                if (pFrom && pTo && d.kind === "tape") {
+                  mEst = Number(Math.hypot(pFrom.x_m - pTo.x_m, pFrom.y_m - pTo.y_m).toFixed(1));
+                }
                 if (d.kind === "arrow") {
-                  draw3DCurvedArrow(ctx, d.x1, d.y1, d.x2, d.y2);
+                  draw3DCurvedArrow(ctx, ax1, ay1, ax2, ay2);
                 } else if (d.kind === "tape") {
-                  draw3DTapeMeasure(ctx, d.x1, d.y1, d.x2, d.y2, vw, vh, d.metersEst);
+                  draw3DTapeMeasure(ctx, ax1, ay1, ax2, ay2, vw, vh, mEst);
                 }
               }
 
@@ -1491,13 +1569,22 @@ export default function BroadcastStudioScreen({
 
     if (dragDrawStartRef.current && (tool === "arrow" || tool === "tape" || tool === "zone")) {
       const { vx: sx, vy: sy } = dragDrawStartRef.current;
+      const p1 = hitPlayerAtVideo(sx, sy);
+      const p2 = hitPlayerAtVideo(vx, vy);
       let metersEst: number | undefined = undefined;
-      if (tool === "tape") {
-        const p1 = hitPlayerAtVideo(sx, sy);
-        const p2 = hitPlayerAtVideo(vx, vy);
-        if (p1 && p2) metersEst = Number(Math.hypot(p1.x_m - p2.x_m, p1.y_m - p2.y_m).toFixed(1));
+      if (tool === "tape" && p1 && p2) {
+        metersEst = Number(Math.hypot(p1.x_m - p2.x_m, p1.y_m - p2.y_m).toFixed(1));
       }
-      setActiveDraft({ kind: tool, x1: sx, y1: sy, x2: vx, y2: vy, metersEst });
+      setActiveDraft({
+        kind: tool,
+        x1: sx,
+        y1: sy,
+        x2: vx,
+        y2: vy,
+        metersEst,
+        fromTrackId: p1?.track_id,
+        toTrackId: p2?.track_id,
+      });
       return;
     }
 
@@ -1732,7 +1819,7 @@ export default function BroadcastStudioScreen({
       : 0;
 
   return (
-    <div className="space-y-5">
+    <div ref={studioContainerRef} className="space-y-5 bg-[#090D16]">
       {/* Hidden Video Backing Source */}
       <video
         ref={videoRef}
@@ -1800,7 +1887,23 @@ export default function BroadcastStudioScreen({
             </button>
             <button
               type="button"
-              onClick={() => setPresentQueue(null)}
+              onClick={() => {
+                if (document.fullscreenElement) {
+                  document.exitFullscreen().catch(() => {});
+                } else {
+                  studioContainerRef.current?.requestFullscreen?.().catch(() => {});
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg bg-sky-500/20 border border-sky-400/40 text-sky-200 font-bold"
+            >
+              {isAr ? "⛶ ملء الشاشة" : "⛶ Fullscreen"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+                setPresentQueue(null);
+              }}
               className="px-3 py-1.5 rounded-lg bg-rose-500/20 border border-rose-400/40 text-rose-200 font-bold flex items-center gap-1"
             >
               <X className="w-3.5 h-3.5" />
@@ -2697,6 +2800,72 @@ export default function BroadcastStudioScreen({
         </div>
       )}
 
+      {/* V9.5 Open-Formula OBV, xPass, CxP & Defensive Responsibility Panel (100% Free Math-First!) */}
+      {advMetrics && (studioPreset === "dissect" || studioPreset === "video_twin") && (
+        <div className="studio-panel p-4 space-y-3 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="font-extrabold text-sm text-white flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-emerald-400" />
+              <span>
+                {isAr
+                  ? "نماذج القيمة والتمرير والمسؤولية الدفاعية (OBV • xPass • Defensive Responsibility)"
+                  : "Open-Formula OBV, Expected Pass (xPass) & Defensive Responsibility"}
+              </span>
+            </div>
+            <span className="text-[10.5px] px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 tabular-nums">
+              {isAr
+                ? `${advMetrics.passes_detected} تمريرة • ${advMetrics.carries_detected} حمل كرة مقاس هندسياً`
+                : `${advMetrics.passes_detected} Passes • ${advMetrics.carries_detected} Carries`}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {Object.entries(advMetrics.team_summary).map(([tk, ts]) => (
+              <div key={tk} className="p-3 rounded-xl bg-[#090D16] border border-white/[0.08] space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-white">{ts.team_name}</span>
+                  <span dir="ltr" className={`font-black tabular-nums ${ts.net_obv >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                    OBV {ts.net_obv >= 0 ? "+" : ""}{ts.net_obv.toFixed(3)}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 text-center tabular-nums text-[11px]">
+                  <div className="p-1.5 rounded bg-[#111827]">
+                    <div className="text-[10px] text-slate-400">{isAr ? "دقة التمرير" : "Pass %"}</div>
+                    <div className="font-bold text-white">{ts.pass_accuracy_pct}%</div>
+                  </div>
+                  <div className="p-1.5 rounded bg-[#111827]">
+                    <div className="text-[10px] text-slate-400">xPass %</div>
+                    <div className="font-bold text-sky-300">{ts.expected_pass_pct}%</div>
+                  </div>
+                  <div className="p-1.5 rounded bg-[#111827]">
+                    <div className="text-[10px] text-slate-400">{isAr ? "فوق المتوقع CxP" : "CxP"}</div>
+                    <div className={`font-bold ${ts.cxp_above_expected_pct >= 0 ? "text-emerald-300" : "text-amber-300"}`}>
+                      {ts.cxp_above_expected_pct >= 0 ? "+" : ""}{ts.cxp_above_expected_pct}%
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {advMetrics.defensive_responsibility_alerts.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-1 border-t border-white/[0.06] text-[11px]">
+              <span className="text-rose-300 font-bold">{isAr ? "تنبيهات المسؤولية الدفاعية:" : "Defensive Responsibility:"}</span>
+              {advMetrics.defensive_responsibility_alerts.slice(0, 3).map((al, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => seekToTime(al.time_s)}
+                  className="px-2 py-0.5 rounded bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-200"
+                >
+                  ⏱ {al.time_s}s • {al.defender_label} ({al.responsibility_pct}%) — {isAr ? al.note_ar : al.note_en}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* V8.4 Tagging Panel, Locker-Room Playlists, Voiceover & Sportscode XML */}
       {(studioPreset === "locker_room" || studioPreset === "video_twin" || studioPreset === "dissect") && (
         <TaggingPlaylistPanel
@@ -2704,6 +2873,7 @@ export default function BroadcastStudioScreen({
           matchId={matchId}
           role={role}
           currentTimeSec={hudTimeS}
+          boardSlidePng={boardSlidePng}
           selectedPlayerLabel={
             selectedDefId !== null
               ? activePlayersRef.current.find((p) => p.track_id === selectedDefId)?.verified_name ||
@@ -2729,6 +2899,7 @@ export default function BroadcastStudioScreen({
           defaultFormation={blueprintFormation}
           externalBlueprint={externalBlueprint}
           initialDrillNote={drillSeedNote}
+          onAttachBoardSlide={(png) => setBoardSlidePng(png)}
         />
       )}
     </div>

@@ -307,23 +307,81 @@ def build_profiles_from_match_parquet(
     return profiles
 
 
+def _pick_col(row: dict[str, Any], candidates: list[str], default: Any = None) -> Any:
+    """Case-insensitive fuzzy column picker supporting StatsBomb, Wyscout, Catapult GPS & STATSports CSVs."""
+    lower_map = {str(k).strip().lower(): v for k, v in row.items() if k is not None}
+    for cand in candidates:
+        val = lower_map.get(cand.lower())
+        if val is not None and str(val).strip() != "":
+            return val
+    return default
+
+
+def _to_float(val: Any, default: float = 0.0) -> float:
+    try:
+        return float(str(val).replace("%", "").replace(",", "").strip())
+    except Exception:
+        return default
+
+
 def import_external_scouting_csv(csv_path: str | Path) -> list[PlayerScoutingProfile]:
-    """Import verified external CSV rows (e.g. StatsBomb Open Data / SkillCorner / Wyscout)."""
+    """Import verified external CSV rows with auto-detection for StatsBomb, Wyscout, Catapult GPS & STATSports."""
     p = Path(csv_path)
     if not p.is_file():
         return []
     profiles: list[PlayerScoutingProfile] = []
     with p.open("r", encoding="utf-8-sig", newline="") as fh:
         reader = csv.DictReader(fh)
+        headers_low = {str(h).strip().lower() for h in (reader.fieldnames or [])}
+        # Auto-detect vendor schema
+        if any(h in headers_low for h in ("total distance (m)", "high speed running (m)", "max velocity (km/h)", "player load", "sprint distance (m)")):
+            detected_vendor = "Catapult / STATSports GPS"
+        elif any(h in headers_low for h in ("minutes played", "progressive passes per 90", "accurate passes, %", "successful defensive actions per 90")):
+            detected_vendor = "Wyscout Export"
+        else:
+            detected_vendor = "StatsBomb Open Data"
+
         for row in reader:
-            mins = float(row.get("minutes_analyzed", 0.0) or 0.0)
-            vaep = float(row.get("vaep_per90", 0.0) or 0.0)
-            xt = float(row.get("xt_per90", 0.0) or 0.0)
-            padj_def = float(row.get("padj_defensive_actions_per90", 0.0) or 0.0)
-            hir = float(row.get("hir_distance_m_per90", 0.0) or 0.0)
-            disc = float(row.get("positional_discipline_score", 78.0) or 78.0)
-            max_spd = min(float(row.get("max_speed_kmh", 31.0) or 31.0), MAX_PHYSICAL_SPEED_KMH)
-            pos = str(row.get("position", "CM")).upper()
+            mins = _to_float(_pick_col(row, ["minutes_analyzed", "minutes played", "minutes", "total duration (min)", "duration"], 0.0))
+            if mins <= 0 and detected_vendor == "Catapult / STATSports GPS":
+                # Default a full tracked session to 90 min if GPS export lacks a minutes column
+                mins = 90.0 if _to_float(_pick_col(row, ["total distance (m)", "total distance"], 0.0)) >= 4000 else 10.0
+
+            xg_p90 = _to_float(_pick_col(row, ["xg per 90", "xg_per90", "xg"], 0.0))
+            xa_p90 = _to_float(_pick_col(row, ["xa per 90", "xa_per90", "xa"], 0.0))
+            prog_p90 = _to_float(_pick_col(row, ["progressive passes per 90", "progressive runs per 90", "progressive_runs_per90"], 0.0))
+            vaep = _to_float(_pick_col(row, ["vaep_per90", "vaep"], 0.0))
+            if vaep <= 0 and (xg_p90 > 0 or xa_p90 > 0 or prog_p90 > 0):
+                vaep = round(xg_p90 * 0.55 + xa_p90 * 0.45 + prog_p90 * 0.025, 3)
+
+            xt = _to_float(_pick_col(row, ["xt_per90", "xt"], 0.0))
+            if xt <= 0 and (xa_p90 > 0 or prog_p90 > 0):
+                xt = round(xa_p90 * 0.5 + prog_p90 * 0.022, 3)
+
+            padj_def = _to_float(
+                _pick_col(row, ["padj_defensive_actions_per90", "successful defensive actions per 90", "padj_tackles_interceptions", "accelerations"], 0.0)
+            )
+            hir = _to_float(
+                _pick_col(row, ["hir_distance_m_per90", "high speed running (m)", "hsr distance (m)", "sprint distance (m)"], 0.0)
+            )
+            if detected_vendor == "Catapult / STATSports GPS" and mins > 0 and hir > 0:
+                hir = round(hir * (90.0 / mins), 1)
+            disc = _to_float(_pick_col(row, ["positional_discipline_score", "accurate passes, %", "pass_accuracy"], 78.0), 78.0)
+            max_spd = min(
+                _to_float(_pick_col(row, ["max_speed_kmh", "max velocity (km/h)", "top speed (km/h)", "peak speed"], 31.0), 31.0),
+                MAX_PHYSICAL_SPEED_KMH,
+            )
+            raw_pos = str(_pick_col(row, ["position", "pos", "role"], "CM")).upper().split(",")[0].strip()
+            pos = raw_pos[:3] if raw_pos in POSITION_WEIGHTS else (
+                "ST" if any(k in raw_pos for k in ("CF", "ST", "FW"))
+                else "W" if any(k in raw_pos for k in ("LW", "RW", "W"))
+                else "AM" if "AM" in raw_pos
+                else "DM" if "DM" in raw_pos
+                else "FB" if any(k in raw_pos for k in ("LB", "RB", "FB", "WB"))
+                else "CB" if "CB" in raw_pos
+                else "GK" if "GK" in raw_pos
+                else "CM"
+            )
             eligible = mins >= MIN_RATING_MINUTES
             rating = (
                 _compute_position_rating(pos, vaep, xt, padj_def, hir, disc / 100.0)
@@ -331,38 +389,42 @@ def import_external_scouting_csv(csv_path: str | Path) -> list[PlayerScoutingPro
                 else None
             )
 
-            pid = str(row.get("player_id", "")).strip() or f"ext_{len(profiles)+1}"
+            name_val = str(_pick_col(row, ["display_name", "player name", "player", "name"], "")).strip()
+            pid = str(_pick_col(row, ["player_id", "id"], "")).strip() or (name_val.lower().replace(" ", "_") if name_val else f"ext_{len(profiles)+1}")
+            team_val = str(_pick_col(row, ["team_name", "team", "club", "squad"], "External Club")).strip()
+            tot_dist = _to_float(_pick_col(row, ["total distance (m)", "total distance"], mins * 108.0), mins * 108.0)
+
             profiles.append(
                 PlayerScoutingProfile(
                     player_id=pid,
-                    display_name=str(row.get("display_name", pid)),
-                    team_name=str(row.get("team_name", "External Club")),
+                    display_name=name_val or pid,
+                    team_name=team_val,
                     position=pos,
-                    archetype_en=str(row.get("archetype_en", "Midfielder")),
-                    archetype_ar=str(row.get("archetype_ar", "لاعب وسط")),
-                    data_source=str(row.get("data_source", "StatsBomb Open Data")),
+                    archetype_en=str(_pick_col(row, ["archetype_en"], f"{pos} ({detected_vendor})")),
+                    archetype_ar=str(_pick_col(row, ["archetype_ar"], f"ملف {pos} — {detected_vendor}")),
+                    data_source=str(_pick_col(row, ["data_source"], detected_vendor)),
                     minutes_analyzed=round(mins, 1),
                     observed_seconds=round(mins * 60.0, 1),
                     observed_frames=int(mins * 60 * 25),
                     sample_confidence=_sample_confidence_band(mins),
                     rating_10=rating,
                     rating_status_ar=(
-                        f"عينة موثّقة ({mins:.0f} دقيقة)"
+                        f"عينة موثّقة ({mins:.0f} دقيقة • {detected_vendor})"
                         if eligible
                         else f"عينة غير كافية للتقييم — {mins * 60:.0f} ثانية فقط"
                     ),
                     rating_status_en=(
-                        f"Verified Sample ({mins:.0f} min)"
+                        f"Verified Sample ({mins:.0f} min • {detected_vendor})"
                         if eligible
                         else f"Insufficient sample — {mins * 60:.0f}s only"
                     ),
-                    in_frame_distance_m=round(mins * 108.0, 1),
-                    avg_speed_kmh=round(float(row.get("avg_speed_kmh", 7.1) or 7.1), 1),
+                    in_frame_distance_m=round(tot_dist, 1),
+                    avg_speed_kmh=round(_to_float(_pick_col(row, ["avg_speed_kmh", "avg speed (km/h)"], 7.1), 7.1), 1),
                     max_speed_kmh=round(max_spd, 1),
-                    active_movements=int(float(row.get("progressive_runs_per90", 6) or 6)),
+                    active_movements=int(prog_p90 or 6),
                     vaep_per90=round(vaep, 3) if eligible else None,
                     xt_per90=round(xt, 3) if eligible else None,
-                    team_xt_share_pct=round(float(row.get("team_xt_share_pct", 14.0) or 14.0), 1) if eligible else None,
+                    team_xt_share_pct=round(_to_float(_pick_col(row, ["team_xt_share_pct"], 14.0), 14.0), 1) if eligible else None,
                     padj_defensive_actions_per90=round(padj_def, 2) if eligible else None,
                     hir_distance_m_per90=round(hir, 1) if eligible else None,
                     positional_discipline_score=round(disc, 1),

@@ -990,6 +990,101 @@ def parse_any_formation_spec(formation_code: str) -> dict[str, Any]:
     }
 
 
+def _slot_position_compatibility(slot: str, player_pos: str) -> int:
+    """Return strict compatibility score (0..100) between a tactical formation slot and a player's real position."""
+    sl = slot.upper().strip()
+    pp = player_pos.upper().strip()
+    if sl == "GK":
+        return 100 if pp == "GK" else 0
+    if pp == "GK":
+        return 0
+
+    def _bucket(code: str) -> str:
+        if code.startswith("CB") or code in ("LCB", "RCB", "CCB"):
+            return "CB"
+        if code.startswith("LB") or code.startswith("LWB"):
+            return "LB"
+        if code.startswith("RB") or code.startswith("RWB"):
+            return "RB"
+        if code in ("FB", "WB"):
+            return "FB"
+        if code.startswith("DM") or code.startswith("CDM"):
+            return "DM"
+        if code.startswith("CAM") or code.startswith("AM"):
+            return "AM"
+        if code.startswith("CM") or code.startswith("M"):
+            return "CM"
+        if code.startswith("LW") or code.startswith("LM"):
+            return "LW"
+        if code.startswith("RW") or code.startswith("RM"):
+            return "RW"
+        if code.startswith("ST") or code.startswith("CF") or code.startswith("FW"):
+            return "ST"
+        return "CM"
+
+    sb = _bucket(sl)
+    pb = _bucket(pp)
+    if sb == pb:
+        return 100
+    compat_map: dict[tuple[str, str], int] = {
+        ("LB", "FB"): 92, ("RB", "FB"): 92, ("LB", "RB"): 65, ("RB", "LB"): 65,
+        ("CB", "DM"): 55, ("CB", "RB"): 45, ("CB", "LB"): 45,
+        ("DM", "CM"): 88, ("CM", "DM"): 85, ("CM", "AM"): 88, ("AM", "CM"): 85,
+        ("AM", "LW"): 78, ("AM", "RW"): 78, ("LW", "RW"): 88, ("RW", "LW"): 88,
+        ("LW", "AM"): 75, ("RW", "AM"): 75, ("LW", "ST"): 72, ("RW", "ST"): 72,
+        ("ST", "LW"): 68, ("ST", "RW"): 68, ("ST", "AM"): 60,
+        ("DM", "CB"): 52, ("CM", "LW"): 55, ("CM", "RW"): 55,
+    }
+    return compat_map.get((sb, pb), 20)
+
+
+def _assign_roster_by_position(
+    slots: list[str],
+    roster: list[dict[str, Any]],
+) -> list[Optional[dict[str, Any]]]:
+    """Match real squad players to tactical slots strictly by natural position (zero LB-at-CB or CM-at-ST mismatches!)."""
+    if not roster:
+        return [None] * len(slots)
+    assigned: list[Optional[dict[str, Any]]] = [None] * len(slots)
+    used_indices: set[int] = set()
+
+    # Pass 1: Assign GK strictly first, then most specialized positions (ST, CB, LB, RB, DM, AM, LW, RW, CM)
+    priority_order = sorted(
+        range(len(slots)),
+        key=lambda i: (
+            0 if slots[i].upper() == "GK"
+            else 1 if slots[i].upper().startswith(("ST", "CF"))
+            else 2 if slots[i].upper().startswith(("CB", "LCB", "RCB"))
+            else 3 if slots[i].upper().startswith(("LB", "RB", "LWB", "RWB"))
+            else 4 if slots[i].upper().startswith(("DM", "CDM"))
+            else 5
+        ),
+    )
+
+    for s_idx in priority_order:
+        sl = slots[s_idx]
+        best_r_idx = -1
+        best_score = -1
+        for r_idx, player in enumerate(roster):
+            if r_idx in used_indices:
+                continue
+            p_pos = str(player.get("position") or "")
+            if not p_pos:
+                # Infer from name tag like "(CB)" or "(GK)" if present
+                nm = str(player.get("verified_name") or player.get("player_name") or "")
+                m_p = re.search(r"\b(GK|CB|LB|RB|LWB|RWB|CDM|DM|CM|CAM|AM|LW|RW|LM|RM|ST|CF|FW)\b", nm.upper())
+                p_pos = m_p.group(1) if m_p else ("GK" if r_idx == 0 else "CM")
+            sc = _slot_position_compatibility(sl, p_pos)
+            if sc > best_score:
+                best_score = sc
+                best_r_idx = r_idx
+        if best_r_idx >= 0:
+            assigned[s_idx] = roster[best_r_idx]
+            used_indices.add(best_r_idx)
+
+    return assigned
+
+
 def _build_single_team_nodes_and_lines(
     spec: dict[str, Any],
     attack_right: bool,
@@ -1003,6 +1098,7 @@ def _build_single_team_nodes_and_lines(
 
     nodes_out: list[dict[str, Any]] = []
     slot_to_xy: dict[str, tuple[float, float]] = {}
+    matched_roster = _assign_roster_by_position([str(nd["slot"]) for nd in spec["nodes"]], roster)
 
     for idx, nd in enumerate(spec["nodes"]):
         x_norm = float(nd["x_norm"])
@@ -1021,7 +1117,7 @@ def _build_single_team_nodes_and_lines(
         y_m = round(y_norm * 68.0, 2)
         slot_to_xy[nd["slot"]] = (x_m, y_m)
 
-        assigned = roster[idx] if idx < len(roster) else None
+        assigned = matched_roster[idx] if idx < len(matched_roster) else None
         p_name = (
             assigned.get("verified_name")
             or assigned.get("player_name")

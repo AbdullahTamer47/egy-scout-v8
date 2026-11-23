@@ -15,7 +15,8 @@ interface Props {
   lang: "ar" | "en";
   matchId: string;
   role: UserRole;
-  pool: ScoutingPlayer[];
+  matchPlayers: ScoutingPlayer[];
+  benchmarkPlayers: ScoutingPlayer[];
   onJumpToClip?: (startSec: number) => void;
 }
 
@@ -29,18 +30,25 @@ const H2H_AXES = [
   { key: "tactical_discipline", ar: "الانضباط", en: "Discipline" },
 ] as const;
 
-export default function HeadToHeadComparisonPanel({ lang, matchId, role, pool, onJumpToClip }: Props) {
+export default function HeadToHeadComparisonPanel({
+  lang,
+  matchId,
+  role,
+  matchPlayers,
+  benchmarkPlayers,
+  onJumpToClip,
+}: Props) {
   const isAr = lang === "ar";
+  const [includeBenchmark, setIncludeBenchmark] = useState<boolean>(false);
+  const pool = includeBenchmark ? [...matchPlayers, ...benchmarkPlayers] : matchPlayers;
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [h2h, setH2h] = useState<HeadToHeadComparisonPayload | null>(null);
   const [trends, setTrends] = useState<MultiMatchTrendsPayload | null>(null);
   const [shareUrl, setShareUrl] = useState<{ player: string; url: string } | null>(null);
 
   useEffect(() => {
-    if (pool.length >= 2 && selectedIds.length === 0) {
-      setSelectedIds(pool.slice(0, 2).map((p) => p.player_id));
-    }
-  }, [pool, selectedIds.length]);
+    setSelectedIds(matchPlayers.slice(0, 2).map((p) => p.player_id));
+  }, [matchId, matchPlayers]);
 
   useEffect(() => {
     if (selectedIds.length < 2) return;
@@ -48,6 +56,7 @@ export default function HeadToHeadComparisonPanel({ lang, matchId, role, pool, o
     const qs = new URLSearchParams({
       match_id: matchId,
       player_ids: selectedIds.join(","),
+      include_external_benchmark: String(includeBenchmark),
     });
     apiFetch<HeadToHeadComparisonPayload>(`/api/scouting/compare?${qs.toString()}`, {}, "club_demo_egypt", role)
       .then((res) => {
@@ -57,7 +66,7 @@ export default function HeadToHeadComparisonPanel({ lang, matchId, role, pool, o
     return () => {
       alive = false;
     };
-  }, [matchId, selectedIds, role]);
+  }, [matchId, selectedIds, includeBenchmark, role]);
 
   useEffect(() => {
     let alive = true;
@@ -130,11 +139,21 @@ export default function HeadToHeadComparisonPanel({ lang, matchId, role, pool, o
               {isAr ? "مقارنة لاعب بلاعب وجهاً لوجه (Head-to-Head — 2 إلى 4 لاعبين)" : "Head-to-Head Fair Player Comparison (2–4 Players)"}
             </h3>
           </div>
-          {h2h && (
-            <span className="text-[11px] text-slate-400">
-              {isAr ? h2h.fairness_note_ar : h2h.fairness_note_en}
-            </span>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#090D16] border border-white/10 text-[11px] text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeBenchmark}
+                onChange={(e) => setIncludeBenchmark(e.target.checked)}
+                className="accent-emerald-500"
+              />
+              <span>
+                {isAr
+                  ? "إضافة مرجع عالمي (StatsBomb) للمقارنة الاسترشادية فقط"
+                  : "Include StatsBomb external reference"}
+              </span>
+            </label>
+          </div>
         </div>
 
         {/* Selectable Player Chips */}

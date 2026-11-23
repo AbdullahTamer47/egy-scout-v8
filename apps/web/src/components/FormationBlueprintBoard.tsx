@@ -27,6 +27,7 @@ import {
   Zap,
 } from "lucide-react";
 import {
+  API_BASE,
   apiFetch,
   BlueprintCustomZone,
   BlueprintNode,
@@ -46,6 +47,7 @@ interface Props {
   team?: "team_a" | "team_b";
   externalBlueprint?: FormationBlueprintPayload | null;
   initialDrillNote?: string | null;
+  onAttachBoardSlide?: (pngDataUrl: string) => void;
 }
 
 type DrawTool = "drag_player" | "run_arrow" | "pass_arrow" | "press_arrow" | "zone_box" | "freehand";
@@ -136,6 +138,7 @@ export default function FormationBlueprintBoard({
   defaultFormation = "4-2-3-1",
   externalBlueprint = null,
   initialDrillNote = null,
+  onAttachBoardSlide,
 }: Props) {
   const isAr = lang === "ar";
   const [formationA, setFormationA] = useState(defaultFormation);
@@ -757,7 +760,7 @@ export default function FormationBlueprintBoard({
     setTrainingProps(kf.props.map((p) => ({ ...p })));
   };
 
-  const handleRecordAnimatedVideo = () => {
+  const handleRecordAnimatedVideo = (targetFmt: "webm" | "mp4" | "gif" = "mp4") => {
     const cvs = canvasRef.current;
     if (!cvs || keyframes.length < 2 || recordingVideo) return;
     try {
@@ -767,16 +770,45 @@ export default function FormationBlueprintBoard({
       rec.ondataavailable = (ev) => {
         if (ev.data.size > 0) chunks.push(ev.data);
       };
-      rec.onstop = () => {
-        const blob = new Blob(chunks, { type: "video/webm" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `egy-scout-animated-${formationA.replace(/[^0-9A-Za-z-]/g, "")}.webm`;
-        a.click();
-        URL.revokeObjectURL(url);
-        setRecordingVideo(false);
-        setIsAnimating(false);
+      rec.onstop = async () => {
+        const webmBlob = new Blob(chunks, { type: "video/webm" });
+        const baseName = `egy-scout-animated-${formationA.replace(/[^0-9A-Za-z-]/g, "")}`;
+        try {
+          if (targetFmt === "mp4" || targetFmt === "gif") {
+            const fd = new FormData();
+            fd.append("file", webmBlob, `${baseName}.webm`);
+            fd.append("target_format", targetFmt);
+            const res = await fetch(`${API_BASE}/api/plans/convert-video`, {
+              method: "POST",
+              headers: { "X-Tenant-Id": "club_demo_egypt", "X-User-Role": role },
+              body: fd,
+            });
+            if (res.ok) {
+              const converted = await res.blob();
+              const url = URL.createObjectURL(converted);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `${baseName}.${targetFmt}`;
+              a.click();
+              URL.revokeObjectURL(url);
+              setSaveBanner(
+                isAr ? `✅ تم تصدير الخطة المتحركة بصيغة ${targetFmt.toUpperCase()} مجاناً!` : `✅ Exported ${targetFmt.toUpperCase()}!`
+              );
+              setTimeout(() => setSaveBanner(null), 2600);
+              return;
+            }
+          }
+          // Fallback to direct WebM download
+          const url = URL.createObjectURL(webmBlob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${baseName}.webm`;
+          a.click();
+          URL.revokeObjectURL(url);
+        } finally {
+          setRecordingVideo(false);
+          setIsAnimating(false);
+        }
       };
       setRecordingVideo(true);
       setIsAnimating(true);
@@ -2158,11 +2190,35 @@ export default function FormationBlueprintBoard({
                 <button
                   type="button"
                   disabled={keyframes.length < 2 || recordingVideo}
-                  onClick={handleRecordAnimatedVideo}
+                  onClick={() => handleRecordAnimatedVideo("mp4")}
                   className="px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 disabled:opacity-35 border border-sky-400/40 text-sky-300 font-bold"
                 >
-                  {recordingVideo ? (isAr ? "⏺ جاري التسجيل..." : "⏺ Recording...") : isAr ? "🎬 تصدير فيديو WebM" : "🎬 Export Video"}
+                  {recordingVideo ? (isAr ? "⏺ جاري التحويل..." : "⏺ Converting...") : isAr ? "🎬 فيديو MP4" : "🎬 Export MP4"}
                 </button>
+                <button
+                  type="button"
+                  disabled={keyframes.length < 2 || recordingVideo}
+                  onClick={() => handleRecordAnimatedVideo("gif")}
+                  className="px-2 py-1 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 disabled:opacity-35 border border-purple-400/40 text-purple-200 font-bold"
+                >
+                  🎞️ GIF
+                </button>
+                {onAttachBoardSlide && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cvs = canvasRef.current;
+                      if (cvs) {
+                        onAttachBoardSlide(cvs.toDataURL("image/png"));
+                        setSaveBanner(isAr ? "📌 تم إدراج شريحة المرسم في محاضرة غرفة الملابس!" : "📌 Slide added to Locker-Room Lecture!");
+                        setTimeout(() => setSaveBanner(null), 2600);
+                      }
+                    }}
+                    className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 font-bold"
+                  >
+                    {isAr ? "📌 شريحة للمحاضرة" : "📌 Add Slide"}
+                  </button>
+                )}
               </div>
             </div>
 

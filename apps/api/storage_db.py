@@ -7,12 +7,13 @@ Stores per-tenant:
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import secrets
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 
 class ScoutSQLiteStore:
@@ -21,10 +22,15 @@ class ScoutSQLiteStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextlib.contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
 
     def _init_schema(self) -> None:
         with self._connect() as conn:
@@ -67,6 +73,30 @@ class ScoutSQLiteStore:
                     created_by_role TEXT NOT NULL,
                     payload_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS shortlist_items (
+                    tenant_id TEXT NOT NULL,
+                    player_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (tenant_id, player_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS qa_lineups (
+                    tenant_id TEXT NOT NULL,
+                    match_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (tenant_id, match_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS bench_states (
+                    tenant_id TEXT NOT NULL,
+                    match_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (tenant_id, match_id)
                 );
                 """
             )
@@ -211,3 +241,65 @@ class ScoutSQLiteStore:
         out["player_name"] = row["player_name"]
         out["created_at"] = row["created_at"]
         return out
+
+    # ---------- Full SQLite Persistence: Shortlist, QA Lineups, Bench States ----------
+    def list_shortlist(self, tenant_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM shortlist_items WHERE tenant_id = ? ORDER BY updated_at DESC",
+                (tenant_id,),
+            ).fetchall()
+        return [json.loads(r["payload_json"]) for r in rows]
+
+    def upsert_shortlist(self, tenant_id: str, player_id: str, item: dict[str, Any]) -> list[dict[str, Any]]:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO shortlist_items (tenant_id, player_id, payload_json, updated_at) VALUES (?, ?, ?, ?)",
+                (tenant_id, player_id, json.dumps(item, ensure_ascii=False), now),
+            )
+        return self.list_shortlist(tenant_id)
+
+    def delete_shortlist(self, tenant_id: str, player_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM shortlist_items WHERE tenant_id = ? AND player_id = ?", (tenant_id, player_id))
+        return self.list_shortlist(tenant_id)
+
+    def get_qa_lineup(self, tenant_id: str, match_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM qa_lineups WHERE tenant_id = ? AND match_id = ?",
+                (tenant_id, match_id),
+            ).fetchone()
+        return json.loads(row["payload_json"]) if row else None
+
+    def save_qa_lineup(self, tenant_id: str, match_id: str, data: dict[str, Any]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO qa_lineups (tenant_id, match_id, payload_json, updated_at) VALUES (?, ?, ?, ?)",
+                (tenant_id, match_id, json.dumps(data, ensure_ascii=False), now),
+            )
+
+    def get_bench_state(self, tenant_id: str, match_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM bench_states WHERE tenant_id = ? AND match_id = ?",
+                (tenant_id, match_id),
+            ).fetchone()
+        return json.loads(row["payload_json"]) if row else None
+
+    def save_bench_state(self, tenant_id: str, match_id: str, data: dict[str, Any]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO bench_states (tenant_id, match_id, payload_json, updated_at) VALUES (?, ?, ?, ?)",
+                (tenant_id, match_id, json.dumps(data, ensure_ascii=False), now),
+            )
+
+    def delete_bench_state(self, tenant_id: str, match_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM bench_states WHERE tenant_id = ? AND match_id = ?",
+                (tenant_id, match_id),
+            )

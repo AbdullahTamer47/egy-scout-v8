@@ -32,6 +32,7 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
   const [file, setFile] = useState<File | null>(null);
   const [teamAName, setTeamAName] = useState("Team A");
   const [teamBName, setTeamBName] = useState("Team B");
+  const [officialRosterText, setOfficialRosterText] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [running, setRunning] = useState(false);
   const [ingestingMatch, setIngestingMatch] = useState(false);
@@ -100,6 +101,7 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
       form.append("team_a_name", teamAName.trim() || "Team A");
       form.append("team_b_name", teamBName.trim() || "Team B");
       form.append("match_format", matchFormat);
+      if (officialRosterText.trim()) form.append("official_roster_text", officialRosterText.trim());
       const res = await apiFetch<LiveProofResponse>(
         "/api/matches/ingest",
         { method: "POST", body: form },
@@ -132,6 +134,7 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
             team_b_name: teamBName.trim() || "Team B",
             match_format: matchFormat,
             max_duration_s: maxDurationS,
+            official_roster_text: officialRosterText.trim(),
           }),
         },
         "club_demo_egypt",
@@ -234,7 +237,7 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
             <div className="p-4 rounded-xl border border-white/[0.1] bg-[#090D16]/90 space-y-3 text-xs">
               <div className="flex items-center gap-2 text-emerald-400 font-semibold">
                 <Globe className="w-4 h-4" />
-                <span>{isAr ? "استيراد تلقائي عبر yt-dlp (يوتيوب / درايف / رابط بث)" : "Auto-Import via yt-dlp (YouTube / Drive / Broadcast URL)"}</span>
+                <span>{isAr ? "استيراد تلقائي (YouTube / Drive / بث حي RTSP أو HLS .m3u8)" : "Auto-Import (YouTube / Drive / Live RTSP or .m3u8 Stream)"}</span>
               </div>
               <input
                 type="url"
@@ -242,7 +245,7 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
                 value={importUrl}
                 disabled={isReadOnly}
                 onChange={(e) => setImportUrl(e.target.value)}
-                placeholder="https://www.youtube.com/watch?v=..."
+                placeholder="https://www.youtube.com/watch?v=...  OR  rtsp://... / https://.../live.m3u8"
                 className="w-full bg-[#111827] border border-white/[0.12] rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500/60"
               />
               <div className="flex items-center gap-3 text-[11px] text-slate-300">
@@ -315,6 +318,26 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
                 className="w-full bg-[#090D16] border border-white/[0.12] rounded-lg px-2.5 py-1.5 text-slate-100 disabled:opacity-50"
               />
             </label>
+          </div>
+
+          <div className="space-y-1 text-xs">
+            <label className="block text-[11px] text-emerald-300 font-semibold">
+              {isAr
+                ? "📋 قائمة أسماء وأرقام التشكيلة الرسمية (اختياري — خطوة واحدة مع الفيديو وتُطبّق تلقائياً!)"
+                : "📋 Paste Official Match Roster (Optional — unified Step 1, auto-applied on ingest!)"}
+            </label>
+            <textarea
+              rows={3}
+              value={officialRosterText}
+              disabled={isReadOnly}
+              onChange={(e) => setOfficialRosterText(e.target.value)}
+              placeholder={
+                isAr
+                  ? "مثال:\n1 - محمد الشناوي (GK)\n22 - إمام عاشور (CM)\n9 - محمد شريف (ST)"
+                  : "Example:\n1 - Mohamed El Shenawy (GK)\n22 - Emam Ashour (CM)"
+              }
+              className="w-full bg-[#090D16] border border-white/[0.12] rounded-lg px-2.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500/60"
+            />
           </div>
 
           <div className="flex flex-wrap gap-2.5">
