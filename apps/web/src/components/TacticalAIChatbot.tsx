@@ -35,6 +35,83 @@ interface ChatMessage {
   followUps?: string[];
 }
 
+function renderInlineTokens(line: string): React.ReactNode[] {
+  // Parse **bold** and `code` tokens cleanly into JSX
+  const parts = line.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  return parts.map((part, idx) => {
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+      return (
+        <strong key={idx} className="font-extrabold text-white">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      return (
+        <code
+          key={idx}
+          className="px-1.5 py-0.5 mx-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-mono text-[11px]"
+        >
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    return <span key={idx}>{part}</span>;
+  });
+}
+
+function renderFormattedMarkdown(text: string): React.ReactNode {
+  const lines = text.split("\n");
+  return (
+    <div className="space-y-1.5">
+      {lines.map((rawLine, i) => {
+        const line = rawLine.trim();
+        if (!line) return <div key={i} className="h-1" />;
+        if (line === "---") {
+          return <hr key={i} className="border-white/10 my-2" />;
+        }
+        if (line.startsWith("### ")) {
+          return (
+            <div key={i} className="text-xs font-extrabold text-emerald-300 pt-1">
+              {renderInlineTokens(line.slice(4))}
+            </div>
+          );
+        }
+        if (line.startsWith("#### ")) {
+          return (
+            <div key={i} className="text-xs font-bold text-sky-300 pt-1">
+              {renderInlineTokens(line.slice(5))}
+            </div>
+          );
+        }
+        if (line.startsWith("> ")) {
+          return (
+            <div
+              key={i}
+              className="ps-2.5 py-1 border-s-2 border-emerald-500/50 bg-[#090D16]/70 rounded-e text-[11px] text-slate-200"
+            >
+              {renderInlineTokens(line.slice(2))}
+            </div>
+          );
+        }
+        if (line.startsWith("- ")) {
+          return (
+            <div key={i} className="flex items-start gap-1.5 text-[11.5px] text-slate-200">
+              <span className="text-emerald-400 font-bold">•</span>
+              <div className="flex-1">{renderInlineTokens(line.slice(2))}</div>
+            </div>
+          );
+        }
+        return (
+          <div key={i} className="text-[11.5px] leading-relaxed">
+            {renderInlineTokens(line)}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function TacticalAIChatbot({
   lang,
   matchId,
@@ -288,7 +365,7 @@ export default function TacticalAIChatbot({
                   <span>{m.engine}</span>
                 </div>
               )}
-              <div>{m.text}</div>
+              <div>{m.sender === "ai" ? renderFormattedMarkdown(m.text) : m.text}</div>
 
               {/* Structured Moment Did / Did Not / Where & Why Evidence Cards inside Chat */}
               {m.structuredCards && m.structuredCards.length > 0 && (

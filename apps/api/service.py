@@ -949,11 +949,21 @@ class ScoutV8Service:
     ) -> dict[str, Any]:
         """1-Click Smart Roster Auto-Assignment for the 2-Minute Identity QA Sheet.
 
-        Matches visible and sustained tracks in the match to the official match roster by team, role (GK vs Outfield),
-        and spatial position (Backline vs Midfield vs Attack), then persists verified names and jersey numbers.
+        Matches visible and sustained tracks in the match to the official match roster strictly by team and role
+        (never cross-assigning Team A players to Team B tracks!), then persists verified names and jersey numbers.
         """
         qa = self.get_qa_sheet(tenant_id, match_id, frame_id=frame_id)
-        roster = qa["official_roster"] or DEFAULT_MATCH_ROSTERS.get(match_id, [])
+        default_roster = DEFAULT_MATCH_ROSTERS.get(match_id, [])
+        saved_roster = qa["official_roster"] or []
+        # Merge saved_roster with default_roster so both Team A and Team B always have full team-tagged pools
+        merged_map: dict[tuple[str, int], dict[str, Any]] = {}
+        for r in default_roster + saved_roster:
+            t_key = str(r.get("team") or "team_a")
+            j_key = int(r.get("jersey_number") or 0)
+            if j_key > 0:
+                merged_map[(t_key, j_key)] = {**r, "team": t_key}
+        roster = list(merged_map.values()) if merged_map else list(default_roster)
+
         lineup_path = self._tenant_dir(tenant_id) / f"{match_id}_lineup.json"
         saved_lineup = (
             json.loads(lineup_path.read_text(encoding="utf-8"))
@@ -964,9 +974,6 @@ class ScoutV8Service:
 
         roster_a = [r for r in roster if r.get("team", "team_a") == "team_a"]
         roster_b = [r for r in roster if r.get("team") == "team_b"]
-        if not roster_b and len(roster) > 11:
-            roster_a = roster[:11]
-            roster_b = roster[11:]
 
         used_names: set[str] = set()
         assigned_count = 0
@@ -992,14 +999,15 @@ class ScoutV8Service:
                 assigned_count += 1
                 continue
 
+            # Strictly restrict to the track's own team pool (never assign Team A names to Team B!)
             pool = roster_a if team == "team_a" else roster_b
             avail_pool = [p for p in pool if str(p.get("name")) not in used_names]
-            if not avail_pool:
-                avail_pool = [p for p in roster if str(p.get("name")) not in used_names]
 
             chosen = None
             if role == "goalkeeper":
                 chosen = next((p for p in avail_pool if p.get("position") == "GK"), None)
+            else:
+                chosen = next((p for p in avail_pool if p.get("position") != "GK"), None)
             if chosen is None and avail_pool:
                 chosen = avail_pool[0]
 
@@ -1014,7 +1022,6 @@ class ScoutV8Service:
                 }
                 assigned_count += 1
             else:
-                # Fallback clean tactical number
                 fallback_j = tr["jersey_number"] or (tr["base_track_id"] if 1 <= tr["base_track_id"] <= 99 else ((idx % 11) + 2))
                 team_ar = qa["team_a_name_ar"] if team == "team_a" else qa["team_b_name_ar"]
                 overrides[tid_s] = {
