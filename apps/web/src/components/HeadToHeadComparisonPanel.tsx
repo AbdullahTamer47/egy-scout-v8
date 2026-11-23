@@ -292,7 +292,7 @@ export default function HeadToHeadComparisonPanel({
                         className="inline-flex items-center gap-1 px-2 py-1 rounded bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/35 text-sky-300 text-[10.5px] font-bold"
                       >
                         <Share2 className="w-3 h-3" />
-                        <span>{isAr ? "📱 إرسال للاعب" : "📱 Share to Player"}</span>
+                        <span>{isAr ? "إرسال للاعب" : "Share to Player"}</span>
                       </button>
                     </div>
                   </div>
@@ -305,7 +305,7 @@ export default function HeadToHeadComparisonPanel({
         {shareUrl && (
           <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="text-emerald-200 font-bold">
-              ✅ {isAr ? `تم إنشاء بوابة الموبايل المحمية للاعب ${shareUrl.player} (بدون ملاحظات الإدارة الداخلية):` : `Protected mobile portal ready for ${shareUrl.player}:`}
+              {isAr ? `تم إنشاء بوابة الموبايل المحمية للاعب ${shareUrl.player} (بدون ملاحظات الإدارة الداخلية):` : `Protected mobile portal ready for ${shareUrl.player}:`}
             </span>
             <a
               href={shareUrl.url}

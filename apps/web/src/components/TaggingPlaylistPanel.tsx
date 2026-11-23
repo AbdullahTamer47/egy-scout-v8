@@ -109,7 +109,7 @@ export default function TaggingPlaylistPanel({
       );
       setTags(res.tags || []);
       setNote("");
-      setStatusMsg(isAr ? `✅ تم حفظ وسم "${cat.ar}" عند ${currentTimeSec.toFixed(1)}ث` : `✅ Tagged "${cat.en}" at ${currentTimeSec.toFixed(1)}s`);
+      setStatusMsg(isAr ? `تم حفظ وسم "${cat.ar}" عند ${currentTimeSec.toFixed(1)}ث` : `Tagged "${cat.en}" at ${currentTimeSec.toFixed(1)}s`);
       setTimeout(() => setStatusMsg(null), 2600);
     } catch (e) {
       setStatusMsg(String(e));
@@ -156,8 +156,8 @@ export default function TaggingPlaylistPanel({
       setTags(res.tags || []);
       setStatusMsg(
         isAr
-          ? `✅ تم استيراد ${res.imported_count} لقطة من ملف Sportscode / Nacsport XML!`
-          : `✅ Imported ${res.imported_count} Sportscode XML instances!`
+          ? `تم استيراد ${res.imported_count} لقطة من ملف Sportscode / Nacsport XML`
+          : `Imported ${res.imported_count} Sportscode XML instances`
       );
       setTimeout(() => setStatusMsg(null), 3200);
     } catch (err) {
@@ -217,7 +217,7 @@ export default function TaggingPlaylistPanel({
       a.download = `egy-scout-voiced-${matchId}.mp4`;
       a.click();
       URL.revokeObjectURL(url);
-      setStatusMsg(isAr ? "✅ تم دمج التعليق الصوتي مع رسوم البث في ملف MP4 واحد!" : "✅ Muxed voiceover into MP4!");
+      setStatusMsg(isAr ? "تم دمج التعليق الصوتي مع رسوم البث في ملف MP4 واحد" : "Muxed voiceover into MP4");
     } catch (e) {
       setStatusMsg(String(e));
     } finally {
@@ -251,8 +251,8 @@ export default function TaggingPlaylistPanel({
       URL.revokeObjectURL(url);
       setStatusMsg(
         isAr
-          ? `✅ تم تصدير محاضرة غرفة الملابس كاملة (${visibleTags.length} لقطات${boardSlidePng ? " + شريحة المرسم" : ""}) كفيديو MP4 واحد!`
-          : "✅ Merged lecture MP4 downloaded!"
+          ? `تم تصدير محاضرة غرفة الملابس كاملة (${visibleTags.length} لقطات${boardSlidePng ? " + شريحة السبورة" : ""}) كفيديو MP4 واحد`
+          : "Merged lecture MP4 downloaded"
       );
     } catch (e) {
       setStatusMsg(String(e));
@@ -286,7 +286,7 @@ export default function TaggingPlaylistPanel({
             }`}
           >
             {recording ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5 text-rose-400" />}
-            <span>{recording ? (isAr ? "إيقاف التسجيل" : "Stop Voice") : isAr ? "🎙️ تعليق صوتي" : "🎙️ Voiceover"}</span>
+            <span>{recording ? (isAr ? "إيقاف التسجيل" : "Stop Voice") : isAr ? "تعليق صوتي" : "Voiceover"}</span>
           </button>
 
           {voiceUrl && (
@@ -298,7 +298,7 @@ export default function TaggingPlaylistPanel({
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/40 text-rose-200 font-bold"
               >
                 <Film className="w-3.5 h-3.5" />
-                <span>{muxingVoice ? (isAr ? "جاري الدمج..." : "Muxing...") : isAr ? "🎬 دمج الصوت في MP4" : "🎬 Mux MP4"}</span>
+                <span>{muxingVoice ? (isAr ? "جاري الدمج..." : "Muxing...") : isAr ? "دمج الصوت في MP4" : "Mux MP4"}</span>
               </button>
               <a
                 href={voiceUrl}
@@ -316,15 +316,15 @@ export default function TaggingPlaylistPanel({
             disabled={visibleTags.length === 0 || exportingMerged}
             onClick={handleExportMergedPlaylistMp4}
             className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 disabled:opacity-40 border border-indigo-400/40 text-indigo-200 font-bold"
-            title={isAr ? "تصدير كل لقطات القائمة + شريحة المرسم في فيديو محاضرة MP4 واحد" : "Export Merged Lecture MP4"}
+            title={isAr ? "تصدير كل لقطات القائمة + شريحة السبورة في فيديو محاضرة MP4 واحد" : "Export Merged Lecture MP4"}
           >
             <Film className="w-3.5 h-3.5" />
             <span>
               {exportingMerged
                 ? isAr ? "جاري تجميع المحاضرة..." : "Merging..."
                 : isAr
-                ? `🎬 تصدير المحاضرة MP4${boardSlidePng ? " (+شريحة)" : ""}`
-                : "🎬 Export Lecture MP4"}
+                ? `تصدير المحاضرة MP4${boardSlidePng ? " (+شريحة)" : ""}`
+                : "Export Lecture MP4"}
             </span>
           </button>
 
@@ -361,7 +361,7 @@ export default function TaggingPlaylistPanel({
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-extrabold transition"
           >
             <Presentation className="w-3.5 h-3.5" />
-            <span>{isAr ? `📽️ عرض غرفة الملابس (${visibleTags.length})` : `📽️ Present (${visibleTags.length})`}</span>
+            <span>{isAr ? `عرض غرفة الملابس (${visibleTags.length})` : `Present (${visibleTags.length})`}</span>
           </button>
         </div>
       </div>

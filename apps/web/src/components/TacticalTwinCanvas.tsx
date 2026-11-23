@@ -414,7 +414,7 @@ export default function TacticalTwinCanvas({
                 : "bg-[#090D16] border-white/[0.08] text-slate-500"
             }`}
           >
-            {isAr ? "📡 قنوات التمرير" : "📡 Pass Channels"}
+            {isAr ? "قنوات التمرير" : "Pass Channels"}
           </button>
           <button
             type="button"
@@ -425,7 +425,7 @@ export default function TacticalTwinCanvas({
                 : "bg-[#090D16] border-white/[0.08] text-slate-500"
             }`}
           >
-            {isAr ? "♟️ أسهم التصحيح" : "♟️ Correction Vectors"}
+            {isAr ? "أسهم التصحيح" : "Correction Vectors"}
           </button>
           <button
             type="button"

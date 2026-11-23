@@ -2737,42 +2737,40 @@ class ScoutV8Service:
             f"- محور العرض Y من 0 (خط التماس العلوي) إلى 68 متر (خط التماس السفلي)، ووسط الملعب عند Y=34.\n"
             f"- الفريق الأول (team_a — نادينا): {ta_ar} يهاجم من اليسار إلى اليمين (نحو X=105).\n"
             f"- الفريق الثاني (team_b — الخصم): {tb_ar} يهاجم من اليمين إلى اليسار (نحو X=0).\n\n"
-            "قواعد صارمة لتنفيذ أي خطة جديدة أو مجنونة أو غير تقليدية:\n"
-            "1. لا تلتزم أبداً بالتشكيلات التقليدية إذا طلب المستخدم خطة مجنونة أو جديدة أو مبتكرة أو غير متماثلة! ضع الإحداثيات الحقيقية (x_m, y_m) لكل لاعب من الـ 11 لاعباً بحرية مطلقة لتجسيد الفكرة حرفياً!\n"
-            "   - مثلاً: لو طلب «حارس متقدم لمنتصف الملعب» ضع GK عند x_m=42.\n"
-            "   - لو طلب «هجوم كاسح على الجبهة اليسرى وتفريغ اليمين» ضع 7 لاعبين عند y_m بين 6 و 28.\n"
-            "   - لو طلب «خطة هرمية أو دائرية أو 1-1-8 أو 2-1-6-1 أو ابتكار خطة لم تُلعب من قبل» وزّع الـ 11 إحداثياً بدقة هندسية حقيقية تجسد الشكل المطلوب!\n"
-            "2. أخرج كائن JSON صالحاً فقط بهذا الشكل بالضبط:\n"
+            "قواعد صارمة لتنفيذ أي خطة تكتيكية (تقليدية أو مبتكرة):\n"
+            "1. ثبّت حارس المرمى (GK) دائماً داخل منطقة الجزاء (x_m=6.0 و y_m=34.0 للفريق الأول، و x_m=99.0 و y_m=34.0 للخصم) بدون سهم حركة (move_to_x_m=x_m) إلا إذا طلب المستخدم صراحةً تقدم الحارس!\n"
+            "2. اجعل أسهم تحرك اللاعبين (move_to_x_m, move_to_y_m) قصيرة ومنطقية (بحد أقصى 8 إلى 10 أمتار في اتجاه التحرك التكتيكي) ولا ترسم أسهماً عشوائية متقاطعة عبر الملعب.\n"
+            "3. إذا طلب المستخدم خطة جديدة أو مبتكرة أو غير متماثلة (مثل 2-1-6-1 أو 3-2-4-1 أو هجوم كاسح على جبهة)، وزّع اللاعبين الـ 10 الميدانيين بدقة هندسية واضحة ومنظمة بدون تداخل.\n"
+            "4. أخرج كائن JSON صالحاً فقط بهذا الشكل بالضبط:\n"
             "{\n"
-            '  "team_a_formation": "اسم/رمز التشكيل مثل 2-1-6-1 أو 1-3-5-1 أو 4-3-3 أو اسم مبتكر",\n'
-            '  "team_b_formation": "تشكيل الخصم مثل 5-4-1 أو 4-4-2",\n'
+            '  "team_a_formation": "رمز التشكيل مثل 4-2-3-1 أو 3-2-4-1 أو 2-1-6-1",\n'
+            '  "team_b_formation": "تشكيل الخصم مثل 4-4-2 أو 5-4-1",\n'
             '  "team_a_style": "balanced | aggressive | conservative | tiki_taka | counter_attack | inverted_fullbacks | wing_overload",\n'
             '  "team_b_style": "balanced | aggressive | conservative | tiki_taka | counter_attack | inverted_fullbacks | wing_overload",\n'
-            '  "title_ar": "اسم جذاب ودقيق للخطة المرسومة بالعربية",\n'
-            '  "coach_explanation_ar": "شرح تكتيكي عميق لماذا هذه الخطة عبقرية وكيف تربك الخصم وكيف تتحرك خطوطها",\n'
+            '  "title_ar": "اسم واضح للخطة التكتيكية بالعربية",\n'
+            '  "coach_explanation_ar": "شرح تكتيكي واضح ومباشر لكيفية عمل الخطة وتوزيع الأدوار",\n'
             '  "team_a_nodes": [\n'
-            '    {"slot": "GK", "role_ar": "حارس ليبرو متقدم", "x_m": 22.0, "y_m": 34.0, "move_to_x_m": 34.0, "move_to_y_m": 34.0, "duty_ar": "المشاركة في البناء من المنتصف"},\n'
-            '    "... (11 لاعباً بالضبط لـ team_a بإحداثيات x_m في [4..100] و y_m في [5..63])"\n'
+            '    {"slot": "GK", "role_ar": "حارس مرمى", "x_m": 6.0, "y_m": 34.0, "move_to_x_m": 6.0, "move_to_y_m": 34.0, "duty_ar": "حماية المرمى وبناء اللعب الآمن"},\n'
+            '    "... (11 لاعباً بالضبط لـ team_a بإحداثيات منظمة)"\n'
             "  ],\n"
             '  "team_a_lines": [\n'
-            '    {"line_type": "backline", "label_ar": "الخط الأول", "slots": ["CB1", "CB2"]},\n'
-            '    {"line_type": "midfield", "label_ar": "الخط الوسطي / الشكل المبتكر", "slots": ["DM", "CM1", "CM2"]},\n'
-            '    {"line_type": "attack", "label_ar": "كتلة الهجوم", "slots": ["LW", "ST", "RW"]}\n'
+            '    {"line_type": "backline", "label_ar": "خط الدفاع", "slots": ["LB", "LCB", "RCB", "RB"]},\n'
+            '    {"line_type": "midfield", "label_ar": "خط الوسط", "slots": ["LDM", "RDM", "CAM"]},\n'
+            '    {"line_type": "attack", "label_ar": "خط الهجوم", "slots": ["LW", "ST", "RW"]}\n'
             "  ],\n"
             '  "team_b_nodes": [\n'
-            '    {"slot": "GK", "role_ar": "حارس الخصم", "x_m": 99.0, "y_m": 34.0, "move_to_x_m": 96.0, "move_to_y_m": 34.0, "duty_ar": "حماية المرمى"},\n'
+            '    {"slot": "GK", "role_ar": "حارس الخصم", "x_m": 99.0, "y_m": 34.0, "move_to_x_m": 99.0, "move_to_y_m": 34.0, "duty_ar": "حماية المرمى"},\n'
             '    "... (11 لاعباً بالضبط للخصم team_b)"\n'
             "  ],\n"
             '  "custom_arrows": [\n'
-            '    {"from_x_m": 45.0, "from_y_m": 34.0, "to_x_m": 78.0, "to_y_m": 16.0, "kind": "pass", "color": "#FACC15", "label_ar": "تمريرة كاسرة"},\n'
-            '    {"from_x_m": 66.0, "from_y_m": 15.0, "to_x_m": 92.0, "to_y_m": 28.0, "kind": "run", "color": "#10B981", "label_ar": "اختراق صاعق"}\n'
+            '    {"from_x_m": 38.0, "from_y_m": 34.0, "to_x_m": 62.0, "to_y_m": 24.0, "kind": "pass", "color": "#FACC15", "label_ar": "تمريرة كاسرة للخطوط"}\n'
             "  ],\n"
             '  "custom_zones": [\n'
-            '    {"x1_m": 64.0, "y1_m": 10.0, "x2_m": 94.0, "y2_m": 36.0, "color": "#F59E0B", "label_ar": "منطقة التفوق العددي / المصيدة"}\n'
+            '    {"x1_m": 66.0, "y1_m": 18.0, "x2_m": 88.0, "y2_m": 50.0, "color": "#F59E0B", "label_ar": "منطقة التفوق العددي"}\n'
             "  ],\n"
-            '  "execution_steps_ar": ["1. ...", "2. ...", "3. ...", "4. ..."]\n'
+            '  "execution_steps_ar": ["1. ...", "2. ...", "3. ..."]\n'
             "}\n"
-            "مهم جداً: أعطِ 11 لاعباً كاملين في team_a_nodes و11 لاعباً في team_b_nodes، و5 إلى 8 أسهم في custom_arrows، ومنطقتين في custom_zones تجسد فكرة المستخدم بحرية وإبداع كامل!"
+            "مهم جداً: أعطِ 11 لاعباً كاملين في team_a_nodes و11 لاعباً في team_b_nodes، وسهمين تكتيكيين فقط في custom_arrows بدون أي فوضى بصرية!"
         )
 
         llm_raw, provider = self._call_external_llm_if_configured(
@@ -2814,6 +2812,11 @@ class ScoutV8Service:
         # Apply direct custom AI coordinates for ALL 11 players using POSITION-AWARE squad matching (zero LB-at-CB!)
         from packages.tactics_engine.moment_analyzer import _assign_roster_by_position
 
+        wants_sweeper_gk = any(
+            kw in (prompt or "").lower()
+            for kw in ("حارس متقدم", "تقدم الحارس", "حارس ليبرو", "طلع الحارس", "sweeper")
+        )
+
         def _merge_ai_nodes(
             ai_list: Any, base_nodes: list[dict[str, Any]], team_key: str
         ) -> list[dict[str, Any]]:
@@ -2821,6 +2824,8 @@ class ScoutV8Service:
                 return base_nodes
             valid_raw = [nd for nd in ai_list[:11] if isinstance(nd, dict)]
             ai_slots = [str(nd.get("slot") or f"P{i+1}")[:8] for i, nd in enumerate(valid_raw)]
+            if ai_slots:
+                ai_slots[0] = "GK"
             roster_pool = [
                 {
                     "verified_name": bn.get("player_label"),
@@ -2836,20 +2841,42 @@ class ScoutV8Service:
             for idx, raw_nd in enumerate(valid_raw):
                 base_nd = base_nodes[idx] if idx < len(base_nodes) else {}
                 matched = pos_matched[idx] if idx < len(pos_matched) and pos_matched[idx] else {}
-                xm = float(np.clip(float(raw_nd.get("x_m", base_nd.get("x_m", 52.5))), 3.0, 102.0))
-                ym = float(np.clip(float(raw_nd.get("y_m", base_nd.get("y_m", 34.0))), 4.0, 64.0))
-                mx = float(np.clip(float(raw_nd.get("move_to_x_m", xm)), 3.0, 102.0))
-                my = float(np.clip(float(raw_nd.get("move_to_y_m", ym)), 4.0, 64.0))
+                slot_code = ai_slots[idx].upper()
+                is_gk = (idx == 0) or (slot_code == "GK")
+
+                if is_gk and not wants_sweeper_gk:
+                    # Strictly lock goalkeeper inside penalty box with ZERO movement arrow
+                    xm = 6.0 if team_key == "team_a" else 99.0
+                    ym = 34.0
+                    mx, my = xm, ym
+                else:
+                    min_x = 12.0 if (team_key == "team_a" and not is_gk) else 4.0
+                    max_x = 93.0 if (team_key == "team_b" and not is_gk) else 101.0
+                    xm = float(np.clip(float(raw_nd.get("x_m", base_nd.get("x_m", 52.5))), min_x, max_x))
+                    ym = float(np.clip(float(raw_nd.get("y_m", base_nd.get("y_m", 34.0))), 5.0, 63.0))
+                    raw_mx = float(np.clip(float(raw_nd.get("move_to_x_m", xm)), min_x, max_x))
+                    raw_my = float(np.clip(float(raw_nd.get("move_to_y_m", ym)), 5.0, 63.0))
+                    # Clamp movement vector length so AI never draws wild 40m arrows across the pitch
+                    dx, dy = raw_mx - xm, raw_my - ym
+                    dist = float(np.hypot(dx, dy))
+                    max_run = 3.0 if ("CB" in slot_code and not wants_sweeper_gk) else 9.5
+                    if dist > max_run and dist > 0:
+                        scale = max_run / dist
+                        mx = xm + dx * scale
+                        my = ym + dy * scale
+                    else:
+                        mx, my = raw_mx, raw_my
+
                 # Prevent two players on the same team from sitting directly on top of each other
                 for prev_nd in merged:
-                    if float(np.hypot(xm - prev_nd["x_m"], ym - prev_nd["y_m"])) < 3.5:
-                        xm = float(np.clip(xm + 4.5, 4.0, 101.0))
-                        ym = float(np.clip(ym + (3.5 if ym < 34.0 else -3.5), 5.0, 63.0))
+                    if float(np.hypot(xm - prev_nd["x_m"], ym - prev_nd["y_m"])) < 3.8:
+                        xm = float(np.clip(xm + (4.2 if team_key == "team_a" else -4.2), 5.0, 100.0))
+                        ym = float(np.clip(ym + (4.0 if ym < 34.0 else -4.0), 5.0, 63.0))
                 merged.append(
                     {
                         "team": team_key,
                         "slot": ai_slots[idx],
-                        "role_ar": str(raw_nd.get("role_ar") or base_nd.get("role_ar") or "دور تكتيكي حر"),
+                        "role_ar": str(raw_nd.get("role_ar") or base_nd.get("role_ar") or "دور تكتيكي"),
                         "player_label": str(matched.get("verified_name") or base_nd.get("player_label") or ai_slots[idx]),
                         "track_id": matched.get("track_id") if matched else base_nd.get("track_id"),
                         "jersey_number": matched.get("jersey_number") or base_nd.get("jersey_number") or (idx + 1),
@@ -2857,41 +2884,42 @@ class ScoutV8Service:
                         "y_m": round(ym, 1),
                         "move_to_x_m": round(mx, 1),
                         "move_to_y_m": round(my, 1),
-                        "duty_ar": str(raw_nd.get("duty_ar") or base_nd.get("duty_ar") or "واجب تكتيكي مبتكر"),
+                        "duty_ar": str(raw_nd.get("duty_ar") or base_nd.get("duty_ar") or "واجب تكتيكي"),
                     }
                 )
             while len(merged) < len(base_nodes):
                 merged.append(base_nodes[len(merged)])
             return merged if len(merged) >= 6 else base_nodes
 
+        def _rebuild_clean_lines(nodes_list: list[dict[str, Any]], team_key: str) -> list[dict[str, Any]]:
+            """Cluster outfield players by depth (x_m) into 3 clean lines sorted by y_m (zero twisted/floating lines)."""
+            outfield = [n for n in nodes_list if str(n.get("slot", "")).upper() != "GK"]
+            if len(outfield) < 4:
+                return []
+            ordered_x = sorted(outfield, key=lambda n: n["x_m"] if team_key == "team_a" else -n["x_m"])
+            n_def = min(4, max(2, len(ordered_x) // 3))
+            n_mid = min(4, max(2, (len(ordered_x) - n_def) // 2))
+            bands = [
+                ("backline", "خط الدفاع", ordered_x[:n_def]),
+                ("midfield", "خط الوسط", ordered_x[n_def : n_def + n_mid]),
+                ("attack", "خط الهجوم", ordered_x[n_def + n_mid :]),
+            ]
+            clean_lines = []
+            for ltype, lbl, grp in bands:
+                pts = sorted(
+                    [{"slot": g["slot"], "x_m": g["x_m"], "y_m": g["y_m"]} for g in grp],
+                    key=lambda p: p["y_m"],
+                )
+                if len(pts) >= 2:
+                    clean_lines.append({"team": team_key, "line_type": ltype, "label_ar": lbl, "points": pts})
+            return clean_lines
+
         bp["nodes"] = _merge_ai_nodes(ai_spec.get("team_a_nodes"), bp["nodes"], "team_a")
         bp["opponent_nodes"] = _merge_ai_nodes(
             ai_spec.get("team_b_nodes"), bp.get("opponent_nodes", []), "team_b"
         )
-
-        # Build custom connected tactical lines from AI's team_a_lines (or auto-cluster AI's custom coordinates)
-        if isinstance(ai_spec.get("team_a_lines"), list) and ai_spec["team_a_lines"]:
-            slot_xy = {n["slot"]: (n["x_m"], n["y_m"]) for n in bp["nodes"]}
-            custom_lines = []
-            for ln in ai_spec["team_a_lines"]:
-                if not isinstance(ln, dict):
-                    continue
-                pts = [
-                    {"slot": sl, "x_m": slot_xy[sl][0], "y_m": slot_xy[sl][1]}
-                    for sl in (ln.get("slots") or [])
-                    if sl in slot_xy
-                ]
-                if len(pts) >= 2:
-                    custom_lines.append(
-                        {
-                            "team": "team_a",
-                            "line_type": str(ln.get("line_type") or "midfield"),
-                            "label_ar": str(ln.get("label_ar") or "خط تكتيكي"),
-                            "points": pts,
-                        }
-                    )
-            if custom_lines:
-                bp["lines"] = custom_lines
+        bp["lines"] = _rebuild_clean_lines(bp["nodes"], "team_a")
+        bp["opponent_lines"] = _rebuild_clean_lines(bp["opponent_nodes"], "team_b")
 
         bp["formation_code"] = final_f_a
         bp["opponent_formation_code"] = final_f_b
@@ -2901,22 +2929,37 @@ class ScoutV8Service:
             bp["philosophy_ar"] = str(ai_spec["coach_explanation_ar"])
         if isinstance(ai_spec.get("execution_steps_ar"), list) and ai_spec["execution_steps_ar"]:
             bp["execution_steps_ar"] = [str(s) for s in ai_spec["execution_steps_ar"]]
-        if isinstance(ai_spec.get("custom_arrows"), list) and ai_spec["custom_arrows"]:
-            bp["custom_arrows"] = ai_spec["custom_arrows"]
-        else:
-            # Synthesize key tactical passing/progression arrows from the AI's custom nodes
-            a_sorted = sorted(bp["nodes"], key=lambda n: n["x_m"])
-            synth_arrows = []
-            if len(a_sorted) >= 10:
-                pairs = [(0, 3, "بناء من العمق", "#38BDF8", "pass"), (3, 7, "تمريرة كاسرة", "#FACC15", "pass"), (7, 10, "اختراق نهائي", "#10B981", "run")]
-                for i1, i2, lbl, col, knd in pairs:
-                    n1, n2 = a_sorted[i1], a_sorted[i2]
-                    synth_arrows.append({
-                        "from_x_m": n1["x_m"], "from_y_m": n1["y_m"],
-                        "to_x_m": n2["x_m"], "to_y_m": n2["y_m"],
-                        "kind": knd, "color": col, "label_ar": lbl,
-                    })
-            bp["custom_arrows"] = synth_arrows
+
+        # Build at most 2 clean progressive passing links anchored to REAL outfield player coordinates (never GK!)
+        outfield_a = sorted(
+            [n for n in bp["nodes"] if str(n.get("slot", "")).upper() != "GK"],
+            key=lambda n: n["x_m"],
+        )
+        synth_arrows = []
+        if len(outfield_a) >= 8:
+            for i1, i2, lbl, col in (
+                (2, 5, "تدرج لعمق الوسط", "#38BDF8"),
+                (5, 8, "تمريرة للثلث الهجومي", "#10B981"),
+            ):
+                n1, n2 = outfield_a[i1], outfield_a[i2]
+                synth_arrows.append({
+                    "from_x_m": n1["x_m"], "from_y_m": n1["y_m"],
+                    "to_x_m": n2["x_m"], "to_y_m": n2["y_m"],
+                    "kind": "pass", "color": col, "label_ar": lbl,
+                })
+        bp["custom_arrows"] = synth_arrows
+        bp["passing_arrows"] = [
+            {
+                "team": "team_a",
+                "from_slot": outfield_a[2]["slot"],
+                "to_slot": outfield_a[5]["slot"],
+                "from_x_m": outfield_a[2]["x_m"],
+                "from_y_m": outfield_a[2]["y_m"],
+                "to_x_m": outfield_a[5]["x_m"],
+                "to_y_m": outfield_a[5]["y_m"],
+                "label_ar": "بناء التدرج",
+            }
+        ] if len(outfield_a) >= 6 else []
         if isinstance(ai_spec.get("custom_zones"), list) and ai_spec["custom_zones"]:
             bp["custom_zones"] = ai_spec["custom_zones"]
         else:

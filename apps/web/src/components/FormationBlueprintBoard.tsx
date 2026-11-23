@@ -51,7 +51,7 @@ interface Props {
 }
 
 type DrawTool = "drag_player" | "run_arrow" | "pass_arrow" | "press_arrow" | "zone_box" | "freehand";
-type TeamDisplayMode = "both" | "team_a" | "team_b";
+type TeamDisplayMode = "dual" | "both" | "team_a" | "team_b";
 type PitchViewMode = "full" | "half" | "corner";
 
 interface TrainingProp {
@@ -85,7 +85,7 @@ interface FreehandStroke {
 const PRESET_FORMATIONS = ["4-2-3-1", "4-3-3", "3-4-2-1", "3-5-2", "4-4-2", "5-3-2", "4-1-4-1", "4-2-2-2"];
 
 const GROQ_AI_MODELS = [
-  { id: "auto", ar: "⚡ تلقائي ذكي (Auto Smart Router)", en: "⚡ Auto Smart Router" },
+  { id: "auto", ar: "تلقائي ذكي (Auto Smart Router)", en: "Auto Smart Router" },
   { id: "openai/gpt-oss-120b", ar: "GPT-OSS 120B (الأقوى للخطط المبتكرة)", en: "GPT-OSS 120B (Flagship)" },
   { id: "qwen/qwen3.8-27b", ar: "Qwen 3.8 27B (ذكي وسريع)", en: "Qwen 3.8 27B (Fast Arabic)" },
   { id: "openai/gpt-oss-20b", ar: "GPT-OSS 20B (فائق السرعة)", en: "GPT-OSS 20B (Turbo)" },
@@ -147,10 +147,12 @@ export default function FormationBlueprintBoard({
   const [customInputB, setCustomInputB] = useState("4-4-2");
   const [styleA, setStyleA] = useState("tiki_taka");
   const [styleB, setStyleB] = useState("balanced");
-  const [teamDisplay, setTeamDisplay] = useState<TeamDisplayMode>("both");
+  const [teamDisplay, setTeamDisplay] = useState<TeamDisplayMode>("dual");
   const [drawTool, setDrawTool] = useState<DrawTool>("drag_player");
   const [showLines, setShowLines] = useState(true);
-  const [showPassVectors, setShowPassVectors] = useState(true);
+  const [showRunArrows, setShowRunArrows] = useState(true);
+  const [showPassVectors, setShowPassVectors] = useState(false);
+  const [showZones, setShowZones] = useState(false);
 
   const [blueprint, setBlueprint] = useState<FormationBlueprintPayload | null>(externalBlueprint);
   const [nodesA, setNodesA] = useState<BlueprintNode[]>([]);
@@ -192,6 +194,8 @@ export default function FormationBlueprintBoard({
   const [aiLoading, setAiLoading] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasBRef = useRef<HTMLCanvasElement | null>(null);
+  const activeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const skipNextFetchRef = useRef<boolean>(false);
   const draggingNodeRef = useRef<
@@ -401,7 +405,6 @@ export default function FormationBlueprintBoard({
       }
       setUserArrows(externalBlueprint.custom_arrows || []);
       setUserZones(externalBlueprint.custom_zones || []);
-      setTeamDisplay("both");
     }
   }, [externalBlueprint]);
 
@@ -470,7 +473,6 @@ export default function FormationBlueprintBoard({
       if (res.tactical_mode) setStyleA(res.tactical_mode);
       setUserArrows(res.custom_arrows || []);
       setUserZones(res.custom_zones || []);
-      setTeamDisplay("both");
     } catch {} finally {
       setAiLoading(false);
     }
@@ -566,7 +568,7 @@ export default function FormationBlueprintBoard({
         role
       );
       setSavedPlans(res.plans || [item, ...savedPlans]);
-      setSaveBanner(isAr ? "✅ تم حفظ الخطة دائماً في قاعدة بيانات السيرفر!" : "✅ Saved permanently to Server SQLite DB!");
+      setSaveBanner(isAr ? "تم حفظ الخطة دائماً في قاعدة بيانات السيرفر" : "Saved permanently to Server SQLite DB");
       setTimeout(() => setSaveBanner(null), 2800);
     } catch {
       const next = [item, ...savedPlans].slice(0, 12);
@@ -574,7 +576,7 @@ export default function FormationBlueprintBoard({
       try {
         localStorage.setItem(SAVED_PLANS_KEY, JSON.stringify(next));
       } catch {}
-      setSaveBanner(isAr ? "✅ تم حفظ الخطة محلياً!" : "✅ Saved locally!");
+      setSaveBanner(isAr ? "تم حفظ الخطة محلياً" : "Saved locally");
       setTimeout(() => setSaveBanner(null), 2600);
     }
   };
@@ -605,7 +607,6 @@ export default function FormationBlueprintBoard({
           }
         : prev
     );
-    setTeamDisplay("both");
   };
 
   const handleDeleteSavedPlan = async (id: string) => {
@@ -669,7 +670,7 @@ export default function FormationBlueprintBoard({
       if (parsed.userZones) setUserZones(parsed.userZones);
       if (parsed.trainingProps) setTrainingProps(parsed.trainingProps);
       if (parsed.keyframes) setKeyframes(parsed.keyframes);
-      setSaveBanner(isAr ? "✅ تم استيراد ملف .egyplan بنجاح!" : "✅ Imported .egyplan file!");
+      setSaveBanner(isAr ? "تم استيراد ملف .egyplan بنجاح" : "Imported .egyplan file");
       setTimeout(() => setSaveBanner(null), 2600);
     } catch {} finally {
       e.target.value = "";
@@ -720,7 +721,8 @@ export default function FormationBlueprintBoard({
       return [...gk, ...out.map((n) => updatedMap.get(n) || n)];
     };
     setNodesA((prev) => alignTeam(prev));
-    setSaveBanner(isAr ? "📏 تمت محاذاة خطوط التشكيل تلقائياً!" : "📏 Formation lines aligned!");
+    setNodesB((prev) => alignTeam(prev));
+    setSaveBanner(isAr ? "تمت محاذاة خطوط التشكيل تلقائياً" : "Formation lines aligned");
     setTimeout(() => setSaveBanner(null), 2200);
   };
 
@@ -792,7 +794,7 @@ export default function FormationBlueprintBoard({
               a.click();
               URL.revokeObjectURL(url);
               setSaveBanner(
-                isAr ? `✅ تم تصدير الخطة المتحركة بصيغة ${targetFmt.toUpperCase()} مجاناً!` : `✅ Exported ${targetFmt.toUpperCase()}!`
+                isAr ? `تم تصدير الخطة المتحركة بصيغة ${targetFmt.toUpperCase()}` : `Exported ${targetFmt.toUpperCase()}`
               );
               setTimeout(() => setSaveBanner(null), 2600);
               return;
@@ -830,8 +832,8 @@ export default function FormationBlueprintBoard({
       : { x0: 0, x1: 105, y0: 0, y1: 68 };
 
   // Convert canvas client event -> pitch meters (respecting Full / Half / Corner pitchView + optional Snap-to-Grid!)
-  const clientToPitchMeters = (clientX: number, clientY: number): [number, number] => {
-    const cvs = canvasRef.current;
+  const clientToPitchMeters = (clientX: number, clientY: number, targetCvs?: HTMLCanvasElement | null): [number, number] => {
+    const cvs = targetCvs || activeCanvasRef.current || canvasRef.current;
     if (!cvs) return [52.5, 34.0];
     const rect = cvs.getBoundingClientRect();
     const pad = 24;
@@ -851,8 +853,12 @@ export default function FormationBlueprintBoard({
     return [Math.round(xm * 10) / 10, Math.round(ym * 10) / 10];
   };
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const [xm, ym] = clientToPitchMeters(e.clientX, e.clientY);
+  const handleMouseDown = (
+    e: React.MouseEvent<HTMLCanvasElement>,
+    boardScope: "both" | "team_a" | "team_b" = "both"
+  ) => {
+    activeCanvasRef.current = e.currentTarget;
+    const [xm, ym] = clientToPitchMeters(e.clientX, e.clientY, e.currentTarget);
 
     if (drawTool === "drag_player") {
       // 0. Check training props (ball, cone, mini_goal, mannequin) within 3.2m
@@ -868,6 +874,8 @@ export default function FormationBlueprintBoard({
       const selNd = selList[selectedNode.index];
       if (
         selNd &&
+        showRunArrows &&
+        (boardScope === "both" || boardScope === selectedNode.team) &&
         Math.hypot(selNd.move_to_x_m - xm, selNd.move_to_y_m - ym) <= 3.8 &&
         Math.hypot(selNd.move_to_x_m - selNd.x_m, selNd.move_to_y_m - selNd.y_m) >= 2.0
       ) {
@@ -876,9 +884,9 @@ export default function FormationBlueprintBoard({
         return;
       }
 
-      // 2. Find nearest player node from visible teams within 4.8m
+      // 2. Find nearest player node from visible teams on this board within 4.8m
       let bestHit: { team: "team_a" | "team_b"; index: number; dist: number } | null = null;
-      if (teamDisplay !== "team_b") {
+      if (boardScope !== "team_b") {
         nodesA.forEach((nd, idx) => {
           const d = Math.hypot(nd.x_m - xm, nd.y_m - ym);
           if (d <= 4.8 && (!bestHit || d < bestHit.dist)) {
@@ -886,7 +894,7 @@ export default function FormationBlueprintBoard({
           }
         });
       }
-      if (teamDisplay !== "team_a") {
+      if (boardScope !== "team_a") {
         nodesB.forEach((nd, idx) => {
           const d = Math.hypot(nd.x_m - xm, nd.y_m - ym);
           if (d <= 4.8 && (!bestHit || d < bestHit.dist)) {
@@ -1026,430 +1034,454 @@ export default function FormationBlueprintBoard({
     }
   };
 
-  // Master Canvas Render Effect
+  // Master Canvas Render Effect (Supports Dual Side-by-Side Boards OR Single Combined/Filtered Board)
   useEffect(() => {
-    const cvs = canvasRef.current;
-    if (!cvs || !blueprint) return;
-    const ctx = cvs.getContext("2d");
-    if (!ctx) return;
+    if (!blueprint) return;
 
-    const W = cvs.width;
-    const H = cvs.height;
-    const pad = 24;
-    const pw = W - pad * 2;
-    const ph = H - pad * 2;
+    const renderBoardCanvas = (cvs: HTMLCanvasElement, scope: "both" | "team_a" | "team_b") => {
+      const ctx = cvs.getContext("2d");
+      if (!ctx) return;
 
-    // 1. Stadium Turf Background with Mowed Stripes + Multi-Pitch View Zoom Transform
-    ctx.fillStyle = "#061A13";
-    ctx.fillRect(0, 0, W, H);
+      const W = cvs.width;
+      const H = cvs.height;
+      const pad = 24;
+      const pw = W - pad * 2;
+      const ph = H - pad * 2;
 
-    ctx.save();
-    const vb = getViewBounds();
-    if (pitchView !== "full") {
-      ctx.beginPath();
-      ctx.rect(pad, pad, pw, ph);
-      ctx.clip();
-      const sx = 105 / (vb.x1 - vb.x0);
-      const sy = 68 / (vb.y1 - vb.y0);
-      ctx.translate(pad, pad);
-      ctx.scale(sx, sy);
-      ctx.translate(-(pad + (vb.x0 / 105) * pw), -(pad + (vb.y0 / 68) * ph));
-    }
+      // 1. Stadium Turf Background with Mowed Stripes + Multi-Pitch View Zoom Transform
+      ctx.fillStyle = "#061A13";
+      ctx.fillRect(0, 0, W, H);
 
-    const nStripes = 12;
-    for (let i = 0; i < nStripes; i++) {
-      if (i % 2 === 0) {
-        ctx.fillStyle = "#09251B";
-        ctx.fillRect(pad + (i * pw) / nStripes, pad, pw / nStripes, ph);
-      }
-    }
-
-    // Optional Magnetic Snap-to-Grid Overlay (2.5m spacing)
-    if (snapGrid) {
       ctx.save();
-      ctx.strokeStyle = "rgba(16, 185, 129, 0.14)";
-      ctx.lineWidth = 0.8;
-      for (let gx = 5; gx < 105; gx += 5) {
-        const px = pad + (gx / 105) * pw;
+      const vb = getViewBounds();
+      if (pitchView !== "full") {
         ctx.beginPath();
-        ctx.moveTo(px, pad);
-        ctx.lineTo(px, H - pad);
-        ctx.stroke();
+        ctx.rect(pad, pad, pw, ph);
+        ctx.clip();
+        const sx = 105 / (vb.x1 - vb.x0);
+        const sy = 68 / (vb.y1 - vb.y0);
+        ctx.translate(pad, pad);
+        ctx.scale(sx, sy);
+        ctx.translate(-(pad + (vb.x0 / 105) * pw), -(pad + (vb.y0 / 68) * ph));
       }
-      for (let gy = 5; gy < 68; gy += 5) {
-        const py = pad + (gy / 68) * ph;
-        ctx.beginPath();
-        ctx.moveTo(pad, py);
-        ctx.lineTo(W - pad, py);
-        ctx.stroke();
+
+      const nStripes = 12;
+      for (let i = 0; i < nStripes; i++) {
+        if (i % 2 === 0) {
+          ctx.fillStyle = "#09251B";
+          ctx.fillRect(pad + (i * pw) / nStripes, pad, pw / nStripes, ph);
+        }
       }
-      ctx.restore();
-    }
 
-    // 2. FIFA Pitch Markings
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.30)";
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(pad, pad, pw, ph);
-    ctx.beginPath();
-    ctx.moveTo(W / 2, pad);
-    ctx.lineTo(W / 2, H - pad);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(W / 2, H / 2, ph * 0.14, 0, Math.PI * 2);
-    ctx.stroke();
-
-    const boxW = pw * (16.5 / 105);
-    const boxH = ph * (40.32 / 68);
-    const sixW = pw * (5.5 / 105);
-    const sixH = ph * (18.32 / 68);
-    ctx.strokeRect(pad, (H - boxH) / 2, boxW, boxH);
-    ctx.strokeRect(W - pad - boxW, (H - boxH) / 2, boxW, boxH);
-    ctx.strokeRect(pad, (H - sixH) / 2, sixW, sixH);
-    ctx.strokeRect(W - pad - sixW, (H - sixH) / 2, sixW, sixH);
-
-    // 3. Built-in Tactical Zones (Zone 14 & Half-Spaces) + Custom / AI Zones
-    for (const tz of blueprint.tactical_zones) {
-      const x1 = pad + (Math.min(tz.x1_m, tz.x2_m) / 105) * pw;
-      const x2 = pad + (Math.max(tz.x1_m, tz.x2_m) / 105) * pw;
-      const y1 = pad + (tz.y1_m / 68) * ph;
-      const y2 = pad + (tz.y2_m / 68) * ph;
-      const isZ14 = tz.zone_id === "zone_14";
-
-      ctx.save();
-      ctx.fillStyle = isZ14 ? "rgba(245, 158, 11, 0.12)" : "rgba(56, 189, 248, 0.06)";
-      ctx.strokeStyle = isZ14 ? "rgba(250, 204, 21, 0.45)" : "rgba(56, 189, 248, 0.25)";
-      ctx.setLineDash([5, 4]);
-      ctx.lineWidth = isZ14 ? 1.5 : 1.0;
-      ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-      ctx.setLineDash([]);
-      ctx.fillStyle = isZ14 ? "#FACC15" : "#7DD3FC";
-      ctx.font = "700 9.5px Inter, system-ui, sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(tz.label_ar, (x1 + x2) / 2, y1 + 11);
-      ctx.restore();
-    }
-
-    for (const cz of userZones) {
-      const x1 = pad + (Math.min(cz.x1_m, cz.x2_m) / 105) * pw;
-      const x2 = pad + (Math.max(cz.x1_m, cz.x2_m) / 105) * pw;
-      const y1 = pad + (Math.min(cz.y1_m, cz.y2_m) / 68) * ph;
-      const y2 = pad + (Math.max(cz.y1_m, cz.y2_m) / 68) * ph;
-      ctx.save();
-      ctx.fillStyle = "rgba(16, 185, 129, 0.18)";
-      ctx.strokeStyle = cz.color || "#10B981";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 4]);
-      ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-      ctx.setLineDash([]);
-      ctx.fillStyle = "#6EE7B7";
-      ctx.font = "700 10.5px Inter, system-ui, sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(cz.label_ar, (x1 + x2) / 2, y1 + 14);
-      ctx.restore();
-    }
-
-    const hexA = blueprint.kit_colors?.team_a_hex || "#EF4444";
-    const hexB = blueprint.kit_colors?.team_b_hex || "#38BDF8";
-
-    // Helper to draw dynamic connected lines using the live dragged node positions!
-    const drawTeamFormationLines = (
-      linesSpec: FormationBlueprintPayload["lines"],
-      liveNodes: BlueprintNode[],
-      teamColor: string
-    ) => {
-      if (!showLines) return;
-      const slotMap = new Map<string, { x_m: number; y_m: number }>();
-      for (const n of liveNodes) {
-        slotMap.set(n.slot, { x_m: n.x_m, y_m: n.y_m });
-      }
-      for (const ln of linesSpec) {
-        const pts = ln.points.map((pt) => slotMap.get(pt.slot) || pt);
-        if (pts.length < 2) continue;
+      // Optional Magnetic Snap-to-Grid Overlay (2.5m spacing)
+      if (snapGrid) {
         ctx.save();
-        ctx.strokeStyle = teamColor;
-        ctx.globalAlpha = 0.72;
-        ctx.lineWidth = 2.4;
-        ctx.setLineDash([6, 4]);
+        ctx.strokeStyle = "rgba(16, 185, 129, 0.14)";
+        ctx.lineWidth = 0.8;
+        for (let gx = 5; gx < 105; gx += 5) {
+          const px = pad + (gx / 105) * pw;
+          ctx.beginPath();
+          ctx.moveTo(px, pad);
+          ctx.lineTo(px, H - pad);
+          ctx.stroke();
+        }
+        for (let gy = 5; gy < 68; gy += 5) {
+          const py = pad + (gy / 68) * ph;
+          ctx.beginPath();
+          ctx.moveTo(pad, py);
+          ctx.lineTo(W - pad, py);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      // 2. FIFA Pitch Markings
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(pad, pad, pw, ph);
+      ctx.beginPath();
+      ctx.moveTo(W / 2, pad);
+      ctx.lineTo(W / 2, H - pad);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(W / 2, H / 2, ph * 0.14, 0, Math.PI * 2);
+      ctx.stroke();
+
+      const boxW = pw * (16.5 / 105);
+      const boxH = ph * (40.32 / 68);
+      const sixW = pw * (5.5 / 105);
+      const sixH = ph * (18.32 / 68);
+      ctx.strokeRect(pad, (H - boxH) / 2, boxW, boxH);
+      ctx.strokeRect(W - pad - boxW, (H - boxH) / 2, boxW, boxH);
+      ctx.strokeRect(pad, (H - sixH) / 2, sixW, sixH);
+      ctx.strokeRect(W - pad - sixW, (H - sixH) / 2, sixW, sixH);
+
+      // 3. Built-in Tactical Zones (only when showZones is toggled ON — zero default clutter!)
+      if (showZones) {
+        for (const tz of blueprint.tactical_zones) {
+          const x1 = pad + (Math.min(tz.x1_m, tz.x2_m) / 105) * pw;
+          const x2 = pad + (Math.max(tz.x1_m, tz.x2_m) / 105) * pw;
+          const y1 = pad + (tz.y1_m / 68) * ph;
+          const y2 = pad + (tz.y2_m / 68) * ph;
+          const isZ14 = tz.zone_id === "zone_14";
+
+          ctx.save();
+          ctx.fillStyle = isZ14 ? "rgba(245, 158, 11, 0.10)" : "rgba(56, 189, 248, 0.05)";
+          ctx.strokeStyle = isZ14 ? "rgba(250, 204, 21, 0.35)" : "rgba(56, 189, 248, 0.22)";
+          ctx.setLineDash([5, 4]);
+          ctx.lineWidth = 1.2;
+          ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+          ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+          ctx.setLineDash([]);
+          ctx.fillStyle = isZ14 ? "#FACC15" : "#7DD3FC";
+          ctx.font = "700 9px Inter, system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText(tz.label_ar, (x1 + x2) / 2, y1 + 11);
+          ctx.restore();
+        }
+      }
+
+      if (showZones || drawTool === "zone_box") {
+        for (const cz of userZones) {
+          const x1 = pad + (Math.min(cz.x1_m, cz.x2_m) / 105) * pw;
+          const x2 = pad + (Math.max(cz.x1_m, cz.x2_m) / 105) * pw;
+          const y1 = pad + (Math.min(cz.y1_m, cz.y2_m) / 68) * ph;
+          const y2 = pad + (Math.max(cz.y1_m, cz.y2_m) / 68) * ph;
+          ctx.save();
+          ctx.fillStyle = "rgba(16, 185, 129, 0.14)";
+          ctx.strokeStyle = cz.color || "#10B981";
+          ctx.lineWidth = 1.8;
+          ctx.setLineDash([6, 4]);
+          ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+          ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+          ctx.setLineDash([]);
+          ctx.fillStyle = "#6EE7B7";
+          ctx.font = "700 10px Inter, system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText(cz.label_ar, (x1 + x2) / 2, y1 + 13);
+          ctx.restore();
+        }
+      }
+
+      const hexA = blueprint.kit_colors?.team_a_hex || "#EF4444";
+      const hexB = blueprint.kit_colors?.team_b_hex || "#38BDF8";
+
+      // Clean non-crossing formation lines: cluster outfield nodes by depth (x_m) & sort each line strictly by y_m (top-to-bottom)
+      const drawTeamFormationLines = (
+        liveNodes: BlueprintNode[],
+        teamColor: string,
+        teamKey: "team_a" | "team_b"
+      ) => {
+        if (!showLines) return;
+        const outfield = liveNodes.filter((n) => n.slot.toUpperCase() !== "GK" && n.x_m > 9 && n.x_m < 96);
+        if (outfield.length < 3) return;
+        const orderedX = [...outfield].sort((a, b) => (teamKey === "team_a" ? a.x_m - b.x_m : b.x_m - a.x_m));
+        const nDef = Math.min(4, Math.max(2, Math.floor(orderedX.length / 3)));
+        const nMid = Math.min(4, Math.max(2, Math.floor((orderedX.length - nDef) / 2)));
+        const bands = [
+          orderedX.slice(0, nDef),
+          orderedX.slice(nDef, nDef + nMid),
+          orderedX.slice(nDef + nMid),
+        ];
+
+        for (const band of bands) {
+          if (band.length < 2) continue;
+          const pts = [...band].sort((a, b) => a.y_m - b.y_m);
+          ctx.save();
+          ctx.strokeStyle = teamColor;
+          ctx.globalAlpha = 0.45;
+          ctx.lineWidth = 2.0;
+          ctx.setLineDash([6, 5]);
+          ctx.beginPath();
+          pts.forEach((pt, idx) => {
+            const px = pad + (pt.x_m / 105) * pw;
+            const py = pad + (pt.y_m / 68) * ph;
+            if (idx === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          });
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.restore();
+        }
+      };
+
+      if (scope !== "team_b") {
+        drawTeamFormationLines(nodesA, hexA, "team_a");
+      }
+      if (scope !== "team_a") {
+        drawTeamFormationLines(nodesB, hexB, "team_b");
+      }
+
+      // Helper to draw an arrow on the pitch
+      const drawArrowVector = (
+        fx_m: number,
+        fy_m: number,
+        tx_m: number,
+        ty_m: number,
+        color: string,
+        dashed: boolean,
+        label?: string
+      ) => {
+        const fx = pad + (fx_m / 105) * pw;
+        const fy = pad + (fy_m / 68) * ph;
+        const tx = pad + (tx_m / 105) * pw;
+        const ty = pad + (ty_m / 68) * ph;
+        if (Math.hypot(tx - fx, ty - fy) < 8) return;
+
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2.0;
+        if (dashed) ctx.setLineDash([5, 4]);
         ctx.beginPath();
-        pts.forEach((pt, idx) => {
+        ctx.moveTo(fx, fy);
+        ctx.lineTo(tx, ty);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        const ang = Math.atan2(ty - fy, tx - fx);
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(tx - 8 * Math.cos(ang - 0.42), ty - 8 * Math.sin(ang - 0.42));
+        ctx.lineTo(tx - 8 * Math.cos(ang + 0.42), ty - 8 * Math.sin(ang + 0.42));
+        ctx.closePath();
+        ctx.fill();
+
+        if (label) {
+          const mx = (fx + tx) * 0.5;
+          const my = (fy + ty) * 0.5 - 6;
+          ctx.font = "700 9px Inter, system-ui, sans-serif";
+          const tw = ctx.measureText(label).width + 10;
+          ctx.fillStyle = "rgba(9, 13, 22, 0.85)";
+          ctx.beginPath();
+          ctx.roundRect(mx - tw / 2, my - 8, tw, 15, 4);
+          ctx.fill();
+          ctx.fillStyle = color;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(label, mx, my);
+        }
+        ctx.restore();
+      };
+
+      // 4. Built-in Style Passing Arrows (only when showPassVectors is toggled ON)
+      if (showPassVectors) {
+        if (scope !== "team_b" && blueprint.passing_arrows) {
+          for (const pa of blueprint.passing_arrows) {
+            drawArrowVector(pa.from_x_m, pa.from_y_m, pa.to_x_m, pa.to_y_m, "#FACC15", true, pa.label_ar);
+          }
+        }
+        if (scope !== "team_a" && blueprint.opponent_passing_arrows) {
+          for (const pa of blueprint.opponent_passing_arrows) {
+            drawArrowVector(pa.from_x_m, pa.from_y_m, pa.to_x_m, pa.to_y_m, "#38BDF8", true);
+          }
+        }
+      }
+
+      if (scope !== "team_b" && (showPassVectors || drawTool !== "drag_player")) {
+        for (const ua of userArrows) {
+          const col = ua.color || (ua.kind === "pass" ? "#FACC15" : ua.kind === "press" ? "#EF4444" : "#10B981");
+          drawArrowVector(ua.from_x_m, ua.from_y_m, ua.to_x_m, ua.to_y_m, col, ua.kind === "pass", ua.label_ar);
+        }
+      }
+
+      // Active drag shape preview
+      if (draftShapeRef.current && activeCanvasRef.current === cvs) {
+        const d = draftShapeRef.current;
+        if (drawTool === "zone_box") {
+          const x1 = pad + (Math.min(d.startX_m, d.curX_m) / 105) * pw;
+          const x2 = pad + (Math.max(d.startX_m, d.curX_m) / 105) * pw;
+          const y1 = pad + (Math.min(d.startY_m, d.curY_m) / 68) * ph;
+          const y2 = pad + (Math.max(d.startY_m, d.curY_m) / 68) * ph;
+          ctx.save();
+          ctx.fillStyle = `${drawColor}33`;
+          ctx.strokeStyle = drawColor;
+          ctx.lineWidth = 2;
+          ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+          ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+          ctx.restore();
+        } else {
+          drawArrowVector(
+            d.startX_m,
+            d.startY_m,
+            d.curX_m,
+            d.curY_m,
+            drawColor,
+            drawDashed || drawTool === "pass_arrow"
+          );
+        }
+      }
+
+      // Freehand strokes
+      const allStrokes = activeStrokeRef.current ? [...freehandStrokes, activeStrokeRef.current] : freehandStrokes;
+      for (const st of allStrokes) {
+        if (st.points.length < 2) continue;
+        ctx.save();
+        ctx.strokeStyle = st.color;
+        ctx.lineWidth = 2.4;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        st.points.forEach((pt, idx) => {
           const px = pad + (pt.x_m / 105) * pw;
           const py = pad + (pt.y_m / 68) * ph;
           if (idx === 0) ctx.moveTo(px, py);
           else ctx.lineTo(px, py);
         });
         ctx.stroke();
-        ctx.setLineDash([]);
         ctx.restore();
       }
-    };
 
-    if (teamDisplay !== "team_b") {
-      drawTeamFormationLines(blueprint.lines || [], nodesA, hexA);
-    }
-    if (teamDisplay !== "team_a" && blueprint.opponent_lines) {
-      drawTeamFormationLines(blueprint.opponent_lines, nodesB, hexB);
-    }
+      // 5. Render Player Nodes
+      const renderTeamNodes = (list: BlueprintNode[], tKey: "team_a" | "team_b", kitHex: string) => {
+        list.forEach((nd, idx) => {
+          const px = pad + (nd.x_m / 105) * pw;
+          const py = pad + (nd.y_m / 68) * ph;
+          const tx = pad + (nd.move_to_x_m / 105) * pw;
+          const ty = pad + (nd.move_to_y_m / 68) * ph;
+          const isSel = selectedNode.team === tKey && selectedNode.index === idx;
+          const isGk = nd.slot.toUpperCase() === "GK";
 
-    // Helper to draw an arrow on the pitch
-    const drawArrowVector = (
-      fx_m: number,
-      fy_m: number,
-      tx_m: number,
-      ty_m: number,
-      color: string,
-      dashed: boolean,
-      label?: string
-    ) => {
-      const fx = pad + (fx_m / 105) * pw;
-      const fy = pad + (fy_m / 68) * ph;
-      const tx = pad + (tx_m / 105) * pw;
-      const ty = pad + (ty_m / 68) * ph;
-      if (Math.hypot(tx - fx, ty - fy) < 8) return;
+          // Player run vector (never on GK unless explicitly selected & dragged; only when showRunArrows is ON)
+          if (showRunArrows && !isGk && Math.hypot(tx - px, ty - py) > 10) {
+            drawArrowVector(
+              nd.x_m,
+              nd.y_m,
+              nd.move_to_x_m,
+              nd.move_to_y_m,
+              isSel ? "#10B981" : tKey === "team_a" ? "rgba(255,255,255,0.55)" : "rgba(125,211,252,0.50)",
+              false
+            );
+            if (isSel) {
+              ctx.save();
+              ctx.fillStyle = "#FACC15";
+              ctx.strokeStyle = "#090D16";
+              ctx.lineWidth = 1.8;
+              ctx.beginPath();
+              ctx.arc(tx, ty, 5.2, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.stroke();
+              ctx.restore();
+            }
+          }
 
-      ctx.save();
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2.2;
-      if (dashed) ctx.setLineDash([5, 4]);
-      ctx.beginPath();
-      ctx.moveTo(fx, fy);
-      ctx.lineTo(tx, ty);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      const ang = Math.atan2(ty - fy, tx - fx);
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(tx, ty);
-      ctx.lineTo(tx - 9 * Math.cos(ang - 0.42), ty - 9 * Math.sin(ang - 0.42));
-      ctx.lineTo(tx - 9 * Math.cos(ang + 0.42), ty - 9 * Math.sin(ang + 0.42));
-      ctx.closePath();
-      ctx.fill();
-
-      if (label) {
-        const mx = (fx + tx) * 0.5;
-        const my = (fy + ty) * 0.5 - 6;
-        ctx.font = "700 9.5px Inter, system-ui, sans-serif";
-        const tw = ctx.measureText(label).width + 10;
-        ctx.fillStyle = "rgba(9, 13, 22, 0.85)";
-        ctx.beginPath();
-        ctx.roundRect(mx - tw / 2, my - 8, tw, 15, 4);
-        ctx.fill();
-        ctx.fillStyle = color;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(label, mx, my);
-      }
-      ctx.restore();
-    };
-
-    // 4. Built-in Style Passing Arrows & User/AI Custom Arrows
-    if (showPassVectors) {
-      if (teamDisplay !== "team_b" && blueprint.passing_arrows) {
-        for (const pa of blueprint.passing_arrows) {
-          drawArrowVector(pa.from_x_m, pa.from_y_m, pa.to_x_m, pa.to_y_m, "#FACC15", true, pa.label_ar);
-        }
-      }
-      if (teamDisplay !== "team_a" && blueprint.opponent_passing_arrows) {
-        for (const pa of blueprint.opponent_passing_arrows) {
-          drawArrowVector(pa.from_x_m, pa.from_y_m, pa.to_x_m, pa.to_y_m, "#38BDF8", true);
-        }
-      }
-    }
-
-    for (const ua of userArrows) {
-      const col = ua.color || (ua.kind === "pass" ? "#FACC15" : ua.kind === "press" ? "#EF4444" : "#10B981");
-      drawArrowVector(ua.from_x_m, ua.from_y_m, ua.to_x_m, ua.to_y_m, col, ua.kind === "pass", ua.label_ar);
-    }
-
-    // Active drag shape preview
-    if (draftShapeRef.current) {
-      const d = draftShapeRef.current;
-      if (drawTool === "zone_box") {
-        const x1 = pad + (Math.min(d.startX_m, d.curX_m) / 105) * pw;
-        const x2 = pad + (Math.max(d.startX_m, d.curX_m) / 105) * pw;
-        const y1 = pad + (Math.min(d.startY_m, d.curY_m) / 68) * ph;
-        const y2 = pad + (Math.max(d.startY_m, d.curY_m) / 68) * ph;
-        ctx.save();
-        ctx.fillStyle = `${drawColor}33`;
-        ctx.strokeStyle = drawColor;
-        ctx.lineWidth = 2;
-        ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-        ctx.restore();
-      } else {
-        drawArrowVector(
-          d.startX_m,
-          d.startY_m,
-          d.curX_m,
-          d.curY_m,
-          drawColor,
-          drawDashed || drawTool === "pass_arrow"
-        );
-      }
-    }
-
-    // Freehand strokes
-    const allStrokes = activeStrokeRef.current ? [...freehandStrokes, activeStrokeRef.current] : freehandStrokes;
-    for (const st of allStrokes) {
-      if (st.points.length < 2) continue;
-      ctx.save();
-      ctx.strokeStyle = st.color;
-      ctx.lineWidth = 2.6;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.beginPath();
-      st.points.forEach((pt, idx) => {
-        const px = pad + (pt.x_m / 105) * pw;
-        const py = pad + (pt.y_m / 68) * ph;
-        if (idx === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      });
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // 5. Render Player Nodes for Team A and/or Team B
-    const renderTeamNodes = (list: BlueprintNode[], tKey: "team_a" | "team_b", kitHex: string) => {
-      list.forEach((nd, idx) => {
-        const px = pad + (nd.x_m / 105) * pw;
-        const py = pad + (nd.y_m / 68) * ph;
-        const tx = pad + (nd.move_to_x_m / 105) * pw;
-        const ty = pad + (nd.move_to_y_m / 68) * ph;
-        const isSel = selectedNode.team === tKey && selectedNode.index === idx;
-
-        // Player run vector
-        if (Math.hypot(tx - px, ty - py) > 8) {
-          drawArrowVector(
-            nd.x_m,
-            nd.y_m,
-            nd.move_to_x_m,
-            nd.move_to_y_m,
-            isSel ? "#10B981" : tKey === "team_a" ? "rgba(255,255,255,0.65)" : "rgba(125,211,252,0.55)",
-            false
-          );
-          // Draggable glowing tip handle on selected player's run arrow!
           if (isSel) {
             ctx.save();
-            ctx.fillStyle = "#FACC15";
-            ctx.strokeStyle = "#090D16";
-            ctx.lineWidth = 1.8;
+            ctx.strokeStyle = "#10B981";
+            ctx.lineWidth = 2.5;
             ctx.beginPath();
-            ctx.arc(tx, ty, 5.5, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.arc(px, py, 16.5, 0, Math.PI * 2);
             ctx.stroke();
             ctx.restore();
           }
-        }
 
-        if (isSel) {
           ctx.save();
-          ctx.strokeStyle = "#10B981";
-          ctx.lineWidth = 2.6;
           ctx.beginPath();
-          ctx.arc(px, py, 17, 0, Math.PI * 2);
+          ctx.arc(px, py, 12.0, 0, Math.PI * 2);
+          ctx.fillStyle = isGk ? (tKey === "team_a" ? "#F59E0B" : "#22D3EE") : kitHex;
+          ctx.fill();
+          ctx.lineWidth = 2.0;
+          ctx.strokeStyle = tKey === "team_a" ? "#FFFFFF" : "#0F172A";
           ctx.stroke();
+
+          ctx.fillStyle = "#FFFFFF";
+          ctx.font = "800 9.5px Inter, system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(nd.jersey_number ? `${nd.jersey_number}` : nd.slot, px, py);
+
+          const shortName = nd.player_label.replace(/\s*\([^)]*\)/g, "").slice(0, 14);
+          const pillText = `${nd.slot} • ${shortName}`;
+          ctx.font = "700 9.2px Inter, system-ui, sans-serif";
+          const tw = ctx.measureText(pillText).width + 10;
+          const labelOffsetY = tKey === "team_a" || scope === "team_b" ? 15 : -28;
+          ctx.fillStyle = "rgba(9, 13, 22, 0.92)";
+          ctx.beginPath();
+          ctx.roundRect(px - tw / 2, py + labelOffsetY, tw, 15, 4);
+          ctx.fill();
+          ctx.strokeStyle = isSel ? "#10B981" : kitHex;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          ctx.fillStyle = isSel ? "#6EE7B7" : "#F8FAFC";
+          ctx.fillText(pillText, px, py + labelOffsetY + 7.5);
           ctx.restore();
-        }
+        });
+      };
 
+      if (scope !== "team_a") {
+        renderTeamNodes(nodesB, "team_b", hexB);
+      }
+      if (scope !== "team_b") {
+        renderTeamNodes(nodesA, "team_a", hexA);
+      }
+
+      // 6. Render Training Equipment Props
+      for (const pr of trainingProps) {
+        const px = pad + (pr.x_m / 105) * pw;
+        const py = pad + (pr.y_m / 68) * ph;
         ctx.save();
-        ctx.beginPath();
-        ctx.arc(px, py, 12.5, 0, Math.PI * 2);
-        ctx.fillStyle = nd.slot === "GK" ? (tKey === "team_a" ? "#F59E0B" : "#22D3EE") : kitHex;
-        ctx.fill();
-        ctx.lineWidth = 2.2;
-        ctx.strokeStyle = tKey === "team_a" ? "#FFFFFF" : "#0F172A";
-        ctx.stroke();
-
-        ctx.fillStyle = "#FFFFFF";
-        ctx.font = "800 9.5px Inter, system-ui, sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(nd.jersey_number ? `${nd.jersey_number}` : nd.slot, px, py);
-
-        const shortName = nd.player_label.replace(/\s*\([^)]*\)/g, "").slice(0, 14);
-        const pillText = `${nd.slot} • ${shortName}`;
-        ctx.font = "700 9.5px Inter, system-ui, sans-serif";
-        const tw = ctx.measureText(pillText).width + 10;
-        const labelOffsetY = tKey === "team_a" ? 15 : -29;
-        ctx.fillStyle = tKey === "team_a" ? "rgba(9, 13, 22, 0.90)" : "rgba(15, 23, 42, 0.88)";
-        ctx.beginPath();
-        ctx.roundRect(px - tw / 2, py + labelOffsetY, tw, 15.5, 4);
-        ctx.fill();
-        ctx.strokeStyle = isSel ? "#10B981" : kitHex;
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        ctx.fillStyle = isSel ? "#6EE7B7" : "#F8FAFC";
-        ctx.fillText(pillText, px, py + labelOffsetY + 8);
+        if (pr.kind === "ball") {
+          ctx.beginPath();
+          ctx.arc(px, py, 6.0, 0, Math.PI * 2);
+          ctx.fillStyle = "#FFFFFF";
+          ctx.fill();
+          ctx.lineWidth = 1.6;
+          ctx.strokeStyle = "#0F172A";
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(px, py, 2.0, 0, Math.PI * 2);
+          ctx.fillStyle = "#1E293B";
+          ctx.fill();
+        } else if (pr.kind === "cone") {
+          ctx.fillStyle = "#F97316";
+          ctx.strokeStyle = "#FFFFFF";
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(px, py - 8);
+          ctx.lineTo(px + 7, py + 6);
+          ctx.lineTo(px - 7, py + 6);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        } else if (pr.kind === "mini_goal") {
+          ctx.fillStyle = "rgba(255,255,255,0.18)";
+          ctx.strokeStyle = "#F8FAFC";
+          ctx.lineWidth = 2.2;
+          ctx.fillRect(px - 14, py - 7, 28, 14);
+          ctx.strokeRect(px - 14, py - 7, 28, 14);
+        } else if (pr.kind === "mannequin") {
+          ctx.fillStyle = "#FACC15";
+          ctx.strokeStyle = "#0F172A";
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.arc(px, py - 7, 4.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillRect(px - 4.5, py - 2, 9, 12);
+          ctx.strokeRect(px - 4.5, py - 2, 9, 12);
+        }
         ctx.restore();
-      });
+      }
+
+      ctx.restore();
     };
 
-    if (teamDisplay !== "team_a") {
-      renderTeamNodes(nodesB, "team_b", hexB);
+    if (teamDisplay === "dual") {
+      if (canvasRef.current) renderBoardCanvas(canvasRef.current, "team_a");
+      if (canvasBRef.current) renderBoardCanvas(canvasBRef.current, "team_b");
+    } else {
+      if (canvasRef.current) renderBoardCanvas(canvasRef.current, teamDisplay);
     }
-    if (teamDisplay !== "team_b") {
-      renderTeamNodes(nodesA, "team_a", hexA);
-    }
-
-    // 6. Render V8.5 Training Equipment Props (Cones, Mini-Goals, Mannequins, Footballs)
-    for (const pr of trainingProps) {
-      const px = pad + (pr.x_m / 105) * pw;
-      const py = pad + (pr.y_m / 68) * ph;
-      ctx.save();
-      if (pr.kind === "ball") {
-        ctx.beginPath();
-        ctx.arc(px, py, 6.2, 0, Math.PI * 2);
-        ctx.fillStyle = "#FFFFFF";
-        ctx.fill();
-        ctx.lineWidth = 1.6;
-        ctx.strokeStyle = "#0F172A";
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(px, py, 2.2, 0, Math.PI * 2);
-        ctx.fillStyle = "#1E293B";
-        ctx.fill();
-      } else if (pr.kind === "cone") {
-        ctx.fillStyle = "#F97316";
-        ctx.strokeStyle = "#FFFFFF";
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.moveTo(px, py - 8);
-        ctx.lineTo(px + 7, py + 6);
-        ctx.lineTo(px - 7, py + 6);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-      } else if (pr.kind === "mini_goal") {
-        ctx.fillStyle = "rgba(255,255,255,0.18)";
-        ctx.strokeStyle = "#F8FAFC";
-        ctx.lineWidth = 2.2;
-        ctx.fillRect(px - 14, py - 7, 28, 14);
-        ctx.strokeRect(px - 14, py - 7, 28, 14);
-      } else if (pr.kind === "mannequin") {
-        ctx.fillStyle = "#FACC15";
-        ctx.strokeStyle = "#0F172A";
-        ctx.lineWidth = 1.4;
-        ctx.beginPath();
-        ctx.arc(px, py - 7, 4.2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillRect(px - 4.5, py - 2, 9, 12);
-        ctx.strokeRect(px - 4.5, py - 2, 9, 12);
-      }
-      ctx.restore();
-    }
-
-    ctx.restore();
   }, [
     blueprint,
     nodesA,
     nodesB,
     teamDisplay,
     showLines,
+    showRunArrows,
     showPassVectors,
+    showZones,
     userArrows,
     userZones,
     freehandStrokes,
@@ -1491,17 +1523,17 @@ export default function FormationBlueprintBoard({
           </p>
         </div>
 
-        {/* Display Both Teams vs Single Team */}
-        <div className="flex items-center gap-1.5 bg-[#090D16] border border-white/[0.1] rounded-xl p-1 text-xs">
+        {/* Dual Separate Boards vs Combined vs Single Team */}
+        <div className="flex flex-wrap items-center gap-1.5 bg-[#090D16] border border-white/[0.1] rounded-xl p-1 text-xs">
           <button
             type="button"
-            onClick={() => setTeamDisplay("both")}
+            onClick={() => setTeamDisplay("dual")}
             className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
-              teamDisplay === "both" ? "bg-emerald-500 text-slate-950" : "text-slate-300 hover:text-white"
+              teamDisplay === "dual" ? "bg-emerald-500 text-slate-950" : "text-slate-300 hover:text-white"
             }`}
           >
             <Users className="w-3.5 h-3.5" />
-            <span>{isAr ? "الفريقان معاً (11 ضد 11)" : "Both Teams (11v11)"}</span>
+            <span>{isAr ? "سبورتان منفصلتان (فريقي | الخصم)" : "Dual Boards (Own | Opponent)"}</span>
           </button>
           <button
             type="button"
@@ -1510,7 +1542,7 @@ export default function FormationBlueprintBoard({
               teamDisplay === "team_a" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
             }`}
           >
-            {blueprint?.team_name || (isAr ? "الفريق الأول" : "Team A")}
+            {isAr ? `سبورة ${blueprint?.team_name || "فريقي"}` : `${blueprint?.team_name || "Team A"} Board`}
           </button>
           <button
             type="button"
@@ -1519,12 +1551,21 @@ export default function FormationBlueprintBoard({
               teamDisplay === "team_b" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
             }`}
           >
-            {blueprint?.opponent_name || (isAr ? "الفريق الثاني" : "Team B")}
+            {isAr ? `سبورة ${blueprint?.opponent_name || "الخصم"}` : `${blueprint?.opponent_name || "Team B"} Board`}
+          </button>
+          <button
+            type="button"
+            onClick={() => setTeamDisplay("both")}
+            className={`px-2.5 py-1.5 rounded-lg font-semibold transition ${
+              teamDisplay === "both" ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
+            }`}
+          >
+            {isAr ? "مدمجة (11 ضد 11)" : "Combined (11v11)"}
           </button>
         </div>
       </div>
 
-      {/* AI Live Tactical Drawing Bar (Multi-Model Groq — Custom/Crazy Formations!) */}
+      {/* AI Live Tactical Drawing Bar */}
       <div className="p-3.5 rounded-xl bg-[#090D16] border border-emerald-500/35 space-y-2.5">
         <form
           onSubmit={(e) => {
@@ -1535,7 +1576,7 @@ export default function FormationBlueprintBoard({
         >
           <div className="flex items-center gap-1.5 text-xs font-extrabold text-emerald-400 shrink-0">
             <Bot className="w-4 h-4" />
-            <span>{isAr ? "ابتكر وارسم بالـ AI:" : "AI Tactical Drawer:"}</span>
+            <span>{isAr ? "توليد الخطة بالذكاء الاصطناعي:" : "AI Tactical Generator:"}</span>
           </div>
           <button
             type="button"
@@ -1543,7 +1584,7 @@ export default function FormationBlueprintBoard({
             className="px-2 py-2 rounded-lg bg-[#111827] border border-emerald-500/30 text-[11px] font-bold text-emerald-300 hover:bg-emerald-500/15 shrink-0"
             title={isAr ? "اختيار موديل الذكاء الاصطناعي يدوياً" : "Advanced AI Model Selection"}
           >
-            {aiModel === "auto" ? (isAr ? "⚡ تلقائي ذكي" : "⚡ Auto AI") : aiModel.split("/").pop()}
+            {aiModel === "auto" ? (isAr ? "تلقائي ذكي" : "Auto Router") : aiModel.split("/").pop()}
           </button>
           {showAdvancedModel && (
             <select
@@ -1565,8 +1606,8 @@ export default function FormationBlueprintBoard({
             onChange={(e) => setAiPrompt(e.target.value)}
             placeholder={
               isAr
-                ? "اكتب أي خطة عادية أو مجنونة لم تُلعب من قبل (مثال: خطة 2-1-6-1 بحارس ليبرو في خط النص وهجوم كاسح على اليسار)..."
-                : "Describe any custom, wild, or never-seen-before formation for both teams to draw live..."
+                ? "اكتب التشكيل أو الفكرة التكتيكية (مثال: خطة 3-2-4-1 بأظهرة عكسية وضغط عالٍ ضد 4-4-2)..."
+                : "Describe any tactical formation or pressing structure for both teams..."
             }
             className="flex-1 min-w-[240px] bg-[#111827] border border-white/[0.14] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-400"
           />
@@ -1576,18 +1617,18 @@ export default function FormationBlueprintBoard({
             className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-45 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 transition"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>{aiLoading ? (isAr ? "جاري ابتكار ورسم الـ 22 لاعباً..." : "Drawing 22 players...") : isAr ? "🎨 ارسم الخطة الآن" : "🎨 Draw Plan"}</span>
+            <span>{aiLoading ? (isAr ? "جاري رسم السبورتين..." : "Drawing boards...") : isAr ? "رسم التشكيل الآن" : "Draw Tactical Plan"}</span>
           </button>
         </form>
 
-        {/* 1-Click AI Drawing Presets (Including Wild/Innovative Formations!) */}
+        {/* 1-Click AI Drawing Presets */}
         <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-          <span className="text-slate-400">{isAr ? "أمثلة ابتكار ورسم فوري:" : "Quick AI Prompts:"}</span>
+          <span className="text-slate-400">{isAr ? "نماذج خطط جاهزة:" : "Tactical Presets:"}</span>
           {[
-            `ابتكر خطة مجنونة 2-1-6-1 بحارس ليبرو في منتصف الملعب وهجوم كاسح على الجبهة اليسرى`,
-            `اخترع خطة غير متماثلة بتكديس 7 لاعبين على الجبهة اليمنى لعزل الخصم تماماً`,
-            `ارسم خطة 3-5-2 بأسلوب تيكي تاكا ومثلثات استحواذ ضد 5-3-2 مع اختراق المنطقة 14`,
-            `ارسم خطة 4-3-3 بضغط عالي عكسي ومصيدة ضغط على الأطراف ضد 4-4-2`,
+            `خطة 3-2-4-1 بصندوق وسط وأظهرة عكسية للاستحواذ ضد 4-4-2`,
+            `خطة 4-3-3 بضغط عالي عكسي ومصيدة ضغط على الأطراف ضد 5-3-2`,
+            `خطة 3-5-2 بتيكي تاكا ومثلثات استحواذ واختراق المنطقة 14`,
+            `خطة غير متماثلة بتحميل الجبهة اليسرى بـ 5 لاعبين وعزل الظهير العكسي`,
           ].map((preset, idx) => (
             <button
               key={idx}
@@ -1598,7 +1639,7 @@ export default function FormationBlueprintBoard({
               }}
               className="px-2.5 py-1 rounded-lg bg-[#111827] hover:bg-emerald-500/15 border border-white/[0.08] hover:border-emerald-500/40 text-slate-300 hover:text-emerald-300 transition"
             >
-              ✨ {preset}
+              {preset}
             </button>
           ))}
         </div>
@@ -1755,7 +1796,7 @@ export default function FormationBlueprintBoard({
               }`}
             >
               <Hand className="w-3.5 h-3.5" />
-              <span>{isAr ? "✋ تحريك اللاعبين ورأس السهم" : "✋ Drag Players & Arrow Tips"}</span>
+              <span>{isAr ? "تحريك اللاعبين ورأس السهم" : "Drag Players & Arrow Tips"}</span>
             </button>
             <button
               type="button"
@@ -1767,7 +1808,7 @@ export default function FormationBlueprintBoard({
               }`}
             >
               <MoveUpRight className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{isAr ? "↗️ سهم تحرك" : "↗️ Run Arrow"}</span>
+              <span>{isAr ? "سهم تحرك" : "Run Arrow"}</span>
             </button>
             <button
               type="button"
@@ -1779,7 +1820,7 @@ export default function FormationBlueprintBoard({
               }`}
             >
               <Zap className="w-3.5 h-3.5 text-amber-400" />
-              <span>{isAr ? "⚡ سهم تمريرة" : "⚡ Pass Arrow"}</span>
+              <span>{isAr ? "سهم تمريرة" : "Pass Arrow"}</span>
             </button>
             <button
               type="button"
@@ -1791,7 +1832,7 @@ export default function FormationBlueprintBoard({
               }`}
             >
               <MoveUpRight className="w-3.5 h-3.5 text-rose-400" />
-              <span>{isAr ? "🎯 سهم ضغط" : "🎯 Press Arrow"}</span>
+              <span>{isAr ? "سهم ضغط" : "Press Arrow"}</span>
             </button>
             <button
               type="button"
@@ -1803,7 +1844,7 @@ export default function FormationBlueprintBoard({
               }`}
             >
               <Square className="w-3.5 h-3.5 text-sky-400" />
-              <span>{isAr ? "🟦 منطقة تكتيكية" : "🟦 Tactical Zone"}</span>
+              <span>{isAr ? "منطقة تكتيكية" : "Tactical Zone"}</span>
             </button>
             <button
               type="button"
@@ -1815,7 +1856,7 @@ export default function FormationBlueprintBoard({
               }`}
             >
               <Pencil className="w-3.5 h-3.5" />
-              <span>{isAr ? "✏️ قلم حر" : "✏️ Freehand"}</span>
+              <span>{isAr ? "قلم حر" : "Freehand"}</span>
             </button>
           </div>
 
@@ -1829,7 +1870,18 @@ export default function FormationBlueprintBoard({
                   : "bg-[#111827] border-white/10 text-slate-400"
               }`}
             >
-              {isAr ? "خطوط التشكيل" : "Lines"}
+              {isAr ? "خطوط التشكيل" : "Formation Lines"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowRunArrows((v) => !v)}
+              className={`px-2 py-1 rounded border text-[11px] font-semibold ${
+                showRunArrows
+                  ? "bg-sky-500/20 border-sky-500/40 text-sky-300"
+                  : "bg-[#111827] border-white/10 text-slate-400"
+              }`}
+            >
+              {isAr ? "أسهم التحرك" : "Player Runs"}
             </button>
             <button
               type="button"
@@ -1840,7 +1892,18 @@ export default function FormationBlueprintBoard({
                   : "bg-[#111827] border-white/10 text-slate-400"
               }`}
             >
-              {isAr ? "مسارات التمرير" : "Passes"}
+              {isAr ? "مسارات التمرير" : "Passing Lanes"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowZones((v) => !v)}
+              className={`px-2 py-1 rounded border text-[11px] font-semibold ${
+                showZones
+                  ? "bg-purple-500/20 border-purple-500/40 text-purple-300"
+                  : "bg-[#111827] border-white/10 text-slate-400"
+              }`}
+            >
+              {isAr ? "مناطق الملعب" : "Pitch Zones"}
             </button>
             <button
               type="button"
@@ -1955,7 +2018,7 @@ export default function FormationBlueprintBoard({
               className="px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 font-bold flex items-center gap-1"
             >
               <Save className="w-3 h-3" />
-              <span>{isAr ? "💾 حفظ الخطة" : "💾 Save"}</span>
+              <span>{isAr ? "حفظ الخطة" : "Save Plan"}</span>
             </button>
             <button
               type="button"
@@ -1963,7 +2026,7 @@ export default function FormationBlueprintBoard({
               className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 font-bold flex items-center gap-1"
             >
               <Download className="w-3 h-3" />
-              <span>{isAr ? "📥 تحميل PNG" : "📥 PNG"}</span>
+              <span>{isAr ? "تحميل PNG" : "Export PNG"}</span>
             </button>
             <button
               type="button"
@@ -2019,28 +2082,28 @@ export default function FormationBlueprintBoard({
               onClick={() => addTrainingProp("cone")}
               className="px-2 py-0.5 rounded bg-[#111827] hover:bg-orange-500/20 border border-white/10 text-orange-300 font-semibold"
             >
-              + 🔺 {isAr ? "قمع" : "Cone"}
+              + {isAr ? "قمع تدريب" : "Cone"}
             </button>
             <button
               type="button"
               onClick={() => addTrainingProp("mini_goal")}
               className="px-2 py-0.5 rounded bg-[#111827] hover:bg-white/15 border border-white/10 text-slate-200 font-semibold"
             >
-              + 🥅 {isAr ? "مرمى صغير" : "Mini-Goal"}
+              + {isAr ? "مرمى صغير" : "Mini-Goal"}
             </button>
             <button
               type="button"
               onClick={() => addTrainingProp("mannequin")}
               className="px-2 py-0.5 rounded bg-[#111827] hover:bg-amber-500/20 border border-white/10 text-amber-300 font-semibold"
             >
-              + 🧍 {isAr ? "دمية حائط" : "Wall"}
+              + {isAr ? "دمية حائط" : "Wall"}
             </button>
             <button
               type="button"
               onClick={() => addTrainingProp("ball")}
               className="px-2 py-0.5 rounded bg-[#111827] hover:bg-white/15 border border-white/10 text-white font-semibold"
             >
-              + ⚽ {isAr ? "كرة" : "Ball"}
+              + {isAr ? "كرة" : "Ball"}
             </button>
             {trainingProps.length > 1 && (
               <button
@@ -2109,28 +2172,96 @@ export default function FormationBlueprintBoard({
                 onClick={() => setUserZones((prev) => prev.filter((_, idx) => idx !== i))}
                 className="px-2 py-0.5 rounded bg-[#111827] border border-white/10 hover:border-rose-400 text-slate-300 hover:text-rose-300"
               >
-                🟦 {zn.label_ar || `منطقة #${i + 1}`} ×
+                {zn.label_ar || `منطقة #${i + 1}`} ×
               </button>
             ))}
           </div>
         )}
       </div>
 
-      {/* Main 22-Player Canvas + Full-Control Side Editor */}
+      {/* Main Tactical Boards (Dual Side-by-Side Boards OR Single Board) + Full-Control Side Editor */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         <div className="lg:col-span-8 rounded-xl overflow-hidden border border-white/[0.12] bg-[#061A13] shadow-xl">
-          <canvas
-            ref={canvasRef}
-            width={760}
-            height={470}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            className={`w-full block ${
-              drawTool === "drag_player" ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair"
-            }`}
-          />
+          {teamDisplay === "dual" ? (
+            <div className="grid grid-cols-1 xl:grid-cols-2 divide-y xl:divide-y-0 xl:divide-x xl:divide-x-reverse divide-white/[0.12]">
+              {/* Board 1: Own Team */}
+              <div className="bg-[#061A13]">
+                <div className="px-3 py-2 bg-[#090D16] border-b border-white/[0.08] flex items-center justify-between text-xs">
+                  <span className="font-bold text-white flex items-center gap-1.5">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full inline-block"
+                      style={{ backgroundColor: blueprint?.kit_colors?.team_a_hex || "#EF4444" }}
+                    />
+                    <span>
+                      {isAr
+                        ? `السبورة 1: تمركز ومهام ${blueprint?.team_name || "فريقي"}`
+                        : `Board 1: ${blueprint?.team_name || "Own Team"}`}
+                    </span>
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 font-bold tabular-nums text-[11px]">
+                    <bdi dir="ltr">{formationA}</bdi>
+                  </span>
+                </div>
+                <canvas
+                  ref={canvasRef}
+                  width={680}
+                  height={440}
+                  onMouseDown={(e) => handleMouseDown(e, "team_a")}
+                  onMouseMove={handleMouseMove}
+                  onMouseUp={handleMouseUp}
+                  onMouseLeave={handleMouseUp}
+                  className={`w-full block ${
+                    drawTool === "drag_player" ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair"
+                  }`}
+                />
+              </div>
+
+              {/* Board 2: Opponent Team */}
+              <div className="bg-[#061A13]">
+                <div className="px-3 py-2 bg-[#090D16] border-b border-white/[0.08] flex items-center justify-between text-xs">
+                  <span className="font-bold text-white flex items-center gap-1.5">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full inline-block"
+                      style={{ backgroundColor: blueprint?.kit_colors?.team_b_hex || "#38BDF8" }}
+                    />
+                    <span>
+                      {isAr
+                        ? `السبورة 2: تمركز وتشكيل ${blueprint?.opponent_name || "الخصم"}`
+                        : `Board 2: ${blueprint?.opponent_name || "Opponent"}`}
+                    </span>
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-sky-500/15 border border-sky-500/35 text-sky-300 font-bold tabular-nums text-[11px]">
+                    <bdi dir="ltr">{formationB}</bdi>
+                  </span>
+                </div>
+                <canvas
+                  ref={canvasBRef}
+                  width={680}
+                  height={440}
+                  onMouseDown={(e) => handleMouseDown(e, "team_b")}
+                  onMouseMove={handleMouseMove}
+                  onMouseUp={handleMouseUp}
+                  onMouseLeave={handleMouseUp}
+                  className={`w-full block ${
+                    drawTool === "drag_player" ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair"
+                  }`}
+                />
+              </div>
+            </div>
+          ) : (
+            <canvas
+              ref={canvasRef}
+              width={760}
+              height={470}
+              onMouseDown={(e) => handleMouseDown(e, teamDisplay)}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              className={`w-full block ${
+                drawTool === "drag_player" ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair"
+              }`}
+            />
+          )}
           <div className="px-3 py-2 bg-[#090D16] border-t border-white/[0.06] space-y-2 text-[11px]">
             {/* V8.5 Keyframe Tactical Animation Timeline (TacticalPad / Metrica Nexus style!) */}
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2184,7 +2315,7 @@ export default function FormationBlueprintBoard({
                   <span>
                     {isAnimating
                       ? isAr ? `إيقاف (${(animStepProgress + 1).toFixed(1)})` : "Stop"
-                      : isAr ? "▶ تشغيل الحركة" : "▶ Animate"}
+                      : isAr ? "تشغيل الحركة" : "Animate"}
                   </span>
                 </button>
                 <button
@@ -2193,7 +2324,7 @@ export default function FormationBlueprintBoard({
                   onClick={() => handleRecordAnimatedVideo("mp4")}
                   className="px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 disabled:opacity-35 border border-sky-400/40 text-sky-300 font-bold"
                 >
-                  {recordingVideo ? (isAr ? "⏺ جاري التحويل..." : "⏺ Converting...") : isAr ? "🎬 فيديو MP4" : "🎬 Export MP4"}
+                  {recordingVideo ? (isAr ? "جاري التحويل..." : "Converting...") : isAr ? "تصدير فيديو MP4" : "Export MP4"}
                 </button>
                 <button
                   type="button"
@@ -2201,7 +2332,7 @@ export default function FormationBlueprintBoard({
                   onClick={() => handleRecordAnimatedVideo("gif")}
                   className="px-2 py-1 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 disabled:opacity-35 border border-purple-400/40 text-purple-200 font-bold"
                 >
-                  🎞️ GIF
+                  GIF
                 </button>
                 {onAttachBoardSlide && (
                   <button
@@ -2210,13 +2341,13 @@ export default function FormationBlueprintBoard({
                       const cvs = canvasRef.current;
                       if (cvs) {
                         onAttachBoardSlide(cvs.toDataURL("image/png"));
-                        setSaveBanner(isAr ? "📌 تم إدراج شريحة المرسم في محاضرة غرفة الملابس!" : "📌 Slide added to Locker-Room Lecture!");
+                        setSaveBanner(isAr ? "تم إدراج شريحة السبورة في محاضرة غرفة الملابس" : "Slide added to Locker-Room Lecture");
                         setTimeout(() => setSaveBanner(null), 2600);
                       }
                     }}
                     className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 font-bold"
                   >
-                    {isAr ? "📌 شريحة للمحاضرة" : "📌 Add Slide"}
+                    {isAr ? "إدراج كشريحة للمحاضرة" : "Add Lecture Slide"}
                   </button>
                 )}
               </div>
@@ -2225,8 +2356,8 @@ export default function FormationBlueprintBoard({
             <div className="flex flex-wrap items-center justify-between gap-2 text-[10.5px] text-slate-400">
               <span>
                 {isAr
-                  ? "💡 اسحب أي لاعب أو أداة تدريب (قمع/كرة/مرمى) أو النقطة الصفراء لرأس السهم — واستخدم Ctrl+Z للتراجع."
-                  : "💡 Drag any player, training prop, or yellow arrow-tip — press Ctrl+Z / Ctrl+Y for 50-step Undo/Redo."}
+                  ? "اسحب أي لاعب في أي من السبورتين بالماوس لتعديل تمركزه — واستخدم Ctrl+Z للتراجع."
+                  : "Drag any player on either board to adjust positioning — press Ctrl+Z / Ctrl+Y for Undo/Redo."}
               </span>
               <span className="tabular-nums text-emerald-400 font-semibold">
                 <bdi dir="ltr">{formationA}</bdi> vs <bdi dir="ltr">{formationB}</bdi>
@@ -2254,7 +2385,7 @@ export default function FormationBlueprintBoard({
                     onClick={() => setEditingPlanText((v) => !v)}
                     className="px-2 py-0.5 rounded bg-white/[0.06] hover:bg-white/[0.14] text-[10px] text-slate-200 font-semibold"
                   >
-                    {editingPlanText ? (isAr ? "إغلاق التعديل" : "Done") : isAr ? "✏️ تعديل الخطة" : "✏️ Edit"}
+                    {editingPlanText ? (isAr ? "إغلاق التعديل" : "Done") : isAr ? "تعديل النص" : "Edit"}
                   </button>
                 </div>
               </div>
@@ -2323,14 +2454,14 @@ export default function FormationBlueprintBoard({
                   }}
                   className="w-full bg-[#111827] border border-white/[0.12] rounded-lg px-2 py-1 text-[11px] text-sky-300 font-bold"
                 >
-                  <optgroup label={`🔴 ${blueprint.team_name || "فريقي"} (${nodesA.length})`}>
+                  <optgroup label={`${blueprint.team_name || "فريقي"} (${nodesA.length})`}>
                     {nodesA.map((n, i) => (
                       <option key={`a-${i}`} value={`team_a:${i}`}>
                         #{n.jersey_number ?? i + 1} • {n.slot} — {n.player_label}
                       </option>
                     ))}
                   </optgroup>
-                  <optgroup label={`🔵 ${blueprint.opponent_name || "الخصم"} (${nodesB.length})`}>
+                  <optgroup label={`${blueprint.opponent_name || "الخصم"} (${nodesB.length})`}>
                     {nodesB.map((n, i) => (
                       <option key={`b-${i}`} value={`team_b:${i}`}>
                         #{n.jersey_number ?? i + 1} • {n.slot} — {n.player_label}

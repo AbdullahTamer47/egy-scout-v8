@@ -1126,33 +1126,37 @@ def _build_single_team_nodes_and_lines(
 
         dir_s = 1.0 if attack_right else -1.0
         slot_up = nd["slot"].upper()
-        if any(k in slot_up for k in ("RB", "LB", "WB")):
+        if slot_up == "GK":
+            to_x = x_m
+            to_y = y_m
+            duty_ar = "حماية المرمى وتوجيه خط الدفاع وبناء اللعب الآمن"
+        elif any(k in slot_up for k in ("RB", "LB", "WB")):
             if tactical_mode == "inverted_fullbacks":
-                to_x = round(float(np.clip(x_m + dir_s * 7.5, 4.0, 101.0)), 2)
-                to_y = round(y_m + (34.0 - y_m) * 0.35, 2)
+                to_x = round(float(np.clip(x_m + dir_s * 6.5, 4.0, 101.0)), 2)
+                to_y = round(y_m + (34.0 - y_m) * 0.30, 2)
                 duty_ar = "ظهير عكسي يدخل لعمق الوسط لتشكيل تفوق عددي في البناء"
             else:
-                to_x = round(float(np.clip(x_m + dir_s * 12.0, 4.0, 101.0)), 2)
-                to_y = round(y_m + (34.0 - y_m) * 0.10, 2)
+                to_x = round(float(np.clip(x_m + dir_s * 9.0, 4.0, 101.0)), 2)
+                to_y = round(y_m + (34.0 - y_m) * 0.08, 2)
                 duty_ar = "تقدم هجومي على الطرف مع التغطية العكسية للممر النصفي"
         elif any(k in slot_up for k in ("CAM", "AM", "CM")):
-            to_x = round(float(np.clip(x_m + dir_s * 9.5, 4.0, 101.0)), 2)
-            to_y = round(y_m + (34.0 - y_m) * 0.24, 2)
+            to_x = round(float(np.clip(x_m + dir_s * 7.5, 4.0, 101.0)), 2)
+            to_y = round(y_m + (34.0 - y_m) * 0.18, 2)
             duty_ar = "اختراق المنطقة 14 وأنصاف المساحات لربط الخطوط وصناعة الفرص"
         elif any(k in slot_up for k in ("RW", "LW", "RM", "LM")):
-            to_x = round(float(np.clip(x_m + dir_s * 11.0, 4.0, 101.0)), 2)
-            to_y = round(y_m + (34.0 - y_m) * (0.15 if tactical_mode == "wing_overload" else 0.38), 2)
+            to_x = round(float(np.clip(x_m + dir_s * 8.5, 4.0, 101.0)), 2)
+            to_y = round(y_m + (34.0 - y_m) * (0.12 if tactical_mode == "wing_overload" else 0.28), 2)
             duty_ar = "اختراق قطري خلف الظهير نحو منطقة الجزاء"
         elif "ST" in slot_up:
-            to_x = round(float(np.clip(x_m + dir_s * 9.5, 4.0, 101.0)), 2)
+            to_x = round(float(np.clip(x_m + dir_s * 7.5, 4.0, 101.0)), 2)
             to_y = y_m
             duty_ar = "تثبيت قلبي الدفاع والانطلاق في ظهر الخط الخلفي"
         elif "DM" in slot_up:
-            to_x = round(float(np.clip(x_m + dir_s * 4.5, 4.0, 101.0)), 2)
-            to_y = round(y_m + (34.0 - y_m) * 0.25, 2)
+            to_x = round(float(np.clip(x_m + dir_s * 3.5, 4.0, 101.0)), 2)
+            to_y = round(y_m + (34.0 - y_m) * 0.18, 2)
             duty_ar = "حماية المنطقة 14 أمام قلبي الدفاع وإغلاق مسارات التحول"
         else:
-            to_x = round(float(np.clip(x_m + dir_s * (3.5 if tactical_mode == "aggressive" else 0.0), 4.0, 101.0)), 2)
+            to_x = x_m
             to_y = y_m
             duty_ar = "ضبط خط التسلل والتغطية العميقة"
 
@@ -1174,12 +1178,16 @@ def _build_single_team_nodes_and_lines(
 
     lines_out: list[dict[str, Any]] = []
     for ln in spec["lines"]:
-        pts = [
-            {"slot": sl, "x_m": slot_to_xy[sl][0], "y_m": slot_to_xy[sl][1]}
-            for sl in ln["slots"]
-            if sl in slot_to_xy
-        ]
-        lines_out.append({"team": team_key, "line_type": ln["line_type"], "label_ar": ln["label_ar"], "points": pts})
+        pts = sorted(
+            [
+                {"slot": sl, "x_m": slot_to_xy[sl][0], "y_m": slot_to_xy[sl][1]}
+                for sl in ln["slots"]
+                if sl in slot_to_xy and sl.upper() != "GK"
+            ],
+            key=lambda p: p["y_m"],
+        )
+        if len(pts) >= 2:
+            lines_out.append({"team": team_key, "line_type": ln["line_type"], "label_ar": ln["label_ar"], "points": pts})
 
     # Style-driven tactical passing combinations
     passing_arrows: list[dict[str, Any]] = []

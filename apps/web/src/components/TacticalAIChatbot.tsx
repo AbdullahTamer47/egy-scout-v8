@@ -297,7 +297,7 @@ function renderFormattedMarkdown(text: string): React.ReactNode {
 }
 
 const AI_MODELS = [
-  { id: "auto", ar: "⚡ تلقائي ذكي (Auto Smart Router)", en: "⚡ Auto Smart Router (Recommended)" },
+  { id: "auto", ar: "تلقائي ذكي (Auto Smart Router)", en: "Auto Smart Router (Recommended)" },
   { id: "openai/gpt-oss-120b", ar: "GPT-OSS 120B (الأقوى للخطط المعقدة)", en: "GPT-OSS 120B (Deep Tactical)" },
   { id: "qwen/qwen3.8-27b", ar: "Qwen 3.8 27B (ذكي وسريع بالعربي)", en: "Qwen 3.8 27B (Fast Arabic)" },
   { id: "openai/gpt-oss-20b", ar: "GPT-OSS 20B (فائق السرعة)", en: "GPT-OSS 20B (Turbo)" },
@@ -421,7 +421,7 @@ export default function TacticalAIChatbot({
         className="fixed bottom-5 end-5 z-50 flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs shadow-2xl shadow-emerald-950/80 border border-emerald-300 transition transform hover:scale-[1.03]"
       >
         <Bot className="w-5 h-5" />
-        <span>{isAr ? "🤖 المساعد التكتيكي الذكي (AI 120B)" : "🤖 AI Tactical Analyst"}</span>
+        <span>{isAr ? "المساعد التكتيكي الذكي (AI)" : "AI Tactical Analyst"}</span>
       </button>
     );
   }
@@ -440,12 +440,12 @@ export default function TacticalAIChatbot({
             </div>
             <div className="min-w-0">
               <div className="text-xs font-extrabold text-white truncate">
-                {isAr ? "المحلل التكتيكي الذكي وراسم الخطط (Groq AI)" : "EGY-SCOUT AI Tactical Brain & Plan Drawer"}
+                {isAr ? "المحلل التكتيكي الذكي وراسم الخطط" : "EGY-SCOUT AI Tactical Brain & Plan Drawer"}
               </div>
               <div className="text-[10px] text-emerald-400 truncate">
                 {isAr
-                  ? "🟢 متصل حياً ببيانات الفريقين (22 لاعباً) ومرسم الملعب التكتيكي"
-                  : "🟢 Connected live to two-team telemetry & 22-player pitch canvas"}
+                  ? "متصل حياً ببيانات الفريقين والسبورة التكتيكية المزدوجة"
+                  : "Connected live to two-team telemetry & dual tactical boards"}
               </div>
             </div>
           </div>
@@ -464,8 +464,8 @@ export default function TacticalAIChatbot({
           <span className="text-emerald-300 font-semibold truncate">
             {selectedModel === "auto"
               ? isAr
-                ? "⚡ الوضع التلقائي الذكي (يختار الموديل الأنسب تلقائياً)"
-                : "⚡ Auto Smart Router Active"
+                ? "الوضع التلقائي الذكي (يختار الموديل الأنسب تلقائياً)"
+                : "Auto Smart Router Active"
               : activeModelLabel}
           </span>
           <button
@@ -473,7 +473,7 @@ export default function TacticalAIChatbot({
             onClick={() => setShowAdvancedModel((v) => !v)}
             className="px-2 py-0.5 rounded bg-[#090D16] border border-white/10 text-[10px] text-slate-400 hover:text-white shrink-0"
           >
-            {showAdvancedModel ? (isAr ? "إخفاء الموديلات" : "Hide") : isAr ? "⚙️ إعدادات متقدمة" : "⚙️ Advanced"}
+            {showAdvancedModel ? (isAr ? "إخفاء الموديلات" : "Hide") : isAr ? "إعدادات الموديل" : "Model Settings"}
           </button>
         </div>
         {showAdvancedModel && (
@@ -531,13 +531,13 @@ export default function TacticalAIChatbot({
                             </span>
                           </div>
                           <div className="text-emerald-200">
-                            <b>✅ فعل:</b> {String(c.did_ar)}
+                            <b>فعل:</b> {String(c.did_ar)}
                           </div>
                           <div className="text-rose-300">
-                            <b>❌ لم يفعل:</b> {String(c.did_not_ar)}
+                            <b>لم يفعل:</b> {String(c.did_not_ar)}
                           </div>
                           <div className="text-amber-200">
-                            <b>📍 أين ولماذا:</b> {String(c.where_and_why_ar)}
+                            <b>أين ولماذا:</b> {String(c.where_and_why_ar)}
                           </div>
                         </div>
                       );

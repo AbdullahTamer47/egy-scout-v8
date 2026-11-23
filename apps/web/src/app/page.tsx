@@ -149,18 +149,18 @@ export default function HomePage() {
 
   // Command palette actions
   const cmdActions = [
-    { id: "go-studio", label: isAr ? "📺 افتح استوديو البث ومرسم الـ 22 لاعباً" : "📺 Open Broadcast Studio & Tactical Board", run: () => setTab("studio") },
-    { id: "go-qa", label: isAr ? "🛡️ افتح عزل الحكام وورقة تأكيد الهوية (QA)" : "🛡️ Open Referee Isolation & Identity QA", run: () => setTab("accuracy") },
-    { id: "go-scout", label: isAr ? "🎯 افتح الكشافة والمقارنة وجهاً لوجه (H2H)" : "🎯 Open Fair Scouting & Head-to-Head", run: () => setTab("scouting") },
-    { id: "go-quick", label: isAr ? "⚡ استيراد فيديو MP4 أو رابط YouTube جديد" : "⚡ Import New MP4 or YouTube Match", run: () => setTab("quick") },
-    { id: "mode-coach", label: isAr ? "👔 التبديل إلى وضع المدرب السريع (Coach Mode)" : "👔 Switch to Coach Quick Mode", run: () => handleWorkspaceModeChange("coach") },
-    { id: "mode-analyst", label: isAr ? "🔬 التبديل إلى وضع المحلل الكامل (Analyst Pro)" : "🔬 Switch to Analyst Pro Mode", run: () => handleWorkspaceModeChange("analyst") },
-    { id: "mode-scout", label: isAr ? "🔎 التبديل إلى وضع الكشاف (Scout Mode)" : "🔎 Switch to Scout Mode", run: () => handleWorkspaceModeChange("scout") },
-    { id: "toggle-chat", label: isAr ? "🤖 فتح / إغلاق المساعد التكتيكي الذكي" : "🤖 Toggle AI Tactical Assistant", run: () => setChatOpen((v) => !v) },
-    { id: "shortcuts", label: isAr ? "⌨️ عرض اختصارات الكيبورد الاحترافية" : "⌨️ Show Pro Keyboard Shortcuts", run: () => setShortcutsOpen(true) },
+    { id: "go-studio", label: isAr ? "افتح استوديو البث والسبورة التكتيكية المزدوجة" : "Open Broadcast Studio & Dual Tactical Boards", run: () => setTab("studio") },
+    { id: "go-qa", label: isAr ? "افتح عزل الحكام وورقة تأكيد الهوية (QA)" : "Open Referee Isolation & Identity QA", run: () => setTab("accuracy") },
+    { id: "go-scout", label: isAr ? "افتح الكشافة والمقارنة وجهاً لوجه (H2H)" : "Open Fair Scouting & Head-to-Head", run: () => setTab("scouting") },
+    { id: "go-quick", label: isAr ? "ارفع فيديو مباراتك الخاصة (MP4 أو رابط YouTube / بث مباشر)" : "Upload Your Own Match Video (MP4 / YouTube / Live Stream)", run: () => setTab("quick") },
+    { id: "mode-coach", label: isAr ? "التبديل إلى وضع المدرب السريع (Coach Mode)" : "Switch to Coach Quick Mode", run: () => handleWorkspaceModeChange("coach") },
+    { id: "mode-analyst", label: isAr ? "التبديل إلى وضع المحلل الكامل (Analyst Pro)" : "Switch to Analyst Pro Mode", run: () => handleWorkspaceModeChange("analyst") },
+    { id: "mode-scout", label: isAr ? "التبديل إلى وضع الكشاف (Scout Mode)" : "Switch to Scout Mode", run: () => handleWorkspaceModeChange("scout") },
+    { id: "toggle-chat", label: isAr ? "فتح / إغلاق المساعد التكتيكي الذكي" : "Toggle AI Tactical Assistant", run: () => setChatOpen((v) => !v) },
+    { id: "shortcuts", label: isAr ? "عرض اختصارات الكيبورد الاحترافية" : "Show Pro Keyboard Shortcuts", run: () => setShortcutsOpen(true) },
     ...matches.map((m) => ({
       id: `match-${m.match_id}`,
-      label: `${isAr ? "⚽ انتقل لمباراة:" : "⚽ Switch match:"} ${isAr ? m.title_ar || m.team_a_name : `${m.team_a_name} vs ${m.team_b_name}`}`,
+      label: `${isAr ? "انتقل لمباراة:" : "Switch match:"} ${isAr ? m.title_ar || m.team_a_name : `${m.team_a_name} vs ${m.team_b_name}`}`,
       run: () => setMatchId(m.match_id),
     })),
   ].filter((a) => !cmdQuery.trim() || a.label.toLowerCase().includes(cmdQuery.toLowerCase()));
@@ -178,7 +178,7 @@ export default function HomePage() {
             </div>
             <div className="hidden md:block leading-tight">
               <div className="text-sm font-extrabold tracking-tight text-white">EGY-SCOUT</div>
-              <div className="text-[11px] text-emerald-400 font-semibold">V9.0 Pro Studio</div>
+              <div className="text-[11px] text-emerald-400 font-semibold">V9.5 Pro Studio</div>
             </div>
           </div>
 
@@ -331,7 +331,7 @@ export default function HomePage() {
                 }`}
               >
                 <Bot className="w-4 h-4" />
-                <span>{isAr ? "🤖 المساعد التكتيكي الذكي" : "🤖 AI Tactical Chat"}</span>
+                <span>{isAr ? "المساعد التكتيكي الذكي" : "AI Tactical Analyst"}</span>
               </button>
 
               <div className="hidden sm:inline-flex items-center bg-[#111827] border border-white/[0.1] rounded-lg overflow-hidden text-xs">
@@ -381,53 +381,71 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Visual Multi-Match Selector Pill Cards */}
-          <div className="flex flex-wrap items-center gap-2">
-            {matches.map((m) => {
-              const active = m.match_id === matchId;
-              const labelAr = m.title_ar || `${m.team_a_name_ar || m.team_a_name} × ${m.team_b_name_ar || m.team_b_name}`;
-              const labelEn = `${m.team_a_name} × ${m.team_b_name}`;
-              const hexA = m.kit_colors?.team_a_hex || "#EF4444";
-              const hexB = m.kit_colors?.team_b_hex || "#38BDF8";
+          {/* User Upload Primary Action + Clear Separation of User Matches vs Demo Reference Samples */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setTab("quick")}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-extrabold border transition ${
+                  tab === "quick"
+                    ? "bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-950/60"
+                    : "bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/45"
+                }`}
+              >
+                <UploadCloud className="w-3.5 h-3.5" />
+                <span>{isAr ? "+ ارفع فيديو مباراتك الخاصة (MP4 / YouTube / بث مباشر)" : "+ Upload Your Match Video (MP4 / URL)"}</span>
+              </button>
 
-              return (
-                <button
-                  key={m.match_id}
-                  type="button"
-                  onClick={() => setMatchId(m.match_id)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition ${
-                    active
-                      ? "bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-950/60"
-                      : "bg-[#111827] hover:bg-white/[0.06] text-slate-200 border-white/[0.1] hover:border-emerald-500/40"
-                  }`}
-                >
-                  <span className="flex items-center -space-x-1 rtl:space-x-reverse">
-                    <span
-                      className="w-2.5 h-2.5 rounded-full border border-white/50 inline-block"
-                      style={{ backgroundColor: hexA }}
-                    />
-                    <span
-                      className="w-2.5 h-2.5 rounded-full border border-white/50 inline-block"
-                      style={{ backgroundColor: hexB }}
-                    />
-                  </span>
-                  <span>{isAr ? labelAr : labelEn}</span>
-                </button>
-              );
-            })}
+              <span className="text-[11px] font-semibold text-slate-400 ps-1">
+                {isAr ? "أو استعرض نماذج تجريبية جاهزة (أمثلة):" : "Or explore built-in Demo Samples:"}
+              </span>
 
-            <button
-              type="button"
-              onClick={() => setTab("quick")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition ${
-                tab === "quick"
-                  ? "bg-sky-500/20 text-sky-300 border-sky-400/50"
-                  : "bg-[#090D16] hover:bg-white/[0.05] text-sky-400 border-sky-500/30"
-              }`}
-            >
-              <PlusCircle className="w-3.5 h-3.5" />
-              <span>{isAr ? "+ رفع / تحليل مباراة جديدة" : "+ Upload / Analyze New Match"}</span>
-            </button>
+              {matches.map((m) => {
+                const active = m.match_id === matchId;
+                const isCustom = Boolean(m.is_custom || m.match_id.startsWith("custom_"));
+                const labelAr = m.title_ar || `${m.team_a_name_ar || m.team_a_name} × ${m.team_b_name_ar || m.team_b_name}`;
+                const labelEn = `${m.team_a_name} × ${m.team_b_name}`;
+                const hexA = m.kit_colors?.team_a_hex || "#EF4444";
+                const hexB = m.kit_colors?.team_b_hex || "#38BDF8";
+
+                return (
+                  <button
+                    key={m.match_id}
+                    type="button"
+                    onClick={() => setMatchId(m.match_id)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition ${
+                      active
+                        ? "bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-950/60"
+                        : "bg-[#111827] hover:bg-white/[0.06] text-slate-200 border-white/[0.1] hover:border-emerald-500/40"
+                    }`}
+                  >
+                    <span className="flex items-center -space-x-1 rtl:space-x-reverse">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full border border-white/50 inline-block"
+                        style={{ backgroundColor: hexA }}
+                      />
+                      <span
+                        className="w-2.5 h-2.5 rounded-full border border-white/50 inline-block"
+                        style={{ backgroundColor: hexB }}
+                      />
+                    </span>
+                    <span>{isAr ? labelAr : labelEn}</span>
+                    <span
+                      className={`text-[9.5px] px-1.5 py-0.2 rounded font-bold ${
+                        active
+                          ? "bg-black/20 text-slate-950"
+                          : isCustom
+                          ? "bg-emerald-500/20 text-emerald-300"
+                          : "bg-white/[0.07] text-slate-400"
+                      }`}
+                    >
+                      {isCustom ? (isAr ? "مباراتك" : "Custom") : isAr ? "مثال تجريبي" : "Demo"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </header>
 

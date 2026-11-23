@@ -1853,7 +1853,7 @@ export default function BroadcastStudioScreen({
         <div className="p-3.5 rounded-2xl bg-emerald-950/90 border-2 border-emerald-400 shadow-2xl flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-0.5">
             <div className="flex items-center gap-2 text-xs font-extrabold text-emerald-300">
-              <span>📽️ {isAr ? "وضع عرض غرفة الملابس (Locker-Room Present Mode)" : "Locker-Room Present Mode"}</span>
+              <span>{isAr ? "وضع عرض غرفة الملابس (Locker-Room Present Mode)" : "Locker-Room Present Mode"}</span>
               <span className="px-2 py-0.5 rounded bg-emerald-500/25 text-white tabular-nums">
                 {presentIdx + 1} / {presentQueue.length}
               </span>
@@ -1942,8 +1942,8 @@ export default function BroadcastStudioScreen({
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
             {isAr
-              ? "بدّل بين الأوضاع الجاهزة أدناه بدون سكرول طويل — أو اضغط ? لعرض اختصارات الكيبورد الاحترافية."
-              : "Switch Panel Presets below with zero vertical clutter — press ? for pro keyboard shortcuts."}
+              ? "ملاحظة: المباريات المدمجة هي نماذج تجريبية لاستعراض الأدوات — اضغط «+ ارفع فيديو مباراتك الخاصة» في الشريط العلوي لتحليل أي فيديو أو رابط خاص بك."
+              : "Note: Pre-loaded matches are reference demos — click '+ Upload Your Match Video' in the top bar to analyze your own match video or URL."}
           </p>
         </div>
 
@@ -1973,11 +1973,11 @@ export default function BroadcastStudioScreen({
       <div className="flex flex-wrap items-center gap-1.5 p-1.5 rounded-2xl bg-[#0C1220] border border-white/[0.09] text-xs">
         {(
           [
-            { id: "video_twin" as StudioPreset, ar: "📺 المشاهدة والرسم (فيديو + 2D/3D)", en: "📺 Video & 2D/3D Twin" },
-            { id: "dissect" as StudioPreset, ar: "🔬 التشريح التكتيكي (لحظة + فعل/لم يفعل)", en: "🔬 Moment Dissection" },
-            { id: "tactics_board" as StudioPreset, ar: "📋 مرسم الـ 22 لاعباً المتحرك والـ AI", en: "📋 Animated 22-Player Board" },
-            { id: "locker_room" as StudioPreset, ar: "📽️ التكويد وقائمة غرفة الملابس", en: "📽️ Tagging & Locker-Room" },
-            { id: "split" as StudioPreset, ar: "🔀 عرض مقسم (فيديو + مرسم معاً)", en: "🔀 Split View (Video + Board)" },
+            { id: "video_twin" as StudioPreset, ar: "المشاهدة والرسم (فيديو + 2D/3D)", en: "Video & 2D/3D Twin" },
+            { id: "dissect" as StudioPreset, ar: "التشريح التكتيكي (لحظة + فعل/لم يفعل)", en: "Moment Dissection" },
+            { id: "tactics_board" as StudioPreset, ar: "السبورتان التكتيكيتان (فريقي | الخصم)", en: "Dual Tactical Boards" },
+            { id: "locker_room" as StudioPreset, ar: "التكويد وقائمة غرفة الملابس", en: "Tagging & Locker-Room" },
+            { id: "split" as StudioPreset, ar: "عرض مقسم (فيديو + سبورة معاً)", en: "Split View (Video + Board)" },
           ]
         ).map((pr) => (
           <button
@@ -2755,14 +2755,14 @@ export default function BroadcastStudioScreen({
 
                       <div className="p-2.5 rounded-lg bg-[#111827]/90 border border-emerald-500/30 space-y-1">
                         <div className="font-bold text-emerald-400">
-                          {isAr ? "✅ 1. ما الذي فعله فعلياً (What He Did):" : "✅ 1. What He Did:"}
+                          {isAr ? "1. ما الذي فعله فعلياً (What He Did):" : "1. What He Did:"}
                         </div>
                         <p className="text-slate-200 leading-relaxed">{activePs.did_ar}</p>
                       </div>
 
                       <div className="p-2.5 rounded-lg bg-[#111827]/90 border border-rose-500/30 space-y-1">
                         <div className="font-bold text-rose-400">
-                          {isAr ? "❌ 2. ما الذي لم يفعله (What He Did Not Do):" : "❌ 2. What He Did Not Do:"}
+                          {isAr ? "2. ما الذي لم يفعله (What He Did Not Do):" : "2. What He Did Not Do:"}
                         </div>
                         <p className="text-slate-200 leading-relaxed">{activePs.did_not_ar}</p>
                       </div>
@@ -2770,7 +2770,7 @@ export default function BroadcastStudioScreen({
                       <div className="p-2.5 rounded-lg bg-[#111827]/90 border border-amber-500/30 space-y-1.5">
                         <div className="flex items-center justify-between gap-2">
                           <div className="font-bold text-amber-300">
-                            {isAr ? "📍 3. أين ولماذا أخطأ / التمركز الأمثل:" : "📍 3. Where & Why / Optimal Fix:"}
+                            {isAr ? "3. أين ولماذا أخطأ / التمركز الأمثل:" : "3. Where & Why / Optimal Fix:"}
                           </div>
                           <button
                             type="button"
@@ -2782,7 +2782,7 @@ export default function BroadcastStudioScreen({
                             }}
                             className="px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold whitespace-nowrap"
                           >
-                            {isAr ? "🏋️ حوّل الخطأ إلى تمرين" : "🏋️ Turn Into Drill"}
+                            {isAr ? "تحويل الخطأ إلى تمرين بالسبورة" : "Turn Into Drill"}
                           </button>
                         </div>
                         <p className="text-slate-200 leading-relaxed">{activePs.where_and_why_ar}</p>

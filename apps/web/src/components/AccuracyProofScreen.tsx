@@ -683,7 +683,7 @@ export default function AccuracyProofScreen({ lang, matchId, role }: Props) {
                   className="inline-flex items-center gap-1.5 bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/40 text-sky-200 font-bold text-xs px-3.5 py-2 rounded-lg transition"
                 >
                   <Shield className="w-3.5 h-3.5 text-sky-400" />
-                  {isAr ? "⚡ توزيع تلقائي لقائمة المباراة" : "⚡ 1-Click Auto-Assign Lineup"}
+                  {isAr ? "توزيع تلقائي لقائمة المباراة" : "1-Click Auto-Assign Lineup"}
                 </button>
                 <button
                   onClick={handleSaveQA}
@@ -709,8 +709,8 @@ export default function AccuracyProofScreen({ lang, matchId, role }: Props) {
               }`}
             >
               {isAr
-                ? `🟢 لاعبو الفريم الحالي #${frameId} (${qaTracks.filter((t) => t.in_current_frame || t.in_active_shot).length})`
-                : `🟢 In Active Frame #${frameId} (${qaTracks.filter((t) => t.in_current_frame || t.in_active_shot).length})`}
+                ? `لاعبو الفريم الحالي #${frameId} (${qaTracks.filter((t) => t.in_current_frame || t.in_active_shot).length})`
+                : `In Active Frame #${frameId} (${qaTracks.filter((t) => t.in_current_frame || t.in_active_shot).length})`}
             </button>
             <button
               onClick={() => setQaFilterTab("all_key")}
@@ -950,7 +950,7 @@ export default function AccuracyProofScreen({ lang, matchId, role }: Props) {
                             }}
                             className="w-full bg-[#111827] border border-emerald-500/35 rounded px-2 py-1 text-[11px] text-emerald-300"
                           >
-                            <option value="">{isAr ? "⚡ اختر لاعب من التشكيل الرسمي..." : "⚡ Pick from official lineup..."}</option>
+                            <option value="">{isAr ? "اختر لاعباً من التشكيل الرسمي..." : "Pick from official lineup..."}</option>
                             {officialRoster.map((rp, rIdx) => (
                               <option key={`${rp.jersey_number}-${rIdx}`} value={`${rp.jersey_number}-${rp.name}`}>
                                 #{rp.jersey_number} - {rp.name}

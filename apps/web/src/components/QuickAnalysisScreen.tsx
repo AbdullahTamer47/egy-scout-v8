@@ -155,12 +155,12 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
     <div className="space-y-6">
       <div>
         <h1 className="text-lg font-bold text-white">
-          {isAr ? "مركز استيراد وتحليل مقاطع الفيديو" : "Video Ingestion & Quick Analysis Hub"}
+          {isAr ? "رفع وتحليل مباراتك الخاصة (الوظيفة الأساسية للنظام)" : "Upload & Analyze Your Match Video (Primary Hub)"}
         </h1>
-        <p className="text-xs text-slate-400 mt-0.5">
+        <p className="text-xs text-slate-300 mt-0.5">
           {isAr
-            ? "ارفع ملف MP4 أو استورد رابط YouTube/Drive لعزل اللاعبين والحكام والمعايرة وتصدير Apache Parquet فوراً."
-            : "Upload an MP4 file or import a YouTube/Drive URL for 32-KP calibration, isolation, and Apache Parquet export."}
+            ? "هذا البرنامج مصمم أساساً لرفع فيديو مباراتك الخاصة (ملف MP4 أو رابط YouTube / بث مباشر) وتحليله بالكامل. المباريات الأخرى الموجودة في القائمة العلوية هي نماذج تجريبية فقط لاستعراض الأدوات."
+            : "EGY-SCOUT is built to analyze your own uploaded match videos (MP4 or YouTube/Live Stream URL). Pre-loaded matches in the top bar are reference demos."}
         </p>
       </div>
 
@@ -323,8 +323,8 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
           <div className="space-y-1 text-xs">
             <label className="block text-[11px] text-emerald-300 font-semibold">
               {isAr
-                ? "📋 قائمة أسماء وأرقام التشكيلة الرسمية (اختياري — خطوة واحدة مع الفيديو وتُطبّق تلقائياً!)"
-                : "📋 Paste Official Match Roster (Optional — unified Step 1, auto-applied on ingest!)"}
+                ? "قائمة أسماء وأرقام التشكيلة الرسمية (اختياري — خطوة واحدة مع الفيديو وتُطبّق تلقائياً)"
+                : "Paste Official Match Roster (Optional — unified Step 1, auto-applied on ingest)"}
             </label>
             <textarea
               rows={3}
