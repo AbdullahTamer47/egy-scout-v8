@@ -254,9 +254,17 @@ export default function TacticalTwinCanvas({
       const pad = 12;
       const rx = (((e.clientX - rect.left) / rect.width) * cvs.width - pad) / (cvs.width - pad * 2) * 105;
       const ry = (((e.clientY - rect.top) / rect.height) * cvs.height - pad) / (cvs.height - pad * 2) * 68;
-      const hit = players.find(
-        (p) => p.team === defendingTeam && p.role === "player" && Math.hypot(p.x_m - rx, p.y_m - ry) < 5.5
-      );
+      // Allow selecting & dragging ANY player or goalkeeper from BOTH teams (own club + opponent)!
+      let hit: (typeof players)[number] | undefined;
+      let bestDist = 5.5;
+      for (const p of players) {
+        if (p.role !== "player" && p.role !== "goalkeeper") continue;
+        const d = Math.hypot(p.x_m - rx, p.y_m - ry);
+        if (d < bestDist) {
+          bestDist = d;
+          hit = p;
+        }
+      }
       const activeId = hit ? hit.track_id : selectedDefId;
       if (hit && onSelectPlayer) onSelectPlayer(hit.track_id);
       if (activeId !== null && onGhostPitchMove) {

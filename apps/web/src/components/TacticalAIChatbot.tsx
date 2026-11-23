@@ -175,8 +175,8 @@ function InlineBlueprintMiniCanvas({ blueprint }: { blueprint: FormationBlueprin
     <div className="rounded-xl overflow-hidden border border-emerald-500/40 bg-[#061A13] mt-2">
       <div className="px-2.5 py-1 bg-[#090D16] border-b border-white/10 flex items-center justify-between text-[10px]">
         <span className="font-bold text-emerald-300">
-          {blueprint.team_name} ({blueprint.formation_code}) × {blueprint.opponent_name} (
-          {blueprint.opponent_formation_code || "4-4-2"})
+          {blueprint.team_name} (<bdi dir="ltr">{blueprint.formation_code}</bdi>) × {blueprint.opponent_name} (
+          <bdi dir="ltr">{blueprint.opponent_formation_code || "4-4-2"}</bdi>)
         </span>
         <span className="text-slate-400">22 لاعباً • رسم حي</span>
       </div>
@@ -296,6 +296,13 @@ function renderFormattedMarkdown(text: string): React.ReactNode {
   );
 }
 
+const AI_MODELS = [
+  { id: "openai/gpt-oss-120b", ar: "GPT-OSS 120B (الأقوى)", en: "GPT-OSS 120B (Flagship)" },
+  { id: "qwen/qwen3.8-27b", ar: "Qwen 3.8 27B (ذكي وسريع)", en: "Qwen 3.8 27B (Fast)" },
+  { id: "openai/gpt-oss-20b", ar: "GPT-OSS 20B (فائق السرعة)", en: "GPT-OSS 20B (Turbo)" },
+  { id: "allam-2-7b", ar: "ALLaM 2 7B (عربي أصيل)", en: "ALLaM 2 7B (Arabic)" },
+];
+
 export default function TacticalAIChatbot({
   lang,
   matchId,
@@ -309,6 +316,7 @@ export default function TacticalAIChatbot({
   const isAr = lang === "ar";
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<string>("openai/gpt-oss-120b");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -317,14 +325,14 @@ export default function TacticalAIChatbot({
       {
         id: `welcome-${matchId}`,
         sender: "ai",
-        engine: "Groq AI (openai/gpt-oss-120b)",
+        engine: "Groq AI Multi-Model (GPT-OSS 120B / Qwen 3.8)",
         text: isAr
-          ? `أهلاً بك في **المحلل التكتيكي الذكي (Groq AI 120B)** لمباراة **${matchTitleAr}**.\n\nأنا متصل مباشرة ببيانات الفريقين معاً (22 لاعباً)، الإحداثيات الحقيقية، السرعات، وتشريح كل لاعب (**عمل إيه / معملش إيه / غلط فين وليه**)، وأقدر **أرسم لك أي خطة بأي تشكيل وأي ستايل تكتيكي مباشرة على الملعب**!`
-          : `Welcome to **EGY-SCOUT AI Tactical Brain (Groq AI 120B)** for **${matchTitleAr}**.\n\nConnected live to both teams' telemetry and the 22-player Tactical Drawing Board. Ask me any question or tell me to draw any tactical plan!`,
+          ? `أهلاً بك في **المحلل التكتيكي الذكي (Groq AI)** لمباراة **${matchTitleAr}**.\n\nأنا متصل مباشرة ببيانات الفريقين معاً (22 لاعباً)، الإحداثيات الحقيقية، السرعات، وتشريح كل لاعب (**عمل إيه / معملش إيه / غلط فين وليه**). تقدر تختار الموديل من الأعلى وتطلب **أي خطة مبتكرة أو مجنونة لم تُلعب من قبل** وسأرسم لك إحداثيات الـ 22 لاعباً مباشرة على الملعب!`
+          : `Welcome to **EGY-SCOUT AI Tactical Brain** for **${matchTitleAr}**.\n\nConnected live to both teams' telemetry and the 22-player Tactical Drawing Board. Switch models anytime above and ask me to invent & draw any wild or custom tactical formation directly on the pitch!`,
         followUps: [
+          "ابتكر خطة مجنونة 2-1-6-1 بحارس ليبرو في منتصف الملعب وهجوم كاسح على الجبهة اليسرى",
           "ارسم خطة 3-5-2 بأسلوب تيكي تاكا ضد 5-3-2 مع أسهم اختراق للمنطقة 14",
           "حلل موقف الفريقين معاً في هذه اللقطة: من أخطأ ولماذا؟",
-          "ارسم خطة 4-3-3 بضغط عالي عكسي ومصيدة ضغط على الأطراف",
           "من هم أسرع اللاعبين في الفريقين وما هي أفضل قنوات التمرير المفتوحة؟",
         ],
       },
@@ -364,6 +372,7 @@ export default function TacticalAIChatbot({
             match_id: matchId,
             question: qText,
             history: historyPayload,
+            model: selectedModel,
           }),
         },
         "club_demo_egypt",
@@ -399,6 +408,9 @@ export default function TacticalAIChatbot({
     }
   };
 
+  const activeModelLabel =
+    AI_MODELS.find((m) => m.id === selectedModel)?.[isAr ? "ar" : "en"] || selectedModel;
+
   if (!isOpen) {
     return (
       <button
@@ -407,7 +419,7 @@ export default function TacticalAIChatbot({
         className="fixed bottom-5 end-5 z-50 flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs shadow-2xl shadow-emerald-950/80 border border-emerald-300 transition transform hover:scale-[1.03]"
       >
         <Bot className="w-5 h-5" />
-        <span>{isAr ? "🤖 المساعد التكتيكي الذكي (Llama-3.3-70B)" : "🤖 AI Tactical Analyst"}</span>
+        <span>{isAr ? "🤖 المساعد التكتيكي الذكي (AI 120B)" : "🤖 AI Tactical Analyst"}</span>
       </button>
     );
   }
@@ -417,31 +429,50 @@ export default function TacticalAIChatbot({
       dir={isAr ? "rtl" : "ltr"}
       className="fixed bottom-4 end-4 z-50 w-[95vw] sm:w-[485px] h-[660px] max-h-[88vh] rounded-2xl bg-[#0B101C] border border-emerald-500/40 shadow-2xl shadow-black/90 flex flex-col overflow-hidden"
     >
-      {/* Header (Clean — No API key prompt!) */}
-      <div className="px-4 py-3 bg-[#111827] border-b border-white/[0.08] flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
-            <Bot className="w-4 h-4" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-xs font-extrabold text-white truncate">
-              {isAr ? "المحلل التكتيكي الذكي وراسم الخطط (Llama-3.3-70B)" : "EGY-SCOUT AI Tactical Brain & Plan Drawer"}
+      {/* Header (Clean — Multi-Model Groq Picker, No API key prompt!) */}
+      <div className="px-4 py-3 bg-[#111827] border-b border-white/[0.08] space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
+              <Bot className="w-4 h-4" />
             </div>
-            <div className="text-[10px] text-emerald-400 truncate">
-              {isAr
-                ? "🟢 متصل حياً ببيانات الفريقين (22 لاعباً) ومرسم الملعب التكتيكي"
-                : "🟢 Connected live to two-team telemetry & 22-player pitch canvas"}
+            <div className="min-w-0">
+              <div className="text-xs font-extrabold text-white truncate">
+                {isAr ? "المحلل التكتيكي الذكي وراسم الخطط (Groq AI)" : "EGY-SCOUT AI Tactical Brain & Plan Drawer"}
+              </div>
+              <div className="text-[10px] text-emerald-400 truncate">
+                {isAr
+                  ? "🟢 متصل حياً ببيانات الفريقين (22 لاعباً) ومرسم الملعب التكتيكي"
+                  : "🟢 Connected live to two-team telemetry & 22-player pitch canvas"}
+              </div>
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={onToggleOpen}
+            className="p-1.5 rounded-lg bg-[#090D16] hover:bg-white/[0.08] text-slate-400 hover:text-white transition"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
-        <button
-          type="button"
-          onClick={onToggleOpen}
-          className="p-1.5 rounded-lg bg-[#090D16] hover:bg-white/[0.08] text-slate-400 hover:text-white transition"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        {/* AI Model Switcher */}
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="text-slate-400 shrink-0">{isAr ? "موديل الذكاء:" : "AI Model:"}</span>
+          <select
+            aria-label={isAr ? "اختيار موديل الذكاء الاصطناعي" : "Select AI Model"}
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            className="flex-1 bg-[#090D16] border border-emerald-500/35 rounded-lg px-2 py-1 text-[11px] font-bold text-emerald-300 focus:outline-none focus:border-emerald-400"
+          >
+            {AI_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {isAr ? m.ar : m.en}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Messages Feed */}
@@ -545,8 +576,8 @@ export default function TacticalAIChatbot({
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
             <span>
               {isAr
-                ? "Llama-3.3-70B يحلل بيانات الفريقين ويرسم الخطة التكتيكية..."
-                : "Llama-3.3-70B analyzing two-team telemetry & drawing tactical plan..."}
+                ? `${activeModelLabel} يحلل بيانات الفريقين ويرسم الخطة التكتيكية...`
+                : `${activeModelLabel} analyzing two-team telemetry & drawing tactical plan...`}
             </span>
           </div>
         )}

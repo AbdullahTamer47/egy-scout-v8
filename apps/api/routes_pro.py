@@ -485,7 +485,7 @@ def api_ai_tactical_draw(
     payload: dict[str, Any],
     ctx: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
-    """Use Groq Llama-3.3-70B to draw any custom two-team formation, tactical style, arrows, and zones on the pitch."""
+    """Use Groq Multi-Model AI (GPT-OSS 120B / Qwen 3.8 / ALLaM 2) to draw any custom or innovative 22-player tactical plan."""
     ctx.require("read:tactics")
     from apps.api.main import service
 

@@ -4,15 +4,18 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   Bot,
   Compass,
+  Download,
+  FolderOpen,
   Hand,
-  Layers,
   MoveUpRight,
   Pencil,
-  RotateCcw,
+  Plus,
+  Save,
   Sparkles,
   Square,
   Trash2,
   Undo2,
+  UserMinus,
   Users,
   Zap,
 } from "lucide-react";
@@ -43,6 +46,42 @@ interface FreehandStroke {
 }
 
 const PRESET_FORMATIONS = ["4-2-3-1", "4-3-3", "3-4-2-1", "3-5-2", "4-4-2", "5-3-2", "4-1-4-1", "4-2-2-2"];
+
+const GROQ_AI_MODELS = [
+  { id: "openai/gpt-oss-120b", ar: "GPT-OSS 120B (الأقوى للخطط المبتكرة)", en: "GPT-OSS 120B (Flagship)" },
+  { id: "qwen/qwen3.8-27b", ar: "Qwen 3.8 27B (ذكي وسريع)", en: "Qwen 3.8 27B (Fast Arabic)" },
+  { id: "openai/gpt-oss-20b", ar: "GPT-OSS 20B (فائق السرعة)", en: "GPT-OSS 20B (Turbo)" },
+  { id: "allam-2-7b", ar: "ALLaM 2 7B (نموذج عربي)", en: "ALLaM 2 7B (Arabic)" },
+];
+
+const DRAW_COLORS = [
+  { hex: "#10B981", label: "أخضر تكتيكي" },
+  { hex: "#FACC15", label: "أصفر تمرير" },
+  { hex: "#EF4444", label: "أحمر ضغط" },
+  { hex: "#38BDF8", label: "أزرق سماوي" },
+  { hex: "#A855F7", label: "بنفسجي منطقة 14" },
+  { hex: "#FFFFFF", label: "أبيض صريح" },
+];
+
+interface SavedTacticalPlan {
+  id: string;
+  name: string;
+  savedAt: string;
+  formationA: string;
+  formationB: string;
+  styleA: string;
+  styleB: string;
+  titleAr: string;
+  philosophyAr: string;
+  stepsAr: string[];
+  nodesA: BlueprintNode[];
+  nodesB: BlueprintNode[];
+  userArrows: BlueprintPassingArrow[];
+  userZones: BlueprintCustomZone[];
+  freehandStrokes: FreehandStroke[];
+}
+
+const SAVED_PLANS_KEY = "egy_scout_saved_tactical_plans_v1";
 
 const TACTICAL_STYLES: Array<{ id: string; ar: string; en: string }> = [
   { id: "balanced", ar: "متوازن (Mid-Block)", en: "Balanced" },
@@ -79,21 +118,45 @@ export default function FormationBlueprintBoard({
   const [userArrows, setUserArrows] = useState<BlueprintPassingArrow[]>([]);
   const [userZones, setUserZones] = useState<BlueprintCustomZone[]>([]);
   const [freehandStrokes, setFreehandStrokes] = useState<FreehandStroke[]>([]);
-  const [selectedNodeKey, setSelectedNodeKey] = useState<string>("team_a:CAM");
+  const [selectedNode, setSelectedNode] = useState<{ team: "team_a" | "team_b"; index: number }>({
+    team: "team_a",
+    index: 8,
+  });
 
-  // AI Live Drawing Prompt
+  // Full Drawing Style & Plan Editor State
+  const [drawColor, setDrawColor] = useState<string>("#10B981");
+  const [drawDashed, setDrawDashed] = useState<boolean>(false);
+  const [editingPlanText, setEditingPlanText] = useState<boolean>(false);
+  const [savedPlans, setSavedPlans] = useState<SavedTacticalPlan[]>([]);
+  const [saveBanner, setSaveBanner] = useState<string | null>(null);
+
+  // AI Live Drawing Prompt + Multi-Model Picker
   const [aiPrompt, setAiPrompt] = useState("");
+  const [aiModel, setAiModel] = useState<string>("openai/gpt-oss-120b");
   const [aiLoading, setAiLoading] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const draggingNodeRef = useRef<{ team: "team_a" | "team_b"; index: number } | null>(null);
+  const skipNextFetchRef = useRef<boolean>(false);
+  const draggingNodeRef = useRef<{ team: "team_a" | "team_b"; index: number; mode: "body" | "arrow_tip" } | null>(null);
   const draftShapeRef = useRef<{ startX_m: number; startY_m: number; curX_m: number; curY_m: number } | null>(null);
   const activeStrokeRef = useRef<FreehandStroke | null>(null);
   const [, setRenderTick] = useState(0);
 
-  // Sync when externalBlueprint arrives from AI Chatbot
+  // Load saved custom tactical plans from localStorage
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SAVED_PLANS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) setSavedPlans(parsed);
+      }
+    } catch {}
+  }, []);
+
+  // Sync when externalBlueprint arrives from AI Chatbot (preserve custom AI coordinates!)
   useEffect(() => {
     if (externalBlueprint) {
+      skipNextFetchRef.current = true;
       setBlueprint(externalBlueprint);
       setNodesA(externalBlueprint.nodes || []);
       setNodesB(externalBlueprint.opponent_nodes || []);
@@ -103,17 +166,21 @@ export default function FormationBlueprintBoard({
         setFormationB(externalBlueprint.opponent_formation_code);
         setCustomInputB(externalBlueprint.opponent_formation_code);
       }
-      if (externalBlueprint.custom_arrows?.length) {
-        setUserArrows(externalBlueprint.custom_arrows);
+      if (externalBlueprint.tactical_mode) {
+        setStyleA(externalBlueprint.tactical_mode);
       }
-      if (externalBlueprint.custom_zones?.length) {
-        setUserZones(externalBlueprint.custom_zones);
-      }
+      setUserArrows(externalBlueprint.custom_arrows || []);
+      setUserZones(externalBlueprint.custom_zones || []);
+      setTeamDisplay("both");
     }
   }, [externalBlueprint]);
 
   // Fetch 22-player two-team blueprint from backend whenever formations or styles change
   useEffect(() => {
+    if (skipNextFetchRef.current) {
+      skipNextFetchRef.current = false;
+      return;
+    }
     let alive = true;
     const qs = new URLSearchParams({
       formation_code: formationA,
@@ -154,11 +221,13 @@ export default function FormationBlueprintBoard({
             formation_code: formationA,
             opponent_formation_code: formationB,
             tactical_mode: styleA,
+            model: aiModel,
           }),
         },
         "club_demo_egypt",
         role
       );
+      skipNextFetchRef.current = true;
       setBlueprint(res);
       setNodesA(res.nodes || []);
       setNodesB(res.opponent_nodes || []);
@@ -169,12 +238,136 @@ export default function FormationBlueprintBoard({
         setCustomInputB(res.opponent_formation_code);
       }
       if (res.tactical_mode) setStyleA(res.tactical_mode);
-      if (res.custom_arrows) setUserArrows(res.custom_arrows);
-      if (res.custom_zones) setUserZones(res.custom_zones);
+      setUserArrows(res.custom_arrows || []);
+      setUserZones(res.custom_zones || []);
       setTeamDisplay("both");
     } catch {} finally {
       setAiLoading(false);
     }
+  };
+
+  // Update a field on any player of Team A (own club) or Team B (opponent)
+  const updateNodeField = (
+    team: "team_a" | "team_b",
+    index: number,
+    patch: Partial<BlueprintNode>
+  ) => {
+    const setter = team === "team_a" ? setNodesA : setNodesB;
+    setter((prev) => prev.map((n, idx) => (idx === index ? { ...n, ...patch } : n)));
+  };
+
+  const addPlayerToTeam = (team: "team_a" | "team_b") => {
+    const isA = team === "team_a";
+    const list = isA ? nodesA : nodesB;
+    const nextNum = Math.max(1, ...list.map((n) => Number(n.jersey_number || 0))) + 1;
+    const newNode: BlueprintNode = {
+      slot: isA ? `SUB${list.length + 1}` : `OPP${list.length + 1}`,
+      role_ar: isA ? "لاعب مضاف (تكتيك خاص)" : "لاعب خصم مضاف",
+      x_m: isA ? 52.0 : 58.0,
+      y_m: 34.0,
+      move_to_x_m: isA ? 64.0 : 46.0,
+      move_to_y_m: 34.0,
+      duty_ar: isA ? "تحرك حر وتفوق عددي حسب تعليمات المدرب" : "مراقبة وتضييق المساحات",
+      player_label: isA ? `لاعب جديد #${nextNum}` : `لاعب خصم #${nextNum}`,
+      jersey_number: nextNum,
+      track_id: null,
+      team,
+    };
+    if (isA) {
+      setNodesA((prev) => [...prev, newNode]);
+      setSelectedNode({ team: "team_a", index: list.length });
+    } else {
+      setNodesB((prev) => [...prev, newNode]);
+      setSelectedNode({ team: "team_b", index: list.length });
+    }
+  };
+
+  const removeSelectedPlayer = () => {
+    const { team, index } = selectedNode;
+    if (team === "team_a" && nodesA.length > 1) {
+      setNodesA((prev) => prev.filter((_, i) => i !== index));
+      setSelectedNode({ team: "team_a", index: Math.max(0, index - 1) });
+    } else if (team === "team_b" && nodesB.length > 1) {
+      setNodesB((prev) => prev.filter((_, i) => i !== index));
+      setSelectedNode({ team: "team_b", index: Math.max(0, index - 1) });
+    }
+  };
+
+  const handleDownloadPng = () => {
+    const cvs = canvasRef.current;
+    if (!cvs) return;
+    const url = cvs.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    const cleanA = formationA.replace(/[^0-9A-Za-z-]/g, "");
+    const cleanB = formationB.replace(/[^0-9A-Za-z-]/g, "");
+    a.download = `egy-scout-plan-${cleanA}-vs-${cleanB}.png`;
+    a.click();
+  };
+
+  const handleSaveCurrentPlan = () => {
+    const planName =
+      blueprint?.title_ar || `${blueprint?.team_name || "Team A"} (${formationA}) × (${formationB})`;
+    const item: SavedTacticalPlan = {
+      id: `plan-${Date.now()}`,
+      name: planName.slice(0, 65),
+      savedAt: new Date().toLocaleTimeString(isAr ? "ar-EG" : "en-US", { hour: "2-digit", minute: "2-digit" }),
+      formationA,
+      formationB,
+      styleA,
+      styleB,
+      titleAr: blueprint?.title_ar || planName,
+      philosophyAr: blueprint?.philosophy_ar || "",
+      stepsAr: blueprint?.execution_steps_ar || [],
+      nodesA,
+      nodesB,
+      userArrows,
+      userZones,
+      freehandStrokes,
+    };
+    const next = [item, ...savedPlans].slice(0, 12);
+    setSavedPlans(next);
+    try {
+      localStorage.setItem(SAVED_PLANS_KEY, JSON.stringify(next));
+      setSaveBanner(isAr ? "✅ تم حفظ الخطة بالكامل في جهازك!" : "✅ Plan saved locally!");
+      setTimeout(() => setSaveBanner(null), 2600);
+    } catch {}
+  };
+
+  const handleLoadSavedPlan = (plan: SavedTacticalPlan) => {
+    skipNextFetchRef.current = true;
+    setFormationA(plan.formationA);
+    setCustomInputA(plan.formationA);
+    setFormationB(plan.formationB);
+    setCustomInputB(plan.formationB);
+    setStyleA(plan.styleA);
+    setStyleB(plan.styleB);
+    setNodesA(plan.nodesA);
+    setNodesB(plan.nodesB);
+    setUserArrows(plan.userArrows || []);
+    setUserZones(plan.userZones || []);
+    setFreehandStrokes(plan.freehandStrokes || []);
+    setBlueprint((prev) =>
+      prev
+        ? {
+            ...prev,
+            formation_code: plan.formationA,
+            opponent_formation_code: plan.formationB,
+            title_ar: plan.titleAr,
+            philosophy_ar: plan.philosophyAr,
+            execution_steps_ar: plan.stepsAr,
+          }
+        : prev
+    );
+    setTeamDisplay("both");
+  };
+
+  const handleDeleteSavedPlan = (id: string) => {
+    const next = savedPlans.filter((p) => p.id !== id);
+    setSavedPlans(next);
+    try {
+      localStorage.setItem(SAVED_PLANS_KEY, JSON.stringify(next));
+    } catch {}
   };
 
   // Convert canvas client event -> pitch meters (0..105, 0..68)
@@ -196,13 +389,25 @@ export default function FormationBlueprintBoard({
     const [xm, ym] = clientToPitchMeters(e.clientX, e.clientY);
 
     if (drawTool === "drag_player") {
-      // Find nearest node from visible teams within 4.8m
-      let bestHit: { team: "team_a" | "team_b"; index: number; dist: number; slot: string } | null = null;
+      // 1. Check if clicking the selected player's arrow tip handle first (to resize/re-aim run arrow!)
+      const selList = selectedNode.team === "team_a" ? nodesA : nodesB;
+      const selNd = selList[selectedNode.index];
+      if (
+        selNd &&
+        Math.hypot(selNd.move_to_x_m - xm, selNd.move_to_y_m - ym) <= 3.8 &&
+        Math.hypot(selNd.move_to_x_m - selNd.x_m, selNd.move_to_y_m - selNd.y_m) >= 2.0
+      ) {
+        draggingNodeRef.current = { team: selectedNode.team, index: selectedNode.index, mode: "arrow_tip" };
+        return;
+      }
+
+      // 2. Find nearest player node from visible teams within 4.8m
+      let bestHit: { team: "team_a" | "team_b"; index: number; dist: number } | null = null;
       if (teamDisplay !== "team_b") {
         nodesA.forEach((nd, idx) => {
           const d = Math.hypot(nd.x_m - xm, nd.y_m - ym);
           if (d <= 4.8 && (!bestHit || d < bestHit.dist)) {
-            bestHit = { team: "team_a", index: idx, dist: d, slot: nd.slot };
+            bestHit = { team: "team_a", index: idx, dist: d };
           }
         });
       }
@@ -210,21 +415,21 @@ export default function FormationBlueprintBoard({
         nodesB.forEach((nd, idx) => {
           const d = Math.hypot(nd.x_m - xm, nd.y_m - ym);
           if (d <= 4.8 && (!bestHit || d < bestHit.dist)) {
-            bestHit = { team: "team_b", index: idx, dist: d, slot: nd.slot };
+            bestHit = { team: "team_b", index: idx, dist: d };
           }
         });
       }
       if (bestHit) {
-        const hit = bestHit as { team: "team_a" | "team_b"; index: number; slot: string };
-        draggingNodeRef.current = { team: hit.team, index: hit.index };
-        setSelectedNodeKey(`${hit.team}:${hit.slot}`);
+        const hit = bestHit as { team: "team_a" | "team_b"; index: number };
+        draggingNodeRef.current = { team: hit.team, index: hit.index, mode: "body" };
+        setSelectedNode({ team: hit.team, index: hit.index });
       }
       return;
     }
 
     if (drawTool === "freehand") {
       activeStrokeRef.current = {
-        color: "#FACC15",
+        color: drawColor,
         points: [{ x_m: xm, y_m: ym }],
       };
       setRenderTick((t) => t + 1);
@@ -239,23 +444,16 @@ export default function FormationBlueprintBoard({
     const [xm, ym] = clientToPitchMeters(e.clientX, e.clientY);
 
     if (draggingNodeRef.current) {
-      const { team, index } = draggingNodeRef.current;
-      if (team === "team_a") {
-        setNodesA((prev) =>
+      const { team, index, mode } = draggingNodeRef.current;
+      const setter = team === "team_a" ? setNodesA : setNodesB;
+      if (mode === "arrow_tip") {
+        setter((prev) =>
           prev.map((n, idx) =>
-            idx === index
-              ? {
-                  ...n,
-                  x_m: xm,
-                  y_m: ym,
-                  move_to_x_m: Math.round(Math.min(103, Math.max(2, xm + (n.move_to_x_m - n.x_m))) * 10) / 10,
-                  move_to_y_m: Math.round(Math.min(66, Math.max(2, ym + (n.move_to_y_m - n.y_m))) * 10) / 10,
-                }
-              : n
+            idx === index ? { ...n, move_to_x_m: xm, move_to_y_m: ym } : n
           )
         );
       } else {
-        setNodesB((prev) =>
+        setter((prev) =>
           prev.map((n, idx) =>
             idx === index
               ? {
@@ -311,13 +509,13 @@ export default function FormationBlueprintBoard({
             y1_m: Math.min(d.startY_m, d.curY_m),
             x2_m: Math.max(d.startX_m, d.curX_m),
             y2_m: Math.max(d.startY_m, d.curY_m),
-            color: "#10B981",
+            color: drawColor,
             label_ar: isAr ? "منطقة ضغط / تفوق تكتيكي" : "Tactical Zone",
           },
         ]);
       } else {
         const kind = drawTool === "pass_arrow" ? "pass" : drawTool === "press_arrow" ? "press" : "run";
-        const color = kind === "pass" ? "#FACC15" : kind === "press" ? "#EF4444" : "#10B981";
+        const color = drawColor;
         const label =
           kind === "pass"
             ? isAr
@@ -337,7 +535,7 @@ export default function FormationBlueprintBoard({
             from_y_m: d.startY_m,
             to_x_m: d.curX_m,
             to_y_m: d.curY_m,
-            kind,
+            kind: drawDashed ? "pass" : kind,
             color,
             label_ar: label,
           },
@@ -556,15 +754,21 @@ export default function FormationBlueprintBoard({
         const y1 = pad + (Math.min(d.startY_m, d.curY_m) / 68) * ph;
         const y2 = pad + (Math.max(d.startY_m, d.curY_m) / 68) * ph;
         ctx.save();
-        ctx.fillStyle = "rgba(16, 185, 129, 0.22)";
-        ctx.strokeStyle = "#10B981";
+        ctx.fillStyle = `${drawColor}33`;
+        ctx.strokeStyle = drawColor;
         ctx.lineWidth = 2;
         ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
         ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
         ctx.restore();
       } else {
-        const col = drawTool === "pass_arrow" ? "#FACC15" : drawTool === "press_arrow" ? "#EF4444" : "#10B981";
-        drawArrowVector(d.startX_m, d.startY_m, d.curX_m, d.curY_m, col, drawTool === "pass_arrow");
+        drawArrowVector(
+          d.startX_m,
+          d.startY_m,
+          d.curX_m,
+          d.curY_m,
+          drawColor,
+          drawDashed || drawTool === "pass_arrow"
+        );
       }
     }
 
@@ -590,13 +794,12 @@ export default function FormationBlueprintBoard({
 
     // 5. Render Player Nodes for Team A and/or Team B
     const renderTeamNodes = (list: BlueprintNode[], tKey: "team_a" | "team_b", kitHex: string) => {
-      for (const nd of list) {
+      list.forEach((nd, idx) => {
         const px = pad + (nd.x_m / 105) * pw;
         const py = pad + (nd.y_m / 68) * ph;
         const tx = pad + (nd.move_to_x_m / 105) * pw;
         const ty = pad + (nd.move_to_y_m / 68) * ph;
-        const nodeKey = `${tKey}:${nd.slot}`;
-        const isSel = selectedNodeKey === nodeKey;
+        const isSel = selectedNode.team === tKey && selectedNode.index === idx;
 
         // Player run vector
         if (Math.hypot(tx - px, ty - py) > 8) {
@@ -608,6 +811,18 @@ export default function FormationBlueprintBoard({
             isSel ? "#10B981" : tKey === "team_a" ? "rgba(255,255,255,0.65)" : "rgba(125,211,252,0.55)",
             false
           );
+          // Draggable glowing tip handle on selected player's run arrow!
+          if (isSel) {
+            ctx.save();
+            ctx.fillStyle = "#FACC15";
+            ctx.strokeStyle = "#090D16";
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            ctx.arc(tx, ty, 5.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+          }
         }
 
         if (isSel) {
@@ -651,7 +866,7 @@ export default function FormationBlueprintBoard({
         ctx.fillStyle = isSel ? "#6EE7B7" : "#F8FAFC";
         ctx.fillText(pillText, px, py + labelOffsetY + 8);
         ctx.restore();
-      }
+      });
     };
 
     if (teamDisplay !== "team_a") {
@@ -670,17 +885,20 @@ export default function FormationBlueprintBoard({
     userArrows,
     userZones,
     freehandStrokes,
-    selectedNodeKey,
+    selectedNode,
     drawTool,
+    drawColor,
+    drawDashed,
   ]);
 
-  const activeNode =
-    [...nodesA.map((n) => ({ ...n, _t: "team_a" })), ...nodesB.map((n) => ({ ...n, _t: "team_b" }))].find(
-      (n) => `${n._t}:${n.slot}` === selectedNodeKey
-    ) ||
-    nodesA[8] ||
-    nodesA[0] ||
-    null;
+  const activeNodeList = selectedNode.team === "team_a" ? nodesA : nodesB;
+  const activeNode = activeNodeList[selectedNode.index] || nodesA[0] || nodesB[0] || null;
+  const activeNodeTeam: "team_a" | "team_b" = activeNodeList[selectedNode.index]
+    ? selectedNode.team
+    : nodesA[0]
+    ? "team_a"
+    : "team_b";
+  const activeNodeIdx = activeNodeList[selectedNode.index] ? selectedNode.index : 0;
 
   return (
     <div className="studio-panel p-5 space-y-4">
@@ -735,7 +953,7 @@ export default function FormationBlueprintBoard({
         </div>
       </div>
 
-      {/* AI Live Tactical Drawing Bar (Groq Llama-3.3-70B) */}
+      {/* AI Live Tactical Drawing Bar (Multi-Model Groq — Custom/Crazy Formations!) */}
       <div className="p-3.5 rounded-xl bg-[#090D16] border border-emerald-500/35 space-y-2.5">
         <form
           onSubmit={(e) => {
@@ -746,16 +964,28 @@ export default function FormationBlueprintBoard({
         >
           <div className="flex items-center gap-1.5 text-xs font-extrabold text-emerald-400 shrink-0">
             <Bot className="w-4 h-4" />
-            <span>{isAr ? "ارسم بالذكاء الاصطناعي (Llama-3.3-70B):" : "AI Tactical Plan Drawer:"}</span>
+            <span>{isAr ? "ابتكر وارسم بالـ AI:" : "AI Tactical Drawer:"}</span>
           </div>
+          <select
+            aria-label={isAr ? "اختيار موديل الذكاء الاصطناعي" : "Select AI Model"}
+            value={aiModel}
+            onChange={(e) => setAiModel(e.target.value)}
+            className="bg-[#111827] border border-emerald-500/35 rounded-lg px-2.5 py-2 text-[11px] font-bold text-emerald-300 focus:outline-none focus:border-emerald-400"
+          >
+            {GROQ_AI_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {isAr ? m.ar : m.en}
+              </option>
+            ))}
+          </select>
           <input
             type="text"
             value={aiPrompt}
             onChange={(e) => setAiPrompt(e.target.value)}
             placeholder={
               isAr
-                ? "اكتب أي خطة وأي ستايل (مثال: ارسم خطة 3-5-2 للأهلي بأسلوب تيكي تاكا ضد 5-3-2 لإنبي مع أسهم اختراق للعمق)..."
-                : "Describe any formation & tactical style for both teams to draw live on the pitch..."
+                ? "اكتب أي خطة عادية أو مجنونة لم تُلعب من قبل (مثال: خطة 2-1-6-1 بحارس ليبرو في خط النص وهجوم كاسح على اليسار)..."
+                : "Describe any custom, wild, or never-seen-before formation for both teams to draw live..."
             }
             className="flex-1 min-w-[240px] bg-[#111827] border border-white/[0.14] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-400"
           />
@@ -765,18 +995,18 @@ export default function FormationBlueprintBoard({
             className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-45 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 transition"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>{aiLoading ? (isAr ? "جاري الرسم..." : "Drawing...") : isAr ? "🎨 ارسم الخطة الآن" : "🎨 Draw Plan"}</span>
+            <span>{aiLoading ? (isAr ? "جاري ابتكار ورسم الـ 22 لاعباً..." : "Drawing 22 players...") : isAr ? "🎨 ارسم الخطة الآن" : "🎨 Draw Plan"}</span>
           </button>
         </form>
 
-        {/* 1-Click AI Drawing Presets */}
+        {/* 1-Click AI Drawing Presets (Including Wild/Innovative Formations!) */}
         <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-          <span className="text-slate-400">{isAr ? "أمثلة رسم فوري:" : "Quick AI Prompts:"}</span>
+          <span className="text-slate-400">{isAr ? "أمثلة ابتكار ورسم فوري:" : "Quick AI Prompts:"}</span>
           {[
-            `ارسم خطة 4-3-3 بأسلوب تيكي تاكا ومثلثات استحواذ ضد 4-4-2 بتكتل دفاعي`,
-            `ارسم خطة 3-5-2 بضغط عالي عكسي ومصيدة في المنطقة 14 ضد 5-3-2`,
-            `ارسم خطة 4-2-3-1 بأظهرة عكسية تدخل لعمق الوسط وأسهم اختراق للأجنحة`,
-            `ارسم خطة 3-4-2-1 بهجوم مرتد خاطف وتحولات عمودية خلف خط الدفاع`,
+            `ابتكر خطة مجنونة 2-1-6-1 بحارس ليبرو في منتصف الملعب وهجوم كاسح على الجبهة اليسرى`,
+            `اخترع خطة غير متماثلة بتكديس 7 لاعبين على الجبهة اليمنى لعزل الخصم تماماً`,
+            `ارسم خطة 3-5-2 بأسلوب تيكي تاكا ومثلثات استحواذ ضد 5-3-2 مع اختراق المنطقة 14`,
+            `ارسم خطة 4-3-3 بضغط عالي عكسي ومصيدة ضغط على الأطراف ضد 4-4-2`,
           ].map((preset, idx) => (
             <button
               key={idx}
@@ -930,142 +1160,272 @@ export default function FormationBlueprintBoard({
         </div>
       </div>
 
-      {/* Freeform Interactive Drawing Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-[#090D16] border border-white/[0.08] text-xs">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setDrawTool("drag_player")}
-            className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
-              drawTool === "drag_player"
-                ? "bg-emerald-500 text-slate-950"
-                : "bg-[#111827] text-slate-300 border border-white/[0.08]"
-            }`}
-          >
-            <Hand className="w-3.5 h-3.5" />
-            <span>{isAr ? "✋ سحب وتحريك اللاعبين" : "✋ Drag Players"}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setDrawTool("run_arrow")}
-            className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
-              drawTool === "run_arrow"
-                ? "bg-emerald-500 text-slate-950"
-                : "bg-[#111827] text-slate-300 border border-white/[0.08]"
-            }`}
-          >
-            <MoveUpRight className="w-3.5 h-3.5 text-emerald-400" />
-            <span>{isAr ? "↗️ رسم سهم تحرك" : "↗️ Run Arrow"}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setDrawTool("pass_arrow")}
-            className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
-              drawTool === "pass_arrow"
-                ? "bg-amber-400 text-slate-950"
-                : "bg-[#111827] text-slate-300 border border-white/[0.08]"
-            }`}
-          >
-            <Zap className="w-3.5 h-3.5 text-amber-400" />
-            <span>{isAr ? "⚡ رسم سهم تمريرة" : "⚡ Pass Arrow"}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setDrawTool("press_arrow")}
-            className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
-              drawTool === "press_arrow"
-                ? "bg-rose-500 text-white"
-                : "bg-[#111827] text-slate-300 border border-white/[0.08]"
-            }`}
-          >
-            <MoveUpRight className="w-3.5 h-3.5 text-rose-400" />
-            <span>{isAr ? "🎯 سهم ضغط عكسي" : "🎯 Press Arrow"}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setDrawTool("zone_box")}
-            className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
-              drawTool === "zone_box"
-                ? "bg-sky-400 text-slate-950"
-                : "bg-[#111827] text-slate-300 border border-white/[0.08]"
-            }`}
-          >
-            <Square className="w-3.5 h-3.5 text-sky-400" />
-            <span>{isAr ? "🟦 رسم منطقة تكتيكية" : "🟦 Tactical Zone"}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setDrawTool("freehand")}
-            className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
-              drawTool === "freehand"
-                ? "bg-amber-400 text-slate-950"
-                : "bg-[#111827] text-slate-300 border border-white/[0.08]"
-            }`}
-          >
-            <Pencil className="w-3.5 h-3.5" />
-            <span>{isAr ? "✏️ قلم رسم حر" : "✏️ Freehand Pen"}</span>
-          </button>
+      {/* Freeform Interactive Drawing Toolbar + Full Color/Style/Save/Export Bar */}
+      <div className="space-y-2 p-2.5 rounded-xl bg-[#090D16] border border-white/[0.08] text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setDrawTool("drag_player")}
+              className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
+                drawTool === "drag_player"
+                  ? "bg-emerald-500 text-slate-950"
+                  : "bg-[#111827] text-slate-300 border border-white/[0.08]"
+              }`}
+            >
+              <Hand className="w-3.5 h-3.5" />
+              <span>{isAr ? "✋ تحريك اللاعبين ورأس السهم" : "✋ Drag Players & Arrow Tips"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDrawTool("run_arrow")}
+              className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
+                drawTool === "run_arrow"
+                  ? "bg-emerald-500 text-slate-950"
+                  : "bg-[#111827] text-slate-300 border border-white/[0.08]"
+              }`}
+            >
+              <MoveUpRight className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{isAr ? "↗️ سهم تحرك" : "↗️ Run Arrow"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDrawTool("pass_arrow")}
+              className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
+                drawTool === "pass_arrow"
+                  ? "bg-amber-400 text-slate-950"
+                  : "bg-[#111827] text-slate-300 border border-white/[0.08]"
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-400" />
+              <span>{isAr ? "⚡ سهم تمريرة" : "⚡ Pass Arrow"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDrawTool("press_arrow")}
+              className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
+                drawTool === "press_arrow"
+                  ? "bg-rose-500 text-white"
+                  : "bg-[#111827] text-slate-300 border border-white/[0.08]"
+              }`}
+            >
+              <MoveUpRight className="w-3.5 h-3.5 text-rose-400" />
+              <span>{isAr ? "🎯 سهم ضغط" : "🎯 Press Arrow"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDrawTool("zone_box")}
+              className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
+                drawTool === "zone_box"
+                  ? "bg-sky-400 text-slate-950"
+                  : "bg-[#111827] text-slate-300 border border-white/[0.08]"
+              }`}
+            >
+              <Square className="w-3.5 h-3.5 text-sky-400" />
+              <span>{isAr ? "🟦 منطقة تكتيكية" : "🟦 Tactical Zone"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDrawTool("freehand")}
+              className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
+                drawTool === "freehand"
+                  ? "bg-amber-400 text-slate-950"
+                  : "bg-[#111827] text-slate-300 border border-white/[0.08]"
+              }`}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span>{isAr ? "✏️ قلم حر" : "✏️ Freehand"}</span>
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setShowLines((v) => !v)}
+              className={`px-2 py-1 rounded border text-[11px] font-semibold ${
+                showLines
+                  ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
+                  : "bg-[#111827] border-white/10 text-slate-400"
+              }`}
+            >
+              {isAr ? "خطوط التشكيل" : "Lines"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPassVectors((v) => !v)}
+              className={`px-2 py-1 rounded border text-[11px] font-semibold ${
+                showPassVectors
+                  ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
+                  : "bg-[#111827] border-white/10 text-slate-400"
+              }`}
+            >
+              {isAr ? "مسارات التمرير" : "Passes"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (freehandStrokes.length > 0) {
+                  setFreehandStrokes((p) => p.slice(0, -1));
+                } else if (userArrows.length > 0) {
+                  setUserArrows((p) => p.slice(0, -1));
+                } else if (userZones.length > 0) {
+                  setUserZones((p) => p.slice(0, -1));
+                }
+              }}
+              className="p-1.5 rounded-lg bg-[#111827] hover:bg-white/10 border border-white/10 text-slate-300"
+              title={isAr ? "تراجع عن آخر رسم" : "Undo last drawing"}
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setUserArrows([]);
+                setUserZones([]);
+                setFreehandStrokes([]);
+                if (blueprint) {
+                  setNodesA(blueprint.nodes || []);
+                  setNodesB(blueprint.opponent_nodes || []);
+                }
+              }}
+              className="px-2 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/35 text-rose-300 text-[11px] font-semibold flex items-center gap-1"
+            >
+              <Trash2 className="w-3 h-3" />
+              <span>{isAr ? "إعادة ضبط" : "Reset"}</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setShowLines((v) => !v)}
-            className={`px-2 py-1 rounded border text-[11px] font-semibold ${
-              showLines
-                ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
-                : "bg-[#111827] border-white/10 text-slate-400"
-            }`}
-          >
-            {isAr ? "خطوط التشكيل" : "Formation Lines"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowPassVectors((v) => !v)}
-            className={`px-2 py-1 rounded border text-[11px] font-semibold ${
-              showPassVectors
-                ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
-                : "bg-[#111827] border-white/10 text-slate-400"
-            }`}
-          >
-            {isAr ? "مسارات التمرير" : "Pass Vectors"}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (freehandStrokes.length > 0) {
-                setFreehandStrokes((p) => p.slice(0, -1));
-              } else if (userArrows.length > 0) {
-                setUserArrows((p) => p.slice(0, -1));
-              } else if (userZones.length > 0) {
-                setUserZones((p) => p.slice(0, -1));
-              }
-            }}
-            className="p-1.5 rounded-lg bg-[#111827] hover:bg-white/10 border border-white/10 text-slate-300"
-            title={isAr ? "تراجع عن آخر رسم" : "Undo last drawing"}
-          >
-            <Undo2 className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setUserArrows([]);
-              setUserZones([]);
-              setFreehandStrokes([]);
-              if (blueprint) {
-                setNodesA(blueprint.nodes || []);
-                setNodesB(blueprint.opponent_nodes || []);
-              }
-            }}
-            className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/35 text-rose-300 text-[11px] font-semibold flex items-center gap-1"
-          >
-            <Trash2 className="w-3 h-3" />
-            <span>{isAr ? "إعادة ضبط الملعب" : "Reset Board"}</span>
-          </button>
+        {/* Row 2: Color Swatches, Dashed/Solid, Add Players to Own Club / Opponent, Save & Export PNG */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/[0.06] text-[11px]">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-slate-400">{isAr ? "لون الرسم:" : "Color:"}</span>
+            <div className="flex items-center gap-1">
+              {DRAW_COLORS.map((c) => (
+                <button
+                  key={c.hex}
+                  type="button"
+                  onClick={() => setDrawColor(c.hex)}
+                  title={c.label}
+                  className={`w-5 h-5 rounded-full border-2 transition ${
+                    drawColor === c.hex ? "border-white scale-110 shadow" : "border-white/25 opacity-75 hover:opacity-100"
+                  }`}
+                  style={{ backgroundColor: c.hex }}
+                />
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setDrawDashed((d) => !d)}
+              className={`px-2 py-0.5 rounded border font-semibold ${
+                drawDashed
+                  ? "bg-amber-500/20 border-amber-400/50 text-amber-300"
+                  : "bg-[#111827] border-white/10 text-slate-300"
+              }`}
+            >
+              {drawDashed ? (isAr ? "خط متقطع (---)" : "Dashed") : isAr ? "خط متصل (───)" : "Solid"}
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => addPlayerToTeam("team_a")}
+              className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold flex items-center gap-1"
+            >
+              <Plus className="w-3 h-3" />
+              <span>{isAr ? `+ لاعب لـ ${blueprint?.team_name || "فريقي"}` : "+ Add Own Player"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => addPlayerToTeam("team_b")}
+              className="px-2.5 py-1 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-sky-300 font-bold flex items-center gap-1"
+            >
+              <Plus className="w-3 h-3" />
+              <span>{isAr ? `+ لاعب لـ ${blueprint?.opponent_name || "الخصم"}` : "+ Add Opponent"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveCurrentPlan}
+              className="px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 font-bold flex items-center gap-1"
+            >
+              <Save className="w-3 h-3" />
+              <span>{isAr ? "💾 حفظ الخطة" : "💾 Save"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadPng}
+              className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 font-bold flex items-center gap-1"
+            >
+              <Download className="w-3 h-3" />
+              <span>{isAr ? "📥 تحميل PNG" : "📥 Export PNG"}</span>
+            </button>
+          </div>
         </div>
+
+        {saveBanner && <div className="text-[11px] font-bold text-emerald-400 px-1">{saveBanner}</div>}
+
+        {/* Saved Plans Strip (if any) */}
+        {savedPlans.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-white/[0.06] text-[11px]">
+            <span className="text-slate-400 flex items-center gap-1">
+              <FolderOpen className="w-3 h-3 text-indigo-300" />
+              {isAr ? "خططي المحفوظة:" : "Saved Plans:"}
+            </span>
+            {savedPlans.map((sp) => (
+              <div
+                key={sp.id}
+                className="inline-flex items-center gap-1 bg-[#111827] border border-white/[0.1] rounded-lg px-2 py-0.5"
+              >
+                <button
+                  type="button"
+                  onClick={() => handleLoadSavedPlan(sp)}
+                  className="text-slate-200 hover:text-emerald-300 font-semibold"
+                >
+                  {sp.name} (<bdi dir="ltr">{sp.formationA}</bdi>)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteSavedPlan(sp.id)}
+                  className="text-rose-400 hover:text-rose-300 ps-1"
+                  title={isAr ? "حذف الخطة المحفوظة" : "Delete saved plan"}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Quick Delete Chips for Individual Arrows & Zones */}
+        {(userArrows.length > 0 || userZones.length > 0) && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-white/[0.06] text-[10px]">
+            <span className="text-slate-400">{isAr ? "العناصر المرسومة (اضغط × لحذف عنصر):" : "Drawn items:"}</span>
+            {userArrows.map((arw, i) => (
+              <button
+                key={`arw-${i}`}
+                type="button"
+                onClick={() => setUserArrows((prev) => prev.filter((_, idx) => idx !== i))}
+                className="px-2 py-0.5 rounded bg-[#111827] border border-white/10 hover:border-rose-400 text-slate-300 hover:text-rose-300"
+              >
+                ↗ {arw.label_ar || `سهم #${i + 1}`} ×
+              </button>
+            ))}
+            {userZones.map((zn, i) => (
+              <button
+                key={`zn-${i}`}
+                type="button"
+                onClick={() => setUserZones((prev) => prev.filter((_, idx) => idx !== i))}
+                className="px-2 py-0.5 rounded bg-[#111827] border border-white/10 hover:border-rose-400 text-slate-300 hover:text-rose-300"
+              >
+                🟦 {zn.label_ar || `منطقة #${i + 1}`} ×
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Main 22-Player Canvas + Side Tactical Breakdown */}
+      {/* Main 22-Player Canvas + Full-Control Side Editor */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         <div className="lg:col-span-8 rounded-xl overflow-hidden border border-white/[0.12] bg-[#061A13] shadow-xl">
           <canvas
@@ -1080,55 +1440,279 @@ export default function FormationBlueprintBoard({
               drawTool === "drag_player" ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair"
             }`}
           />
+          <div className="px-3 py-1.5 bg-[#090D16] border-t border-white/[0.06] flex flex-wrap items-center justify-between gap-2 text-[10.5px] text-slate-400">
+            <span>
+              {isAr
+                ? "💡 اسحب دائرة أي لاعب من ناديك أو الخصم لتغيير مكانه، واسحب النقطة الصفراء في رأس السهم لتوجيه تحركه!"
+                : "💡 Drag any player circle (both teams) to reposition, and drag the yellow arrow-tip dot to aim their run!"}
+            </span>
+            <span className="tabular-nums text-emerald-400 font-semibold">
+              <bdi dir="ltr">{formationA}</bdi> vs <bdi dir="ltr">{formationB}</bdi>
+            </span>
+          </div>
         </div>
 
         {blueprint && (
           <div className="lg:col-span-4 space-y-3 text-xs">
-            <div className="p-3.5 rounded-xl bg-[#090D16] border border-emerald-500/30 space-y-1.5">
+            {/* Editable Plan Title & Philosophy */}
+            <div className="p-3.5 rounded-xl bg-[#090D16] border border-emerald-500/30 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-extrabold text-emerald-300">{blueprint.title_ar}</span>
-                {blueprint.ai_provider && (
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                    AI
-                  </span>
-                )}
+                <div className="flex items-center gap-1 shrink-0">
+                  {blueprint.ai_provider && (
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                      {blueprint.ai_provider}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setEditingPlanText((v) => !v)}
+                    className="px-2 py-0.5 rounded bg-white/[0.06] hover:bg-white/[0.14] text-[10px] text-slate-200 font-semibold"
+                  >
+                    {editingPlanText ? (isAr ? "إغلاق التعديل" : "Done") : isAr ? "✏️ تعديل الخطة" : "✏️ Edit"}
+                  </button>
+                </div>
               </div>
-              <p className="text-[11px] text-slate-300 leading-relaxed">{blueprint.philosophy_ar}</p>
+              {editingPlanText ? (
+                <div className="space-y-1.5">
+                  <input
+                    type="text"
+                    value={blueprint.title_ar}
+                    onChange={(e) =>
+                      setBlueprint((prev) => (prev ? { ...prev, title_ar: e.target.value } : prev))
+                    }
+                    className="w-full bg-[#111827] border border-white/15 rounded px-2 py-1 text-[11px] text-white"
+                    placeholder={isAr ? "عنوان الخطة" : "Plan title"}
+                  />
+                  <textarea
+                    rows={2}
+                    value={blueprint.philosophy_ar}
+                    onChange={(e) =>
+                      setBlueprint((prev) => (prev ? { ...prev, philosophy_ar: e.target.value } : prev))
+                    }
+                    className="w-full bg-[#111827] border border-white/15 rounded px-2 py-1 text-[11px] text-slate-200"
+                    placeholder={isAr ? "فلسفة الخطة..." : "Tactical philosophy..."}
+                  />
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-300 leading-relaxed">{blueprint.philosophy_ar}</p>
+              )}
             </div>
 
+            {/* Full Player Inspector & Live Editor (Works for BOTH Own Club AND Opponent!) */}
             {activeNode && (
-              <div className="p-3.5 rounded-xl bg-[#090D16] border border-sky-500/30 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-white">
-                    {activeNode.slot} — {activeNode.role_ar}
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 text-[11px] font-bold">
-                    {activeNode.player_label}
-                  </span>
+              <div className="p-3.5 rounded-xl bg-[#090D16] border border-sky-500/35 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full"
+                      style={{
+                        backgroundColor:
+                          activeNodeTeam === "team_a"
+                            ? blueprint.kit_colors?.team_a_hex || "#EF4444"
+                            : blueprint.kit_colors?.team_b_hex || "#38BDF8",
+                      }}
+                    />
+                    <span className="font-extrabold text-white">
+                      {isAr ? "محرر اللاعب" : "Player Editor"} (
+                      {activeNodeTeam === "team_a" ? blueprint.team_name : blueprint.opponent_name})
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={removeSelectedPlayer}
+                    className="px-2 py-0.5 rounded bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/35 text-rose-300 text-[10px] font-bold flex items-center gap-1"
+                  >
+                    <UserMinus className="w-3 h-3" />
+                    <span>{isAr ? "حذف اللاعب" : "Remove"}</span>
+                  </button>
                 </div>
-                <div className="text-[11px] text-slate-300">
-                  <span className="text-slate-400">{isAr ? "الواجب التكتيكي:" : "Tactical Duty:"} </span>
-                  {activeNode.duty_ar}
+
+                {/* Quick Player Picker Dropdown across BOTH Teams */}
+                <select
+                  aria-label={isAr ? "اختر أي لاعب من الفريقين للتعديل" : "Pick any player to edit"}
+                  value={`${activeNodeTeam}:${activeNodeIdx}`}
+                  onChange={(e) => {
+                    const [t, iStr] = e.target.value.split(":");
+                    setSelectedNode({ team: t as "team_a" | "team_b", index: Number(iStr) });
+                  }}
+                  className="w-full bg-[#111827] border border-white/[0.12] rounded-lg px-2 py-1 text-[11px] text-sky-300 font-bold"
+                >
+                  <optgroup label={`🔴 ${blueprint.team_name || "فريقي"} (${nodesA.length})`}>
+                    {nodesA.map((n, i) => (
+                      <option key={`a-${i}`} value={`team_a:${i}`}>
+                        #{n.jersey_number ?? i + 1} • {n.slot} — {n.player_label}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label={`🔵 ${blueprint.opponent_name || "الخصم"} (${nodesB.length})`}>
+                    {nodesB.map((n, i) => (
+                      <option key={`b-${i}`} value={`team_b:${i}`}>
+                        #{n.jersey_number ?? i + 1} • {n.slot} — {n.player_label}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+
+                {/* Editable Fields: Name, Number, Slot, Role, Duty */}
+                <div className="grid grid-cols-12 gap-1.5 text-[11px]">
+                  <div className="col-span-6">
+                    <label className="text-[10px] text-slate-400 block mb-0.5">{isAr ? "اسم اللاعب" : "Name"}</label>
+                    <input
+                      type="text"
+                      value={activeNode.player_label}
+                      onChange={(e) =>
+                        updateNodeField(activeNodeTeam, activeNodeIdx, { player_label: e.target.value })
+                      }
+                      className="w-full bg-[#111827] border border-white/15 rounded px-2 py-1 text-white font-semibold"
+                    />
+                  </div>
+                  <div className="col-span-3">
+                    <label className="text-[10px] text-slate-400 block mb-0.5">{isAr ? "الرقم" : "#"}</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={99}
+                      value={activeNode.jersey_number ?? ""}
+                      onChange={(e) =>
+                        updateNodeField(activeNodeTeam, activeNodeIdx, {
+                          jersey_number: e.target.value ? Number(e.target.value) : null,
+                        })
+                      }
+                      className="w-full bg-[#111827] border border-white/15 rounded px-1.5 py-1 text-white text-center tabular-nums"
+                    />
+                  </div>
+                  <div className="col-span-3">
+                    <label className="text-[10px] text-slate-400 block mb-0.5">{isAr ? "المركز" : "Slot"}</label>
+                    <input
+                      type="text"
+                      value={activeNode.slot}
+                      onChange={(e) =>
+                        updateNodeField(activeNodeTeam, activeNodeIdx, { slot: e.target.value.toUpperCase() })
+                      }
+                      className="w-full bg-[#111827] border border-white/15 rounded px-1.5 py-1 text-emerald-300 font-bold text-center"
+                    />
+                  </div>
+                  <div className="col-span-12">
+                    <label className="text-[10px] text-slate-400 block mb-0.5">{isAr ? "الدور التكتيكي" : "Role"}</label>
+                    <input
+                      type="text"
+                      value={activeNode.role_ar}
+                      onChange={(e) =>
+                        updateNodeField(activeNodeTeam, activeNodeIdx, { role_ar: e.target.value })
+                      }
+                      className="w-full bg-[#111827] border border-white/15 rounded px-2 py-1 text-slate-200"
+                    />
+                  </div>
+                  <div className="col-span-12">
+                    <label className="text-[10px] text-slate-400 block mb-0.5">{isAr ? "الواجب / التعليمات" : "Duty"}</label>
+                    <input
+                      type="text"
+                      value={activeNode.duty_ar}
+                      onChange={(e) =>
+                        updateNodeField(activeNodeTeam, activeNodeIdx, { duty_ar: e.target.value })
+                      }
+                      className="w-full bg-[#111827] border border-white/15 rounded px-2 py-1 text-slate-200"
+                    />
+                  </div>
                 </div>
-                <div className="text-[10px] text-slate-400 tabular-nums">
-                  {isAr
-                    ? `الإحداثي الحالي: (X=${activeNode.x_m}م، Y=${activeNode.y_m}م) ← هدف التحرك: (X=${activeNode.move_to_x_m}م، Y=${activeNode.move_to_y_m}م)`
-                    : `Current: (${activeNode.x_m}m, ${activeNode.y_m}m) -> Move: (${activeNode.move_to_x_m}m, ${activeNode.move_to_y_m}m)`}
+
+                {/* Live Coordinates & Arrow Target Reset */}
+                <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] text-slate-400 tabular-nums pt-1 border-t border-white/[0.06]">
+                  <span>
+                    {isAr
+                      ? `موقعه: (${activeNode.x_m}م، ${activeNode.y_m}م) ← السهم: (${activeNode.move_to_x_m}م، ${activeNode.move_to_y_m}م)`
+                      : `Pos: (${activeNode.x_m}, ${activeNode.y_m}) → (${activeNode.move_to_x_m}, ${activeNode.move_to_y_m})`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateNodeField(activeNodeTeam, activeNodeIdx, {
+                        move_to_x_m: activeNode.x_m,
+                        move_to_y_m: activeNode.y_m,
+                      })
+                    }
+                    className="text-amber-300 hover:underline font-semibold"
+                  >
+                    {isAr ? "إلغاء سهم اللاعب" : "Clear Run"}
+                  </button>
                 </div>
               </div>
             )}
 
+            {/* Editable Execution Steps */}
             <div className="p-3.5 rounded-xl bg-[#090D16] border border-white/[0.08] space-y-1.5">
-              <div className="font-semibold text-slate-200 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                <span>{isAr ? "خطوات تنفيذ الخطة للفريقين على الملعب:" : "Execution Steps:"}</span>
+              <div className="font-semibold text-slate-200 flex items-center justify-between gap-1.5">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{isAr ? "خطوات تنفيذ الخطة للفريقين:" : "Execution Steps:"}</span>
+                </span>
+                {editingPlanText && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setBlueprint((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              execution_steps_ar: [
+                                ...prev.execution_steps_ar,
+                                `${prev.execution_steps_ar.length + 1}) تعليمات جديدة للمدرب...`,
+                              ],
+                            }
+                          : prev
+                      )
+                    }
+                    className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold"
+                  >
+                    + {isAr ? "إضافة خطوة" : "Add Step"}
+                  </button>
+                )}
               </div>
               <div className="space-y-1.5 text-[11px] text-slate-300 leading-relaxed">
-                {blueprint.execution_steps_ar.map((step, i) => (
-                  <div key={i} className="border-b border-white/[0.05] pb-1.5 last:border-0">
-                    {step}
-                  </div>
-                ))}
+                {blueprint.execution_steps_ar.map((step, i) =>
+                  editingPlanText ? (
+                    <div key={i} className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={step}
+                        onChange={(e) =>
+                          setBlueprint((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  execution_steps_ar: prev.execution_steps_ar.map((s, idx) =>
+                                    idx === i ? e.target.value : s
+                                  ),
+                                }
+                              : prev
+                          )
+                        }
+                        className="flex-1 bg-[#111827] border border-white/15 rounded px-2 py-1 text-[11px] text-slate-200"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setBlueprint((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  execution_steps_ar: prev.execution_steps_ar.filter((_, idx) => idx !== i),
+                                }
+                              : prev
+                          )
+                        }
+                        className="text-rose-400 px-1"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ) : (
+                    <div key={i} className="border-b border-white/[0.05] pb-1.5 last:border-0">
+                      {step}
+                    </div>
+                  )
+                )}
               </div>
             </div>
           </div>

@@ -1304,7 +1304,8 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
         videoRef.current.pause();
         setIsPlaying(false);
       }
-      const hit = hitPlayerAtVideo(vx, vy, data.defending_team);
+      // Allow Ghost-dragging ANY player or goalkeeper from BOTH your own club (team_a) AND the opponent (team_b)!
+      const hit = hitPlayerAtVideo(vx, vy);
       const activeId = hit ? hit.track_id : selectedDefId;
       if (hit) setSelectedDefId(hit.track_id);
       if (activeId !== null) draggingVideoGhostRef.current = true;
@@ -2026,7 +2027,13 @@ export default function BroadcastStudioScreen({ lang, matchId, role, externalBlu
             <div className="grid grid-cols-2 gap-2.5 text-xs tabular-nums">
               <div className="bg-[#090D16] border border-white/[0.06] rounded-lg p-2.5">
                 <div className="text-[11px] text-slate-400">
-                  {isPlaying ? (isAr ? "السيطرة الهجومية" : "Zone Control") : isAr ? "إزاحة المدافع" : "Ghost Offset"}
+                  {isPlaying
+                    ? isAr
+                      ? "السيطرة الهجومية"
+                      : "Zone Control"
+                    : isAr
+                    ? "إزاحة اللاعب (فريقي / الخصم)"
+                    : "Ghost Player Offset (Both Teams)"}
                 </div>
                 <div dir="ltr" className="font-bold text-emerald-400 mt-0.5 inline-block">
                   {isPlaying

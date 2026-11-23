@@ -2372,17 +2372,36 @@ class ScoutV8Service:
         def _build_team_roster(t_key: str) -> list[dict[str, Any]]:
             t_tracks = [t for t in qa["tracks"] if t["team"] == t_key and t["role"] in ("player", "goalkeeper")]
             r_list = [r for r in qa["official_roster"] if r.get("team", "team_a") == t_key]
+            # Put Goalkeeper strictly at index 0 so slot 'GK' always gets the real goalkeeper!
+            gk_ro = [r for r in r_list if str(r.get("position", "")).upper() == "GK"]
+            out_ro = [r for r in r_list if str(r.get("position", "")).upper() != "GK"]
+            ordered_ro = gk_ro + out_ro
+
+            gk_tr = [t for t in t_tracks if t["role"] == "goalkeeper"]
+            out_tr = [t for t in t_tracks if t["role"] != "goalkeeper"]
+            ordered_tr = gk_tr + out_tr
+
             out_r: list[dict[str, Any]] = []
             for idx in range(11):
-                tr = t_tracks[idx] if idx < len(t_tracks) else None
-                ro = r_list[idx] if idx < len(r_list) else None
-                out_r.append(
-                    {
-                        "track_id": tr["track_id"] if tr else None,
-                        "jersey_number": (tr.get("jersey_number") if tr else None) or (ro.get("jersey_number") if ro else (idx + 1)),
-                        "verified_name": (tr.get("verified_name") if tr else None) or (ro.get("name") if ro else None),
-                    }
-                )
+                ro = ordered_ro[idx] if idx < len(ordered_ro) else None
+                tr = ordered_tr[idx] if idx < len(ordered_tr) else None
+                # Prefer official GK at slot 0 over an outfield track
+                if idx == 0 and ro is not None:
+                    out_r.append(
+                        {
+                            "track_id": gk_tr[0]["track_id"] if gk_tr else None,
+                            "jersey_number": ro.get("jersey_number", 1),
+                            "verified_name": ro.get("name"),
+                        }
+                    )
+                else:
+                    out_r.append(
+                        {
+                            "track_id": tr["track_id"] if tr else None,
+                            "jersey_number": (ro.get("jersey_number") if ro else None) or (tr.get("jersey_number") if tr else (idx + 1)),
+                            "verified_name": (ro.get("name") if ro else None) or (tr.get("verified_name") if tr else None),
+                        }
+                    )
             return out_r
 
         _, v8_df = self.get_legacy_and_v8_frames(match_id)
@@ -2412,8 +2431,10 @@ class ScoutV8Service:
         user_question: str,
         history: Optional[list[dict[str, str]]] = None,
         json_mode: bool = False,
+        preferred_model: Optional[str] = None,
+        max_tokens: int = 1600,
     ) -> tuple[Optional[str], Optional[str]]:
-        """Call Groq Cloud (Llama-3.3-70B-Versatile) or Google Gemini with full conversation history."""
+        """Call Groq Cloud top reasoning models (GPT-OSS-120B, Qwen3.8-27B, GPT-OSS-20B, ALLaM-2) with full history."""
         self._load_env_file()
         key = (
             api_key.strip()
@@ -2433,14 +2454,24 @@ class ScoutV8Service:
                         if txt:
                             msgs.append({"role": r_role, "content": txt[:1200]})
                 msgs.append({"role": "user", "content": user_question})
-                for groq_model in ("openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"):
+
+                default_order = ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b", "allam-2-7b"]
+                if preferred_model and preferred_model.strip() in default_order:
+                    pm = preferred_model.strip()
+                    model_order = [pm] + [m for m in default_order if m != pm]
+                else:
+                    model_order = default_order
+
+                for groq_model in model_order:
+                    # ALLaM-2 does not support strict response_format=json_object on some calls
+                    use_json_fmt = json_mode and groq_model != "allam-2-7b"
                     payload_dict: dict[str, Any] = {
                         "model": groq_model,
-                        "temperature": 0.35 if not json_mode else 0.15,
-                        "max_tokens": 1400,
+                        "temperature": 0.45 if not json_mode else 0.25,
+                        "max_tokens": max_tokens,
                         "messages": msgs,
                     }
-                    if json_mode:
+                    if use_json_fmt:
                         payload_dict["response_format"] = {"type": "json_object"}
                     body = json.dumps(payload_dict).encode("utf-8")
                     req = urllib.request.Request(
@@ -2449,12 +2480,12 @@ class ScoutV8Service:
                         headers={
                             "Content-Type": "application/json",
                             "Authorization": f"Bearer {key}",
-                            "User-Agent": "Mozilla/5.0 (EGY-SCOUT-V8/8.5)",
+                            "User-Agent": "Mozilla/5.0 (EGY-SCOUT-V8/8.7)",
                         },
                         method="POST",
                     )
                     try:
-                        with urllib.request.urlopen(req, timeout=18) as resp:
+                        with urllib.request.urlopen(req, timeout=22) as resp:
                             data = json.loads(resp.read().decode("utf-8"))
                             text = data["choices"][0]["message"]["content"]
                             if text:
@@ -2468,7 +2499,7 @@ class ScoutV8Service:
                         {
                             "system_instruction": {"parts": [{"text": system_prompt}]},
                             "contents": [{"role": "user", "parts": [{"text": user_question}]}],
-                            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 1200},
+                            "generationConfig": {"temperature": 0.35, "maxOutputTokens": max_tokens},
                         }
                     ).encode("utf-8")
                     req = urllib.request.Request(
@@ -2478,7 +2509,7 @@ class ScoutV8Service:
                         method="POST",
                     )
                     try:
-                        with urllib.request.urlopen(req, timeout=14) as resp:
+                        with urllib.request.urlopen(req, timeout=16) as resp:
                             data = json.loads(resp.read().decode("utf-8"))
                             candidates = data.get("candidates", [])
                             if candidates:
@@ -2497,8 +2528,10 @@ class ScoutV8Service:
         match_id: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        """Use Groq Llama-3.3-70B to synthesize a custom 22-player (Two-Team) tactical formation, arrows, and zones on the pitch from any Arabic/English prompt!"""
+        """Synthesize ANY custom, innovative, or crazy 22-player tactical plan with exact AI-computed coordinates (x_m, y_m),
+        custom run vectors, custom connected shapes (rings, pyramids, asymmetrical overloads, sweeper-keeper at midfield), arrows, and zones!"""
         prompt = str(payload.get("prompt", "")).strip()
+        preferred_model = str(payload.get("model", "")).strip() or None
         base_f_a = str(payload.get("formation_code", "4-2-3-1")).strip()
         base_f_b = str(payload.get("opponent_formation_code", "4-4-2")).strip()
         base_style = str(payload.get("tactical_mode", "balanced")).strip()
@@ -2506,48 +2539,54 @@ class ScoutV8Service:
         ta_ar = meta.get("team_a_name_ar", meta["team_a_name"])
         tb_ar = meta.get("team_b_name_ar", meta["team_b_name"])
 
-        # Detect any formation strings mentioned in prompt (e.g. 3-5-2, 4-3-3, 4-1-4-1, 5-3-2, 4-2-3-1, 3-4-2-1, 4-2-2-2)
-        found_formations = re.findall(r"\b([2-5](?:-[1-5]){2,3})\b", prompt)
+        found_formations = re.findall(r"\b([1-9](?:-[1-9]){1,4})\b", prompt)
         if len(found_formations) >= 2:
             base_f_a, base_f_b = found_formations[0], found_formations[1]
         elif len(found_formations) == 1:
             base_f_a = found_formations[0]
 
-        p_low = prompt.lower()
-        if any(k in p_low for k in ("تيكي", "tiki", "استحواذ", "مثلثات")):
-            base_style = "tiki_taka"
-        elif any(k in p_low for k in ("ضغط عال", "gegen", "عكسي", "هجومي")):
-            base_style = "aggressive"
-        elif any(k in p_low for k in ("مرتد", "تحول", "counter", "سريع")):
-            base_style = "counter_attack"
-        elif any(k in p_low for k in ("تكتل", "دفاعي", "low block", "باص")):
-            base_style = "conservative"
-        elif any(k in p_low for k in ("عكسي", "inverted", "صندوق")):
-            base_style = "inverted_fullbacks"
-        elif any(k in p_low for k in ("أطراف", "اطراف", "عرضيات", "wing")):
-            base_style = "wing_overload"
-
         sys_json = (
-            f"أنت مهندس رسم خطط كرة قدم تكتيكي على ملعب FIFA أبعاده الطولية X من 0 إلى 105 متر والعرضية Y من 0 إلى 68 متر.\n"
-            f"الفريق الأول (team_a): {ta_ar} (يهاجم نحو اليمين X=105). الفريق الثاني (team_b): {tb_ar} (يهاجم نحو اليسار X=0).\n"
-            "بناءً على طلب المستخدم، أخرج كائن JSON فقط يحتوي على الحقول التالية:\n"
+            f"أنت عبقري تكتيك كرة قدم ومهندس رسم خطط حر 100% على ملعب FIFA أبعاده:\n"
+            f"- محور الطول X من 0 (مرمى {ta_ar}) إلى 105 متر (مرمى {tb_ar}).\n"
+            f"- محور العرض Y من 0 (خط التماس العلوي) إلى 68 متر (خط التماس السفلي)، ووسط الملعب عند Y=34.\n"
+            f"- الفريق الأول (team_a — نادينا): {ta_ar} يهاجم من اليسار إلى اليمين (نحو X=105).\n"
+            f"- الفريق الثاني (team_b — الخصم): {tb_ar} يهاجم من اليمين إلى اليسار (نحو X=0).\n\n"
+            "قواعد صارمة لتنفيذ أي خطة جديدة أو مجنونة أو غير تقليدية:\n"
+            "1. لا تلتزم أبداً بالتشكيلات التقليدية إذا طلب المستخدم خطة مجنونة أو جديدة أو مبتكرة أو غير متماثلة! ضع الإحداثيات الحقيقية (x_m, y_m) لكل لاعب من الـ 11 لاعباً بحرية مطلقة لتجسيد الفكرة حرفياً!\n"
+            "   - مثلاً: لو طلب «حارس متقدم لمنتصف الملعب» ضع GK عند x_m=42.\n"
+            "   - لو طلب «هجوم كاسح على الجبهة اليسرى وتفريغ اليمين» ضع 7 لاعبين عند y_m بين 6 و 28.\n"
+            "   - لو طلب «خطة هرمية أو دائرية أو 1-1-8 أو 2-1-6-1 أو ابتكار خطة لم تُلعب من قبل» وزّع الـ 11 إحداثياً بدقة هندسية حقيقية تجسد الشكل المطلوب!\n"
+            "2. أخرج كائن JSON صالحاً فقط بهذا الشكل بالضبط:\n"
             "{\n"
-            '  "team_a_formation": "مثل 4-3-3 أو 3-5-2 أو 4-2-3-1 أو أي تشكيل يطلبه",\n'
-            '  "team_b_formation": "تشكيل الفريق الثاني مثل 4-4-2 أو 5-3-2",\n'
-            '  "team_a_style": "واحد من: balanced | aggressive | conservative | tiki_taka | counter_attack | inverted_fullbacks | wing_overload",\n'
-            '  "team_b_style": "واحد من نفس القائمة",\n'
-            '  "title_ar": "عنوان الخطة المرسومة بالعربية",\n'
-            '  "coach_explanation_ar": "شرح تكتيكي دقيق ومفصل للخطة المرسومة وكيف يتحرك الفريقان",\n'
+            '  "team_a_formation": "اسم/رمز التشكيل مثل 2-1-6-1 أو 1-3-5-1 أو 4-3-3 أو اسم مبتكر",\n'
+            '  "team_b_formation": "تشكيل الخصم مثل 5-4-1 أو 4-4-2",\n'
+            '  "team_a_style": "balanced | aggressive | conservative | tiki_taka | counter_attack | inverted_fullbacks | wing_overload",\n'
+            '  "team_b_style": "balanced | aggressive | conservative | tiki_taka | counter_attack | inverted_fullbacks | wing_overload",\n'
+            '  "title_ar": "اسم جذاب ودقيق للخطة المرسومة بالعربية",\n'
+            '  "coach_explanation_ar": "شرح تكتيكي عميق لماذا هذه الخطة عبقرية وكيف تربك الخصم وكيف تتحرك خطوطها",\n'
+            '  "team_a_nodes": [\n'
+            '    {"slot": "GK", "role_ar": "حارس ليبرو متقدم", "x_m": 22.0, "y_m": 34.0, "move_to_x_m": 34.0, "move_to_y_m": 34.0, "duty_ar": "المشاركة في البناء من المنتصف"},\n'
+            '    "... (11 لاعباً بالضبط لـ team_a بإحداثيات x_m في [4..100] و y_m في [5..63])"\n'
+            "  ],\n"
+            '  "team_a_lines": [\n'
+            '    {"line_type": "backline", "label_ar": "الخط الأول", "slots": ["CB1", "CB2"]},\n'
+            '    {"line_type": "midfield", "label_ar": "الخط الوسطي / الشكل المبتكر", "slots": ["DM", "CM1", "CM2"]},\n'
+            '    {"line_type": "attack", "label_ar": "كتلة الهجوم", "slots": ["LW", "ST", "RW"]}\n'
+            "  ],\n"
+            '  "team_b_nodes": [\n'
+            '    {"slot": "GK", "role_ar": "حارس الخصم", "x_m": 99.0, "y_m": 34.0, "move_to_x_m": 96.0, "move_to_y_m": 34.0, "duty_ar": "حماية المرمى"},\n'
+            '    "... (11 لاعباً بالضبط للخصم team_b)"\n'
+            "  ],\n"
             '  "custom_arrows": [\n'
-            '    {"from_x_m": 45.0, "from_y_m": 34.0, "to_x_m": 74.0, "to_y_m": 24.0, "kind": "pass", "color": "#FACC15", "label_ar": "تمريرة كاسرة للخطوط"},\n'
-            '    {"from_x_m": 65.0, "from_y_m": 18.0, "to_x_m": 88.0, "to_y_m": 28.0, "kind": "run", "color": "#10B981", "label_ar": "اختراق خلف الظهير"}\n'
+            '    {"from_x_m": 45.0, "from_y_m": 34.0, "to_x_m": 78.0, "to_y_m": 16.0, "kind": "pass", "color": "#FACC15", "label_ar": "تمريرة كاسرة"},\n'
+            '    {"from_x_m": 66.0, "from_y_m": 15.0, "to_x_m": 92.0, "to_y_m": 28.0, "kind": "run", "color": "#10B981", "label_ar": "اختراق صاعق"}\n'
             "  ],\n"
             '  "custom_zones": [\n'
-            '    {"x1_m": 66.0, "y1_m": 20.0, "x2_m": 88.0, "y2_m": 48.0, "color": "#F59E0B", "label_ar": "منطقة التفوق العددي / المصيدة"}\n'
+            '    {"x1_m": 64.0, "y1_m": 10.0, "x2_m": 94.0, "y2_m": 36.0, "color": "#F59E0B", "label_ar": "منطقة التفوق العددي / المصيدة"}\n'
             "  ],\n"
-            '  "execution_steps_ar": ["خطوة 1...", "خطوة 2...", "خطوة 3..."]\n'
+            '  "execution_steps_ar": ["1. ...", "2. ...", "3. ...", "4. ..."]\n'
             "}\n"
-            "أنشئ بين 4 و 7 أسهم تكتيكية دقيقة (custom_arrows من نوع run أو pass أو press) و1 إلى 2 مناطق تكتيكية (custom_zones) تعبر بدقة عن الفكرة التي طلبها المستخدم."
+            "مهم جداً: أعطِ 11 لاعباً كاملين في team_a_nodes و11 لاعباً في team_b_nodes، و5 إلى 8 أسهم في custom_arrows، ومنطقتين في custom_zones تجسد فكرة المستخدم بحرية وإبداع كامل!"
         )
 
         llm_raw, provider = self._call_external_llm_if_configured(
@@ -2555,6 +2594,8 @@ class ScoutV8Service:
             system_prompt=sys_json,
             user_question=prompt or f"ارسم خطة {base_f_a} بأسلوب {base_style} ضد {base_f_b}",
             json_mode=True,
+            preferred_model=preferred_model,
+            max_tokens=3600,
         )
 
         ai_spec: dict[str, Any] = {}
@@ -2583,16 +2624,116 @@ class ScoutV8Service:
             opponent_formation_code=final_f_b,
             opponent_tactical_mode=final_style_b,
         )
+
+        # Apply direct custom AI coordinates for ALL 11 players of Team A (supports ANY crazy/innovative geometry!)
+        def _merge_ai_nodes(
+            ai_list: Any, base_nodes: list[dict[str, Any]], team_key: str
+        ) -> list[dict[str, Any]]:
+            if not isinstance(ai_list, list) or len(ai_list) < 6:
+                return base_nodes
+            merged: list[dict[str, Any]] = []
+            for idx, raw_nd in enumerate(ai_list[:11]):
+                if not isinstance(raw_nd, dict):
+                    continue
+                base_nd = base_nodes[idx] if idx < len(base_nodes) else {}
+                xm = float(np.clip(float(raw_nd.get("x_m", base_nd.get("x_m", 52.5))), 3.0, 102.0))
+                ym = float(np.clip(float(raw_nd.get("y_m", base_nd.get("y_m", 34.0))), 4.0, 64.0))
+                mx = float(np.clip(float(raw_nd.get("move_to_x_m", xm)), 3.0, 102.0))
+                my = float(np.clip(float(raw_nd.get("move_to_y_m", ym)), 4.0, 64.0))
+                # Prevent two players on the same team from sitting directly on top of each other
+                for prev_nd in merged:
+                    if float(np.hypot(xm - prev_nd["x_m"], ym - prev_nd["y_m"])) < 3.5:
+                        xm = float(np.clip(xm + 4.5, 4.0, 101.0))
+                        ym = float(np.clip(ym + (3.5 if ym < 34.0 else -3.5), 5.0, 63.0))
+                merged.append(
+                    {
+                        "team": team_key,
+                        "slot": str(raw_nd.get("slot") or base_nd.get("slot") or f"P{idx+1}")[:8],
+                        "role_ar": str(raw_nd.get("role_ar") or base_nd.get("role_ar") or "دور تكتيكي حر"),
+                        "player_label": str(base_nd.get("player_label") or raw_nd.get("slot") or f"لاعب {idx+1}"),
+                        "track_id": base_nd.get("track_id"),
+                        "jersey_number": base_nd.get("jersey_number") or (idx + 1),
+                        "x_m": round(xm, 1),
+                        "y_m": round(ym, 1),
+                        "move_to_x_m": round(mx, 1),
+                        "move_to_y_m": round(my, 1),
+                        "duty_ar": str(raw_nd.get("duty_ar") or base_nd.get("duty_ar") or "واجب تكتيكي مبتكر"),
+                    }
+                )
+            # Always guarantee a full 11-player squad per team (pad any omitted slots from base_nodes)
+            while len(merged) < len(base_nodes):
+                merged.append(base_nodes[len(merged)])
+            return merged if len(merged) >= 6 else base_nodes
+
+        bp["nodes"] = _merge_ai_nodes(ai_spec.get("team_a_nodes"), bp["nodes"], "team_a")
+        bp["opponent_nodes"] = _merge_ai_nodes(
+            ai_spec.get("team_b_nodes"), bp.get("opponent_nodes", []), "team_b"
+        )
+
+        # Build custom connected tactical lines from AI's team_a_lines (or auto-cluster AI's custom coordinates)
+        if isinstance(ai_spec.get("team_a_lines"), list) and ai_spec["team_a_lines"]:
+            slot_xy = {n["slot"]: (n["x_m"], n["y_m"]) for n in bp["nodes"]}
+            custom_lines = []
+            for ln in ai_spec["team_a_lines"]:
+                if not isinstance(ln, dict):
+                    continue
+                pts = [
+                    {"slot": sl, "x_m": slot_xy[sl][0], "y_m": slot_xy[sl][1]}
+                    for sl in (ln.get("slots") or [])
+                    if sl in slot_xy
+                ]
+                if len(pts) >= 2:
+                    custom_lines.append(
+                        {
+                            "team": "team_a",
+                            "line_type": str(ln.get("line_type") or "midfield"),
+                            "label_ar": str(ln.get("label_ar") or "خط تكتيكي"),
+                            "points": pts,
+                        }
+                    )
+            if custom_lines:
+                bp["lines"] = custom_lines
+
+        bp["formation_code"] = final_f_a
+        bp["opponent_formation_code"] = final_f_b
         if ai_spec.get("title_ar"):
             bp["title_ar"] = str(ai_spec["title_ar"])
         if ai_spec.get("coach_explanation_ar"):
             bp["philosophy_ar"] = str(ai_spec["coach_explanation_ar"])
         if isinstance(ai_spec.get("execution_steps_ar"), list) and ai_spec["execution_steps_ar"]:
             bp["execution_steps_ar"] = [str(s) for s in ai_spec["execution_steps_ar"]]
-        if isinstance(ai_spec.get("custom_arrows"), list):
+        if isinstance(ai_spec.get("custom_arrows"), list) and ai_spec["custom_arrows"]:
             bp["custom_arrows"] = ai_spec["custom_arrows"]
-        if isinstance(ai_spec.get("custom_zones"), list):
+        else:
+            # Synthesize key tactical passing/progression arrows from the AI's custom nodes
+            a_sorted = sorted(bp["nodes"], key=lambda n: n["x_m"])
+            synth_arrows = []
+            if len(a_sorted) >= 10:
+                pairs = [(0, 3, "بناء من العمق", "#38BDF8", "pass"), (3, 7, "تمريرة كاسرة", "#FACC15", "pass"), (7, 10, "اختراق نهائي", "#10B981", "run")]
+                for i1, i2, lbl, col, knd in pairs:
+                    n1, n2 = a_sorted[i1], a_sorted[i2]
+                    synth_arrows.append({
+                        "from_x_m": n1["x_m"], "from_y_m": n1["y_m"],
+                        "to_x_m": n2["x_m"], "to_y_m": n2["y_m"],
+                        "kind": knd, "color": col, "label_ar": lbl,
+                    })
+            bp["custom_arrows"] = synth_arrows
+        if isinstance(ai_spec.get("custom_zones"), list) and ai_spec["custom_zones"]:
             bp["custom_zones"] = ai_spec["custom_zones"]
+        else:
+            # Highlight the densest attacking cluster of Team A automatically
+            att_nodes = sorted(bp["nodes"], key=lambda n: -n["x_m"])[:5]
+            if att_nodes:
+                xs = [n["x_m"] for n in att_nodes]
+                ys = [n["y_m"] for n in att_nodes]
+                bp["custom_zones"] = [{
+                    "x1_m": round(max(10.0, min(xs) - 5.0), 1),
+                    "y1_m": round(max(4.0, min(ys) - 5.0), 1),
+                    "x2_m": round(min(101.0, max(xs) + 5.0), 1),
+                    "y2_m": round(min(64.0, max(ys) + 5.0), 1),
+                    "color": "#F59E0B",
+                    "label_ar": "منطقة الكثافة والتفوق الهجومي",
+                }]
         bp["ai_provider"] = provider or "EGY-SCOUT Tactical Geometry Engine"
         return bp
 
@@ -2602,8 +2743,9 @@ class ScoutV8Service:
         match_id: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        """Conversational Grounded AI Tactical Analyst powered by Groq Llama-3.3-70B + Two-Team Live Telemetry + Live AI Pitch Drawing."""
+        """Conversational Grounded AI Tactical Analyst powered by Groq Multi-Model AI + Two-Team Live Telemetry + Live AI Pitch Drawing."""
         question = str(payload.get("question", "")).strip()
+        preferred_model = str(payload.get("model", "")).strip() or None
         history = payload.get("history") if isinstance(payload.get("history"), list) else []
         time_s = payload.get("time_s")
         frame_id = payload.get("frame_id")
@@ -2647,6 +2789,16 @@ class ScoutV8Service:
                 "ستايل",
                 "اسلوب",
                 "أسلوب",
+                "مجنون",
+                "مبتكر",
+                "جديد",
+                "مختلف",
+                "غريب",
+                "متعملتش",
+                "اخترع",
+                "ابتكر",
+                "فكرة",
+                "فكره",
                 "تيكي تاكا",
                 "ضغط عالي",
                 "مرتد",
@@ -2739,14 +2891,14 @@ class ScoutV8Service:
         }
 
         sys_prompt = (
-            "أنت المحلل التكتيكي الذكي الخبير لنظام EGY-SCOUT V8 (تعمل بنموذج Llama-3.3-70B).\n"
+            "أنت المحلل التكتيكي الذكي العبقري لنظام EGY-SCOUT V8.\n"
             "قواعد صارمة جداً:\n"
-            "1. إياك أن تكرر قوالب محفوظة أو ديباجات ثابتة! أجب مباشرة وبذكاء وحرية كاملة على سؤال المستخدم تحديداً كما يفعل محلل تكتيكي محترف في استوديو تحليلي.\n"
-            "2. حلّل الفريقين معاً دائماً ("
+            "1. إياك أن تكرر قوالب محفوظة أو ديباجات ثابتة! أجب مباشرة وبذكاء وإبداع وحرية كاملة على سؤال المستخدم تحديداً.\n"
+            "2. إذا طلب المستخدم خطة مجنونة أو جديدة أو مبتكرة لم تُلعب من قبل، لا تعتذر ولا تعيده للتشكيلات التقليدية! ابتكرها فعلياً بجرأة واشرح تفاصيلها الهندسية على الملعب لكل لاعب!\n"
+            "3. حلّل الفريقين معاً دائماً ("
             + f"{ta_name} و {tb_name}"
             + ") عندما يكون السؤال عن المباراة أو اللقطة أو التكتيك، ولا تقتصر على فريق واحد أبداً.\n"
-            "3. استند إلى الأرقام الحقيقية من بيانات القياس الحية المرفقة (الإحداثيات بالمتر، السرعات كم/س، المسافات، ماذا فعل اللاعب DID، ماذا لم يفعل DID NOT، وأين ولماذا أخطأ WHERE & WHY) عندما تتحدث عن اللقطة الحالية.\n"
-            "4. إذا طلب المستخدم رسم أي خطة أو تشكيل (مثل 3-5-2، 4-3-3، 4-2-3-1، 5-3-2، أو أي ستايل مثل تيكي تاكا، ضغط عالي، هجوم مرتد)، اشرح له الخطة التي تم رسمها الآن على اللعب التكتيكي للفريقين معاً وكيف تتحرك الخطوط والأسهم.\n\n"
+            "4. استند إلى الأرقام الحقيقية من بيانات القياس الحية المرفقة (الإحداثيات بالمتر، السرعات كم/س، المسافات، ماذا فعل اللاعب DID، ماذا لم يفعل DID NOT، وأين ولماذا أخطأ WHERE & WHY) عندما تتحدث عن اللقطة الحالية.\n\n"
             "بيانات القياس الحية للقطة الحالية (Two-Team Live Telemetry JSON):\n"
             + json.dumps(telemetry_context, ensure_ascii=False)
         )
@@ -2757,18 +2909,20 @@ class ScoutV8Service:
             user_question=question or "حلل موقف الفريقين في هذه اللقطة بالتفصيل.",
             history=history,
             json_mode=False,
+            preferred_model=preferred_model,
+            max_tokens=1800,
         )
 
         structured_cards: list[dict[str, Any]] = []
         suggested_actions: list[dict[str, Any]] = []
         drawn_blueprint: Optional[dict[str, Any]] = None
 
-        # If the user asked to draw a formation/plan/style, generate the live 22-player AI drawing blueprint!
+        # If the user asked to draw a formation/plan/crazy idea, generate the live 22-player custom-coordinate AI drawing blueprint!
         if wants_drawing:
             drawn_blueprint = self.generate_ai_tactical_drawing(
                 tenant_id=tenant_id,
                 match_id=match_id,
-                payload={"prompt": question},
+                payload={"prompt": question, "model": preferred_model},
             )
             structured_cards.append(
                 {
