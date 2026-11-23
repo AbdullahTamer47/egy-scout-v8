@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Box, Compass, Eye, RotateCcw } from "lucide-react";
 import ThreePitchTwin from "@/components/ThreePitchTwin";
-import { TimelineBall } from "@/lib/api";
+import { MomentStatePayload, TimelineBall } from "@/lib/api";
 import { hexToRgba, RenderPlayer } from "@/lib/broadcastRenderer";
 
 export type TwinViewMode = "2d" | "3d" | "pov";
@@ -37,6 +37,7 @@ interface Props {
   isCloseUp: boolean;
   chainIds: number[];
   setPieceSim: SetPieceSimState | null;
+  momentState?: MomentStatePayload | null;
   onSelectPlayer?: (trackId: number) => void;
   onGhostPitchMove?: (pitchX: number, pitchY: number, commit: boolean, trackId?: number) => void;
 }
@@ -110,11 +111,16 @@ export default function TacticalTwinCanvas({
   isCloseUp,
   chainIds,
   setPieceSim,
+  momentState = null,
   onSelectPlayer,
   onGhostPitchMove,
 }: Props) {
   const isAr = lang === "ar";
   const [viewMode, setViewMode] = useState<TwinViewMode>("2d");
+  const [showFormationLines, setShowFormationLines] = useState(true);
+  const [showPassingChannels, setShowPassingChannels] = useState(true);
+  const [showCorrectionArrows, setShowCorrectionArrows] = useState(true);
+  const [showZone14, setShowZone14] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const draggingGhostRef = useRef(false);
   const orbitingRef = useRef<{ active: boolean; lastX: number; lastY: number }>({
@@ -140,6 +146,11 @@ export default function TacticalTwinCanvas({
     isCloseUp,
     chainIds,
     setPieceSim,
+    momentState,
+    showFormationLines,
+    showPassingChannels,
+    showCorrectionArrows,
+    showZone14,
     viewMode,
   });
   latestRef.current = {
@@ -158,6 +169,11 @@ export default function TacticalTwinCanvas({
     isCloseUp,
     chainIds,
     setPieceSim,
+    momentState,
+    showFormationLines,
+    showPassingChannels,
+    showCorrectionArrows,
+    showZone14,
     viewMode,
   };
 
@@ -179,6 +195,11 @@ export default function TacticalTwinCanvas({
     isCloseUp,
     chainIds,
     setPieceSim,
+    momentState,
+    showFormationLines,
+    showPassingChannels,
+    showCorrectionArrows,
+    showZone14,
     viewMode,
   ]);
 
@@ -343,6 +364,56 @@ export default function TacticalTwinCanvas({
         </div>
       </div>
 
+      {/* Tactical Plan Drawing Layer Toggles */}
+      {viewMode === "2d" && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+          <button
+            type="button"
+            onClick={() => setShowFormationLines((v) => !v)}
+            className={`px-2 py-0.5 rounded border font-semibold transition ${
+              showFormationLines
+                ? "bg-emerald-500/20 border-emerald-500/45 text-emerald-300"
+                : "bg-[#090D16] border-white/[0.08] text-slate-500"
+            }`}
+          >
+            {isAr ? "📐 خطوط التشكيل" : "📐 Formation Lines"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowPassingChannels((v) => !v)}
+            className={`px-2 py-0.5 rounded border font-semibold transition ${
+              showPassingChannels
+                ? "bg-sky-500/20 border-sky-500/45 text-sky-300"
+                : "bg-[#090D16] border-white/[0.08] text-slate-500"
+            }`}
+          >
+            {isAr ? "📡 قنوات التمرير" : "📡 Pass Channels"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowCorrectionArrows((v) => !v)}
+            className={`px-2 py-0.5 rounded border font-semibold transition ${
+              showCorrectionArrows
+                ? "bg-amber-500/20 border-amber-500/45 text-amber-300"
+                : "bg-[#090D16] border-white/[0.08] text-slate-500"
+            }`}
+          >
+            {isAr ? "♟️ أسهم التصحيح" : "♟️ Correction Vectors"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowZone14((v) => !v)}
+            className={`px-2 py-0.5 rounded border font-semibold transition ${
+              showZone14
+                ? "bg-purple-500/20 border-purple-500/45 text-purple-300"
+                : "bg-[#090D16] border-white/[0.08] text-slate-500"
+            }`}
+          >
+            Zone 14
+          </button>
+        </div>
+      )}
+
       {/* Twin Canvas: 2D Tactical Pitch Control Board OR Real Three.js 3D WebGL Stadium / Player-POV */}
       <div className="relative rounded-lg overflow-hidden border border-white/[0.08] bg-[#071A14]">
         {viewMode === "2d" ? (
@@ -406,6 +477,33 @@ export default function TacticalTwinCanvas({
   );
 }
 
+function computeInstantTeamLines(
+  players: RenderPlayer[],
+  team: string,
+  attacksRight: boolean
+): { shape: string; lines: RenderPlayer[][] } {
+  const outfield = players.filter((p) => p.team === team && p.role === "player");
+  if (outfield.length === 0) return { shape: "—", lines: [] };
+  const sortedX = [...outfield].sort((a, b) => (attacksRight ? a.x_m - b.x_m : b.x_m - a.x_m));
+  const n = sortedX.length;
+  let groups: RenderPlayer[][] = [];
+  if (n <= 3) {
+    groups = [sortedX];
+  } else if (n <= 6) {
+    const mid = Math.ceil(n / 2);
+    groups = [sortedX.slice(0, mid), sortedX.slice(mid)];
+  } else {
+    const s1 = Math.min(4, Math.max(2, Math.round(n * 0.4)));
+    const s2 = Math.min(n - 1, s1 + Math.max(2, Math.round((n - s1) * 0.55)));
+    groups = [sortedX.slice(0, s1), sortedX.slice(s1, s2), sortedX.slice(s2)];
+  }
+  const latGroups = groups
+    .filter((g) => g.length > 0)
+    .map((g) => [...g].sort((a, b) => a.y_m - b.y_m));
+  const shape = latGroups.map((g) => g.length).join("-");
+  return { shape, lines: latGroups };
+}
+
 function draw2DPitch(
   pctx: CanvasRenderingContext2D,
   W: number,
@@ -425,6 +523,11 @@ function draw2DPitch(
     isCloseUp: boolean;
     chainIds: number[];
     setPieceSim: SetPieceSimState | null;
+    momentState?: MomentStatePayload | null;
+    showFormationLines?: boolean;
+    showPassingChannels?: boolean;
+    showCorrectionArrows?: boolean;
+    showZone14?: boolean;
   },
   ballXY: [number, number],
   now: number
@@ -495,6 +598,29 @@ function draw2DPitch(
   pctx.textAlign = "center";
   pctx.fillText(attacksRight ? "ATT ▶" : "◀ ATT", W * 0.5, pad + 11);
 
+  // 1. Zone 14 Tactical Box Overlay
+  if (st.showZone14 !== false && !st.isCloseUp) {
+    const z14X1 = attacksRight ? 68.0 : 105.0 - 88.5;
+    const z14X2 = attacksRight ? 88.5 : 105.0 - 68.0;
+    const zx1 = pad + (z14X1 / 105) * pw;
+    const zx2 = pad + (z14X2 / 105) * pw;
+    const zy1 = pad + (22.0 / 68) * ph;
+    const zy2 = pad + (46.0 / 68) * ph;
+    pctx.save();
+    pctx.fillStyle = "rgba(250, 204, 21, 0.09)";
+    pctx.strokeStyle = "rgba(250, 204, 21, 0.48)";
+    pctx.lineWidth = 1.2;
+    pctx.setLineDash([4, 3]);
+    pctx.fillRect(zx1, zy1, zx2 - zx1, zy2 - zy1);
+    pctx.strokeRect(zx1, zy1, zx2 - zx1, zy2 - zy1);
+    pctx.setLineDash([]);
+    pctx.fillStyle = "rgba(250, 204, 21, 0.85)";
+    pctx.font = "700 8.5px Inter, sans-serif";
+    pctx.textAlign = "center";
+    pctx.fillText("ZONE 14", (zx1 + zx2) * 0.5, zy1 + 9);
+    pctx.restore();
+  }
+
   // Subtle Set-Piece Kinematic Simulation Animated Overlay (automatically mirrors for Left/Right goal!)
   if (st.setPieceSim) {
     const [rawTx, ty] = st.setPieceSim.target_zone_xy;
@@ -507,7 +633,6 @@ function draw2DPitch(
     const targetPy = pad + (ty / 68) * ph;
     const pulse = 0.5 + 0.5 * Math.sin(now * 0.005);
 
-    // Pulsing target danger zone circle
     pctx.save();
     pctx.fillStyle = `rgba(16, 185, 129, ${0.18 + 0.14 * pulse})`;
     pctx.strokeStyle = "#10B981";
@@ -517,7 +642,6 @@ function draw2DPitch(
     pctx.fill();
     pctx.stroke();
 
-    // Animated corner kick curve
     pctx.strokeStyle = "#FACC15";
     pctx.lineWidth = 2;
     pctx.setLineDash([5, 4]);
@@ -527,7 +651,6 @@ function draw2DPitch(
     pctx.quadraticCurveTo(cornerX + (attacksRight ? -24 : 24), (cornerY + targetPy) * 0.5, targetPx, targetPy);
     pctx.stroke();
 
-    // Decoy pull run vector
     const decStartX = pad + ((attacksRight ? 91 : 14) / 105) * pw;
     const decStartY = pad + (36 / 68) * ph;
     pctx.strokeStyle = "#38BDF8";
@@ -540,6 +663,89 @@ function draw2DPitch(
   }
 
   if (st.isCloseUp || !st.players.length) return;
+
+  // 2. Live Team Formation Lines & Block Shape (drawn continuously at 25fps!)
+  if (st.showFormationLines !== false) {
+    const teamConfigs = [
+      { team: "team_a", hex: st.teamAHex, attRight: st.attackingTeam === "team_a" ? attacksRight : !attacksRight },
+      { team: "team_b", hex: st.teamBHex, attRight: st.attackingTeam === "team_b" ? attacksRight : !attacksRight },
+    ];
+    for (const tc of teamConfigs) {
+      const inst = computeInstantTeamLines(st.players, tc.team, tc.attRight);
+      pctx.save();
+      pctx.strokeStyle = hexToRgba(tc.hex, 0.72);
+      pctx.lineWidth = 1.8;
+      pctx.setLineDash([5, 3]);
+      for (const grp of inst.lines) {
+        if (grp.length < 2) continue;
+        pctx.beginPath();
+        grp.forEach((pt, idx) => {
+          const px = pad + (pt.x_m / 105) * pw;
+          const py = pad + (pt.y_m / 68) * ph;
+          if (idx === 0) pctx.moveTo(px, py);
+          else pctx.lineTo(px, py);
+        });
+        pctx.stroke();
+      }
+      pctx.setLineDash([]);
+      pctx.restore();
+    }
+  }
+
+  // 3. Live Passing Channels from Ball (when momentState is available or computed live)
+  if (st.showPassingChannels !== false && st.momentState?.passing_channels) {
+    pctx.save();
+    for (const ch of st.momentState.passing_channels.slice(0, 4)) {
+      const fx = pad + (ch.from_x_m / 105) * pw;
+      const fy = pad + (ch.from_y_m / 68) * ph;
+      const tx = pad + (ch.to_x_m / 105) * pw;
+      const ty = pad + (ch.to_y_m / 68) * ph;
+      pctx.strokeStyle = ch.is_blocked ? "rgba(239, 68, 68, 0.42)" : "rgba(16, 185, 129, 0.78)";
+      pctx.lineWidth = ch.is_blocked ? 1.2 : 1.9;
+      pctx.setLineDash(ch.is_blocked ? [2, 3] : [6, 3]);
+      pctx.beginPath();
+      pctx.moveTo(fx, fy);
+      pctx.lineTo(tx, ty);
+      pctx.stroke();
+    }
+    pctx.setLineDash([]);
+    pctx.restore();
+  }
+
+  // 4. Tactical Correction Arrows (from Moment State Analyzer)
+  if (st.showCorrectionArrows !== false && st.momentState?.correction_arrows) {
+    pctx.save();
+    for (const arr of st.momentState.correction_arrows.slice(0, 4)) {
+      const fx = pad + (arr.from_x_m / 105) * pw;
+      const fy = pad + (arr.from_y_m / 68) * ph;
+      const tx = pad + (arr.to_x_m / 105) * pw;
+      const ty = pad + (arr.to_y_m / 68) * ph;
+      if (Math.hypot(tx - fx, ty - fy) < 4) continue;
+      const col = arr.urgency === "critical" ? "#FACC15" : "#22D3EE";
+      pctx.strokeStyle = col;
+      pctx.lineWidth = 2.0;
+      pctx.beginPath();
+      pctx.moveTo(fx, fy);
+      pctx.lineTo(tx, ty);
+      pctx.stroke();
+
+      const ang = Math.atan2(ty - fy, tx - fx);
+      pctx.fillStyle = col;
+      pctx.beginPath();
+      pctx.moveTo(tx, ty);
+      pctx.lineTo(tx - 6 * Math.cos(ang - 0.45), ty - 6 * Math.sin(ang - 0.45));
+      pctx.lineTo(tx - 6 * Math.cos(ang + 0.45), ty - 6 * Math.sin(ang + 0.45));
+      pctx.closePath();
+      pctx.fill();
+
+      pctx.beginPath();
+      pctx.arc(tx, ty, 4, 0, Math.PI * 2);
+      pctx.strokeStyle = col;
+      pctx.lineWidth = 1.2;
+      pctx.stroke();
+    }
+    pctx.restore();
+  }
 
   // Linked Chain lines on 2D Twin
   if (st.chainIds.length >= 2) {
@@ -559,13 +765,13 @@ function draw2DPitch(
     pctx.restore();
   }
 
-  // Players + Ghost Arrow
+  // Players + Jersey/Track Number Badges + Ghost Arrow
   for (const p of st.players) {
     const px = pad + (p.x_m / 105) * pw;
     const py = pad + (p.y_m / 68) * ph;
     const isSel = p.track_id === st.selectedDefId;
     pctx.beginPath();
-    pctx.arc(px, py, isSel ? 6 : 4.6, 0, Math.PI * 2);
+    pctx.arc(px, py, isSel ? 7.2 : 6.0, 0, Math.PI * 2);
     pctx.fillStyle =
       p.role === "referee"
         ? "#FACC15"
@@ -577,9 +783,23 @@ function draw2DPitch(
         ? st.teamAHex
         : st.teamBHex;
     pctx.fill();
-    pctx.strokeStyle = isSel ? "#10B981" : "rgba(255,255,255,0.9)";
-    pctx.lineWidth = isSel ? 2.2 : 1;
+    pctx.strokeStyle = isSel ? "#10B981" : "rgba(255,255,255,0.92)";
+    pctx.lineWidth = isSel ? 2.4 : 1.1;
     pctx.stroke();
+
+    // Clean jersey or base track number inside node
+    const numLabel = p.jersey_number
+      ? `${p.jersey_number}`
+      : p.track_id >= 1000
+      ? `${p.track_id % 1000}`
+      : `${p.track_id}`;
+    pctx.save();
+    pctx.fillStyle = p.role === "referee" ? "#0F172A" : "#FFFFFF";
+    pctx.font = "800 7.5px Inter, system-ui, sans-serif";
+    pctx.textAlign = "center";
+    pctx.textBaseline = "middle";
+    pctx.fillText(numLabel, px, py);
+    pctx.restore();
 
     if (isSel && !st.isPlaying && (st.ghostDx !== 0 || st.ghostDy !== 0)) {
       const gx = pad + (Math.max(0, Math.min(105, p.x_m + st.ghostDx)) / 105) * pw;

@@ -403,3 +403,90 @@ def api_serve_hls_file(match_id: str, filename: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="HLS asset not found")
     media = "application/vnd.apple.mpegurl" if filename.endswith(".m3u8") else "video/MP2T"
     return FileResponse(str(fpath), media_type=media)
+
+
+@router.post("/api/matches/{match_id}/auto-assign-qa")
+def api_auto_assign_qa(
+    match_id: str,
+    payload: dict[str, Any],
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    """1-click smart roster auto-assignment for the 2-Minute Identity QA Sheet."""
+    ctx.require("write:qa")
+    from apps.api.main import service
+
+    try:
+        return service.auto_assign_roster_to_qa(
+            ctx.tenant_id,
+            match_id,
+            frame_id=int(payload.get("frame_id", 1250)),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/api/matches/{match_id}/moment-state")
+def api_moment_state(
+    match_id: str,
+    frame_id: int | None = None,
+    time_s: float | None = None,
+    selected_track_id: int | None = None,
+    defending_team: str | None = None,
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    """Moment State Analyzer (PDF Pages 25-26: Did / Did Not / Where & Why) + Live Formation Lines."""
+    ctx.require("read:tactics")
+    from apps.api.main import service
+
+    try:
+        return service.get_moment_state_analysis(
+            tenant_id=ctx.tenant_id,
+            match_id=match_id,
+            frame_id=frame_id,
+            time_s=time_s,
+            selected_track_id=selected_track_id,
+            defending_team=defending_team,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/api/matches/{match_id}/formation-blueprint")
+def api_formation_blueprint(
+    match_id: str,
+    formation_code: str = "4-2-3-1",
+    team: str = "team_a",
+    tactical_mode: str = "balanced",
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    """Interactive 11v11 Formation Blueprint Board populated with real match tracks/roster."""
+    ctx.require("read:tactics")
+    from apps.api.main import service
+
+    try:
+        return service.get_formation_blueprint(
+            tenant_id=ctx.tenant_id,
+            match_id=match_id,
+            formation_code=formation_code,
+            team=team,
+            tactical_mode=tactical_mode,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/api/chat/ask")
+def api_tactical_chat_ask(
+    payload: dict[str, Any],
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    """Grounded AI Tactical Chatbot endpoint (supports built-in NLU + Free Gemini / Groq API keys)."""
+    ctx.require("read:tactics")
+    from apps.api.main import service
+
+    try:
+        match_id = str(payload.get("match_id", "m2_ahly_enppi"))
+        return service.answer_tactical_chat(ctx.tenant_id, match_id, payload)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+

@@ -44,8 +44,14 @@ export function matchVideoUrl(matchId: string): string {
 
 export interface DetectionRow {
   track_id: number;
+  display_id?: string;
+  base_track_id?: number;
+  shot_id?: number;
   role: string;
   team: string;
+  jersey_number?: number | null;
+  verified_name?: string | null;
+  verified?: boolean;
   role_conf: number;
   team_conf: number;
   bbox: [number, number, number, number];
@@ -65,6 +71,8 @@ export interface BeforeAfterPayload {
   match_id: string;
   team_a_name: string;
   team_b_name: string;
+  team_a_name_ar?: string;
+  team_b_name_ar?: string;
   kit_colors: KitColors;
   frame_id: number;
   available_frames: number[];
@@ -87,11 +95,22 @@ export interface BeforeAfterPayload {
 
 export interface QASheetTrack {
   track_id: number;
+  display_id?: string;
+  base_track_id?: number;
+  shot_id?: number;
   role: string;
   team: string;
+  team_name_ar?: string;
+  kit_hex?: string;
   role_conf: number;
   frame_count: number;
+  observed_s?: number;
   first_frame: number;
+  in_current_frame?: boolean;
+  in_active_shot?: boolean;
+  x_m?: number | null;
+  y_m?: number | null;
+  bbox_in_frame?: [number, number, number, number] | null;
   jersey_number: number | null;
   verified_name: string | null;
   verified: boolean;
@@ -261,6 +280,10 @@ export interface MatchListItem {
   match_id: string;
   team_a_name: string;
   team_b_name: string;
+  team_a_name_ar?: string;
+  team_b_name_ar?: string;
+  title_ar?: string;
+  kit_colors?: KitColors;
   fps: number;
   has_video: boolean;
   has_telemetry: boolean;
@@ -368,9 +391,188 @@ export interface BenchStatePayload {
 export interface RosterPlayer {
   jersey_number: number;
   name: string;
-  is_starter: boolean;
-  is_captain: boolean;
+  is_starter?: boolean;
+  is_captain?: boolean;
   position: string;
+  team?: string;
+}
+
+export interface TeamFormationLine {
+  line_type: "backline" | "midfield" | "attack";
+  label_ar: string;
+  count: number;
+  mean_x_m: number;
+  max_lateral_gap_m: number;
+  points: Array<{
+    track_id: number;
+    x_m: number;
+    y_m: number;
+    label: string;
+    jersey_number?: number | null;
+    speed_kmh: number;
+  }>;
+}
+
+export interface LiveTeamFormation {
+  team: string;
+  detected_shape: string;
+  inferred_full_formation: string;
+  visible_outfield_count: number;
+  width_m: number;
+  depth_m: number;
+  compactness_m2: number;
+  defensive_line_x_m: number;
+  line_gap_def_mid_m: number;
+  line_gap_mid_att_m: number;
+  lines: TeamFormationLine[];
+  convex_hull: Array<{ x_m: number; y_m: number }>;
+}
+
+export interface PassingChannelItem {
+  from_x_m: number;
+  from_y_m: number;
+  to_x_m: number;
+  to_y_m: number;
+  target_track_id: number;
+  target_label: string;
+  distance_m: number;
+  lane_clearance_m: number;
+  progressive_gain_m: number;
+  is_blocked: boolean;
+  blocker_track_id: number | null;
+  quality_score: number;
+}
+
+export interface TacticalCorrectionArrow {
+  track_id: number;
+  team: string;
+  player_label: string;
+  action_type: string;
+  label_ar: string;
+  from_x_m: number;
+  from_y_m: number;
+  to_x_m: number;
+  to_y_m: number;
+  delta_m: number;
+  urgency: "critical" | "high" | "medium";
+}
+
+export interface PlayerMomentState {
+  track_id: number;
+  player_label: string;
+  team: string;
+  team_name: string;
+  role: string;
+  jersey_number?: number | null;
+  x_m: number;
+  y_m: number;
+  opt_x_m: number;
+  opt_y_m: number;
+  speed_kmh: number;
+  dist_to_ball_m: number;
+  dist_to_nearest_opponent_m: number;
+  dist_to_nearest_teammate_m: number;
+  zone_ar: string;
+  status_tag: string;
+  severity_score: number;
+  did_ar: string;
+  did_not_ar: string;
+  where_and_why_ar: string;
+}
+
+export interface MomentStatePayload {
+  match_id: string;
+  team_a_name: string;
+  team_b_name: string;
+  team_a_name_ar: string;
+  team_b_name_ar: string;
+  kit_colors: KitColors;
+  attack_goal_x: number;
+  moment_summary: {
+    frame_id: number;
+    time_s: number;
+    ball_x_m: number;
+    ball_y_m: number;
+    ball_zone_ar: string;
+    attacking_team: string;
+    defending_team: string;
+    attacking_team_name: string;
+    defending_team_name: string;
+    attacking_formation_live: string;
+    defending_formation_live: string;
+    attacking_pitch_control_pct: number;
+    shot_xg_before: number;
+    shot_xg_after_correction: number;
+    risk_reduction_if_corrected_pct: number;
+    open_passing_channels_count: number;
+    headline_did_ar: string;
+    headline_did_not_ar: string;
+    headline_where_and_why_ar: string;
+    focal_player: PlayerMomentState | null;
+  };
+  formations: Record<string, LiveTeamFormation>;
+  passing_channels: PassingChannelItem[];
+  correction_arrows: TacticalCorrectionArrow[];
+  player_states: PlayerMomentState[];
+}
+
+export interface FormationBlueprintPayload {
+  match_id: string;
+  team: string;
+  kit_colors: KitColors;
+  formation_code: string;
+  title_ar: string;
+  philosophy_ar: string;
+  team_name: string;
+  opponent_name: string;
+  tactical_mode: string;
+  nodes: Array<{
+    slot: string;
+    role_ar: string;
+    player_label: string;
+    track_id: number | null;
+    jersey_number: number | null;
+    x_m: number;
+    y_m: number;
+    move_to_x_m: number;
+    move_to_y_m: number;
+    duty_ar: string;
+  }>;
+  lines: Array<{
+    line_type: string;
+    label_ar: string;
+    points: Array<{ slot: string; x_m: number; y_m: number }>;
+  }>;
+  tactical_zones: Array<{
+    zone_id: string;
+    label_ar: string;
+    x1_m: number;
+    y1_m: number;
+    x2_m: number;
+    y2_m: number;
+  }>;
+  execution_steps_ar: string[];
+}
+
+export interface TacticalChatResponse {
+  match_id: string;
+  frame_id: number;
+  time_s: number;
+  engine: string;
+  has_external_api_key: boolean;
+  question: string;
+  answer_ar: string;
+  moment_summary: MomentStatePayload["moment_summary"];
+  structured_cards: Array<Record<string, unknown>>;
+  suggested_actions: Array<{
+    action: string;
+    track_id?: number;
+    formation_code?: string;
+    layer?: string;
+    time_s?: number;
+    label_ar: string;
+  }>;
+  follow_up_questions: string[];
 }
 
 export interface MatchupPlanPayload {

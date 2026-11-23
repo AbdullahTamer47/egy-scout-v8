@@ -54,7 +54,7 @@ def before_after(
 ) -> dict[str, Any]:
     ctx.require("read:matches")
     try:
-        return service.get_before_after(match_id, frame_id=frame_id)
+        return service.get_before_after(match_id, frame_id=frame_id, tenant_id=ctx.tenant_id)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
@@ -160,10 +160,12 @@ def match_timeline(
 
 @app.get("/api/matches/{match_id}/qa-sheet")
 def get_qa_sheet(
-    match_id: str, ctx: TenantContext = Depends(get_tenant_context)
+    match_id: str,
+    frame_id: int = 1250,
+    ctx: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
     ctx.require("read:matches")
-    return service.get_qa_sheet(ctx.tenant_id, match_id)
+    return service.get_qa_sheet(ctx.tenant_id, match_id, frame_id=frame_id)
 
 
 @app.post("/api/matches/{match_id}/lineup")

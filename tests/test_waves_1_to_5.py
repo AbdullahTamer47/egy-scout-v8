@@ -196,6 +196,33 @@ class TestWaves1To5(unittest.TestCase):
         self.assertEqual(pdos.status_code, 200)
         self.assertGreater(len(pdos.json()["rating_breakdown"]), 0)
 
+        # Verify Moment State Analyzer (Did / Did Not / Where & Why) + Formation Blueprint + AI Tactical Chatbot + QA Sheet
+        ms_resp = client.get("/api/matches/m2_ahly_enppi/moment-state?frame_id=1250")
+        self.assertEqual(ms_resp.status_code, 200)
+        ms_data = ms_resp.json()
+        self.assertIn("moment_summary", ms_data)
+        self.assertGreater(len(ms_data["player_states"]), 0)
+        self.assertIn("did_ar", ms_data["player_states"][0])
+        self.assertIn("did_not_ar", ms_data["player_states"][0])
+        self.assertIn("where_and_why_ar", ms_data["player_states"][0])
+
+        bp_resp = client.get("/api/matches/m2_ahly_enppi/formation-blueprint?formation_code=4-2-3-1")
+        self.assertEqual(bp_resp.status_code, 200)
+        self.assertEqual(len(bp_resp.json()["nodes"]), 11)
+
+        chat_resp = client.post(
+            "/api/chat/ask",
+            json={"match_id": "m2_ahly_enppi", "question": "ارسم خطة 4-2-3-1 واشرح كل لاعب عمل إيه ومعملش إيه"},
+        )
+        self.assertEqual(chat_resp.status_code, 200)
+        self.assertIn("answer_ar", chat_resp.json())
+        self.assertGreater(len(chat_resp.json()["structured_cards"]), 0)
+
+        qa_resp = client.get("/api/matches/m2_ahly_enppi/qa-sheet?frame_id=1250")
+        self.assertEqual(qa_resp.status_code, 200)
+        self.assertGreater(qa_resp.json()["in_frame_count"], 0)
+        self.assertTrue(qa_resp.json()["tracks"][0]["in_current_frame"])
+
     def test_v8_upgraded_cv_engines_scoreboard_gk_cap_and_pitch_calib(self) -> None:
         from services.cv_worker.stages.events_spotting import parse_scoreboard_text
         from services.cv_worker.stages.pitch_calib import FIFA_KEYPOINTS

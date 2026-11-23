@@ -27,6 +27,7 @@ import {
   Video,
 } from "lucide-react";
 import { EChartsMatchMomentum } from "@/components/TacticalCharts";
+import FormationBlueprintBoard from "@/components/FormationBlueprintBoard";
 import TacticalTwinCanvas, { SetPieceSimState } from "@/components/TacticalTwinCanvas";
 import {
   API_BASE,
@@ -34,6 +35,7 @@ import {
   frameImageUrl,
   matchVideoUrl,
   MomentsAndBriefPayload,
+  MomentStatePayload,
   OpponentDossierPayload,
   PositioningAnalysisPayload,
   TimelineBall,
@@ -470,6 +472,8 @@ export default function BroadcastStudioScreen({ lang, matchId, role }: Props) {
   const [loadingHls, setLoadingHls] = useState(false);
   const [opponentDossier, setOpponentDossier] = useState<OpponentDossierPayload | null>(null);
   const [showDossier, setShowDossier] = useState(false);
+  const [momentState, setMomentState] = useState<MomentStatePayload | null>(null);
+  const [blueprintFormation, setBlueprintFormation] = useState<string>("4-2-3-1");
   const hlsRef = useRef<Hls | null>(null);
 
   const enableGopHlsStream = async () => {
@@ -774,6 +778,30 @@ export default function BroadcastStudioScreen({ lang, matchId, role }: Props) {
       alive = false;
     };
   }, [matchId, role]);
+
+  // Live Moment State Analyzer (Did / Did Not / Where & Why + Live Formation Lines) synced to current time & selected player
+  const quantizedTimeHalfSec = Math.round(hudTimeS);
+  useEffect(() => {
+    let alive = true;
+    const qs = new URLSearchParams();
+    if (quantizedTimeHalfSec > 0) qs.set("time_s", String(quantizedTimeHalfSec));
+    if (selectedDefId !== null) qs.set("selected_track_id", String(selectedDefId));
+    if (data?.defending_team) qs.set("defending_team", data.defending_team);
+
+    apiFetch<MomentStatePayload>(
+      `/api/matches/${encodeURIComponent(matchId)}/moment-state?${qs.toString()}`,
+      {},
+      "club_demo_egypt",
+      role
+    )
+      .then((ms) => {
+        if (alive) setMomentState(ms);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [matchId, quantizedTimeHalfSec, selectedDefId, data?.defending_team, role]);
 
   // Unified 60FPS Broadcast AR Render Loop
   useEffect(() => {
@@ -1950,6 +1978,7 @@ export default function BroadcastStudioScreen({ lang, matchId, role }: Props) {
               isCloseUp={isCloseUpUi}
               chainIds={chainIds}
               setPieceSim={setPieceSim}
+              momentState={momentState}
               onSelectPlayer={(tid) => setSelectedDefId(tid)}
               onGhostPitchMove={(px, py, commit, tid) => {
                 if (videoRef.current && !videoRef.current.paused) {
@@ -2216,6 +2245,138 @@ export default function BroadcastStudioScreen({ lang, matchId, role }: Props) {
           )}
         </div>
       </div>
+
+      {/* PDF Pages 25-26: Live Moment State Analyzer (Did / Did Not / Where & Why) */}
+      {momentState && (
+        <div className="studio-panel p-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <Target className="w-4 h-4 text-emerald-400" />
+                <h2 className="text-sm font-bold text-white">
+                  {isAr
+                    ? "تشريح الحالة التكتيكية لحظياً (Moment State Analyzer — عمل إيه / معملش إيه / غلط فين وليه)"
+                    : "Live Moment State Analyzer (What He Did / Did Not Do / Where & Why)"}
+                </h2>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {isAr
+                  ? `محسوب لحظياً من الإحداثيات الحقيقية والسرعات عند الثانية ${momentState.moment_summary.time_s}s (الفريم #${momentState.moment_summary.frame_id}) — اضغط على أي لاعب بالأسفل لتشريح موقفه التكتيكي فوراً.`
+                  : `Computed dynamically from real coordinates & velocities at t=${momentState.moment_summary.time_s}s — click any player pill below to inspect their exact tactical state.`}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="px-2.5 py-1 rounded-lg bg-[#090D16] border border-white/[0.08] text-slate-200 font-semibold">
+                {isAr
+                  ? `التشكيل الحي: ${momentState.moment_summary.attacking_team_name} (${momentState.moment_summary.attacking_formation_live}) × ${momentState.moment_summary.defending_team_name} (${momentState.moment_summary.defending_formation_live})`
+                  : `Live Shape: ${momentState.moment_summary.attacking_formation_live} vs ${momentState.moment_summary.defending_formation_live}`}
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 font-bold tabular-nums">
+                {isAr
+                  ? `خفض الخطر عند التصحيح: -${momentState.moment_summary.risk_reduction_if_corrected_pct}% (xG: ${momentState.moment_summary.shot_xg_before} ← ${momentState.moment_summary.shot_xg_after_correction})`
+                  : `Correction Impact: -${momentState.moment_summary.risk_reduction_if_corrected_pct}% Risk`}
+              </span>
+            </div>
+          </div>
+
+          {/* Clickable Player Selector Strip */}
+          <div className="flex flex-wrap items-center gap-1.5 pb-1">
+            {momentState.player_states.slice(0, 14).map((ps) => {
+              const isFocal =
+                (selectedDefId !== null && ps.track_id === selectedDefId) ||
+                (selectedDefId === null && momentState.moment_summary.focal_player?.track_id === ps.track_id);
+              const badgeColor =
+                ps.status_tag === "tactical_gap" || ps.status_tag === "line_break"
+                  ? "border-amber-400/60 text-amber-300"
+                  : ps.status_tag === "ball_carrier"
+                  ? "border-sky-400/60 text-sky-300"
+                  : "border-white/[0.1] text-slate-300";
+
+              return (
+                <button
+                  key={ps.track_id}
+                  type="button"
+                  onClick={() => setSelectedDefId(ps.track_id)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition flex items-center gap-1.5 ${
+                    isFocal
+                      ? "bg-emerald-500 text-slate-950 border-emerald-400 font-bold shadow"
+                      : `bg-[#090D16] hover:border-white/30 ${badgeColor}`
+                  }`}
+                >
+                  <span>{ps.player_label}</span>
+                  <span className={`text-[10px] ${isFocal ? "text-slate-900" : "text-slate-400"}`}>
+                    ({ps.team_name})
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 3-Column Did / Did Not / Where & Why Cards for Focal Player */}
+          {(() => {
+            const activePs =
+              momentState.player_states.find((p) => p.track_id === selectedDefId) ||
+              momentState.moment_summary.focal_player ||
+              momentState.player_states[0];
+            if (!activePs) return null;
+            return (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[#090D16] border border-white/[0.08] text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-white text-sm">{activePs.player_label}</span>
+                    <span className="px-2 py-0.5 rounded bg-white/[0.07] text-slate-200">{activePs.team_name}</span>
+                    <span className="text-emerald-400 font-semibold">{activePs.zone_ar}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-300 tabular-nums">
+                    <span>{isAr ? `السرعة: ${activePs.speed_kmh} كم/س` : `Speed: ${activePs.speed_kmh} km/h`}</span>
+                    <span>{isAr ? `البعد عن الكرة: ${activePs.dist_to_ball_m}م` : `Dist to Ball: ${activePs.dist_to_ball_m}m`}</span>
+                    <span>{isAr ? `أقرب خصم: ${activePs.dist_to_nearest_opponent_m}م` : `Nearest Opp: ${activePs.dist_to_nearest_opponent_m}m`}</span>
+                    <span className="text-sky-300 font-semibold">
+                      {isAr
+                        ? `الموقع: (${activePs.x_m}م، ${activePs.y_m}م) ← الأمثل: (${activePs.opt_x_m}م، ${activePs.opt_y_m}م)`
+                        : `Pos: (${activePs.x_m}m, ${activePs.y_m}m) -> Opt: (${activePs.opt_x_m}m, ${activePs.opt_y_m}m)`}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 text-xs">
+                  <div className="p-3.5 rounded-xl bg-[#090D16] border border-emerald-500/35 space-y-1.5">
+                    <div className="font-bold text-emerald-400 flex items-center justify-between">
+                      <span>{isAr ? "1. ما الذي فعله فعلياً (What He Did)" : "1. What HeActually Did"}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15">DID</span>
+                    </div>
+                    <p className="text-slate-200 leading-relaxed">{activePs.did_ar}</p>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-[#090D16] border border-rose-500/35 space-y-1.5">
+                    <div className="font-bold text-rose-400 flex items-center justify-between">
+                      <span>{isAr ? "2. ما الذي لم يفعله (What He Did Not Do)" : "2. What He Did Not Do"}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/15">DID NOT</span>
+                    </div>
+                    <p className="text-slate-200 leading-relaxed">{activePs.did_not_ar}</p>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-[#090D16] border border-amber-500/35 space-y-1.5">
+                    <div className="font-bold text-amber-300 flex items-center justify-between">
+                      <span>{isAr ? "3. أين ولماذا أخطأ / التمركز الصحيح" : "3. Where & Why It Failed / Fix"}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15">WHERE & WHY</span>
+                    </div>
+                    <p className="text-slate-200 leading-relaxed">{activePs.where_and_why_ar}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* Interactive 11v11 Tactical Formation & Plan Blueprint Board */}
+      <FormationBlueprintBoard
+        lang={lang}
+        matchId={matchId}
+        role={role}
+        defaultFormation={blueprintFormation}
+      />
     </div>
   );
 }
