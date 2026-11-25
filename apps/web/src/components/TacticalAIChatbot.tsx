@@ -9,7 +9,8 @@ import {
   Target,
   X,
 } from "lucide-react";
-import { apiFetch, FormationBlueprintPayload, TacticalChatResponse, UserRole } from "@/lib/api";
+import EstimateBadge from "@/components/ui/EstimateBadge";
+import { apiFetch, FormationBlueprintPayload, TacticalChatResponse, useGroqModels, UserRole } from "@/lib/api";
 
 interface Props {
   lang: "ar" | "en";
@@ -116,26 +117,32 @@ function InlineBlueprintMiniCanvas({ blueprint }: { blueprint: FormationBlueprin
     drawLines(blueprint.lines, hexA);
     if (blueprint.opponent_lines) drawLines(blueprint.opponent_lines, hexB);
 
-    // Draw custom / passing arrows
+    // Draw custom / passing arrows with smooth arc + xPass % badge
     const arrows = [
-      ...(blueprint.custom_arrows || []),
       ...(blueprint.passing_arrows || []),
-    ].slice(0, 6);
+      ...(blueprint.custom_arrows || []),
+    ].slice(0, 8);
     for (const ar of arrows) {
       const fx = pad + (ar.from_x_m / 105) * pw;
       const fy = pad + (ar.from_y_m / 68) * ph;
       const tx = pad + (ar.to_x_m / 105) * pw;
       const ty = pad + (ar.to_y_m / 68) * ph;
       if (Math.hypot(tx - fx, ty - fy) < 5) continue;
-      const col = ar.color || (ar.kind === "pass" ? "#FACC15" : "#10B981");
+      const col = ar.color || "#FACC15";
+      const dx = tx - fx;
+      const dy = ty - fy;
+      const cpx = (fx + tx) * 0.5 - dy * 0.14;
+      const cpy = (fy + ty) * 0.5 + dx * 0.14;
       ctx.save();
       ctx.strokeStyle = col;
-      ctx.lineWidth = 1.8;
+      ctx.lineWidth = 1.9;
+      ctx.setLineDash([4, 3]);
       ctx.beginPath();
       ctx.moveTo(fx, fy);
-      ctx.lineTo(tx, ty);
+      ctx.quadraticCurveTo(cpx, cpy, tx, ty);
       ctx.stroke();
-      const ang = Math.atan2(ty - fy, tx - fx);
+      ctx.setLineDash([]);
+      const ang = Math.atan2(ty - cpy, tx - cpx);
       ctx.fillStyle = col;
       ctx.beginPath();
       ctx.moveTo(tx, ty);
@@ -143,6 +150,20 @@ function InlineBlueprintMiniCanvas({ blueprint }: { blueprint: FormationBlueprin
       ctx.lineTo(tx - 6 * Math.cos(ang + 0.45), ty - 6 * Math.sin(ang + 0.45));
       ctx.closePath();
       ctx.fill();
+      if (typeof ar.xpass_pct === "number") {
+        const mx = 0.25 * fx + 0.5 * cpx + 0.25 * tx;
+        const my = 0.25 * fy + 0.5 * cpy + 0.25 * ty;
+        const badge = `${Math.round(ar.xpass_pct)}%`;
+        ctx.fillStyle = "rgba(9,13,22,0.9)";
+        ctx.beginPath();
+        ctx.roundRect(mx - 12, my - 6.5, 24, 13, 3);
+        ctx.fill();
+        ctx.fillStyle = ar.xpass_pct >= 75 ? "#34D399" : "#FACC15";
+        ctx.font = "800 7.5px Inter, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(badge, mx, my);
+      }
       ctx.restore();
     }
 
@@ -296,14 +317,6 @@ function renderFormattedMarkdown(text: string): React.ReactNode {
   );
 }
 
-const AI_MODELS = [
-  { id: "auto", ar: "تلقائي ذكي (Auto Smart Router)", en: "Auto Smart Router (Recommended)" },
-  { id: "openai/gpt-oss-120b", ar: "GPT-OSS 120B (الأقوى للخطط المعقدة)", en: "GPT-OSS 120B (Deep Tactical)" },
-  { id: "qwen/qwen3.8-27b", ar: "Qwen 3.8 27B (ذكي وسريع بالعربي)", en: "Qwen 3.8 27B (Fast Arabic)" },
-  { id: "openai/gpt-oss-20b", ar: "GPT-OSS 20B (فائق السرعة)", en: "GPT-OSS 20B (Turbo)" },
-  { id: "allam-2-7b", ar: "ALLaM 2 7B (عربي أصيل)", en: "ALLaM 2 7B (Arabic)" },
-];
-
 export default function TacticalAIChatbot({
   lang,
   matchId,
@@ -315,6 +328,7 @@ export default function TacticalAIChatbot({
   onAiBlueprintDrawn,
 }: Props) {
   const isAr = lang === "ar";
+  const { models: aiModels } = useGroqModels(role);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string>("auto");
@@ -327,15 +341,14 @@ export default function TacticalAIChatbot({
       {
         id: `welcome-${matchId}`,
         sender: "ai",
-        engine: "Groq AI Multi-Model (GPT-OSS 120B / Qwen 3.8)",
+        engine: isAr ? "المحلل التكتيكي الذكي" : "AI Tactical Analyst",
         text: isAr
-          ? `أهلاً بك في **المحلل التكتيكي الذكي (Groq AI)** لمباراة **${matchTitleAr}**.\n\nأنا متصل مباشرة ببيانات الفريقين معاً (22 لاعباً)، الإحداثيات الحقيقية، السرعات، وتشريح كل لاعب (**عمل إيه / معملش إيه / غلط فين وليه**). تقدر تختار الموديل من الأعلى وتطلب **أي خطة مبتكرة أو مجنونة لم تُلعب من قبل** وسأرسم لك إحداثيات الـ 22 لاعباً مباشرة على الملعب!`
-          : `Welcome to **EGY-SCOUT AI Tactical Brain** for **${matchTitleAr}**.\n\nConnected live to both teams' telemetry and the 22-player Tactical Drawing Board. Switch models anytime above and ask me to invent & draw any wild or custom tactical formation directly on the pitch!`,
+          ? `أهلاً بك في **المحلل التكتيكي الذكي** لمباراة **${matchTitleAr}**.\n\nمتصل ببيانات الفريقين (الإحداثيات والسرعات وتشريح اللقطة). اسأل عن أي لقطة أو اطلب رسم تشكيل تكتيكي على السبورة.`
+          : `Welcome to **EGY-SCOUT AI Tactical Analyst** for **${matchTitleAr}**.\n\nConnected to both teams' tracking telemetry and the Tactical Board. Ask about any moment or request a tactical formation.`,
         followUps: [
-          "ابتكر خطة مجنونة 2-1-6-1 بحارس ليبرو في منتصف الملعب وهجوم كاسح على الجبهة اليسرى",
-          "ارسم خطة 3-5-2 بأسلوب تيكي تاكا ضد 5-3-2 مع أسهم اختراق للمنطقة 14",
-          "حلل موقف الفريقين معاً في هذه اللقطة: من أخطأ ولماذا؟",
-          "من هم أسرع اللاعبين في الفريقين وما هي أفضل قنوات التمرير المفتوحة؟",
+          isAr ? `قارن تمركز الفريقين في هذه اللقطة ومن أخطأ؟` : "Compare both teams' shape and positioning in this moment.",
+          isAr ? `ما أسرع اللاعبين وما هي قنوات التمرير المفتوحة؟` : "Who are the fastest players and what passing lanes are open?",
+          isAr ? `ارسم خطة ضغط عالي 4-3-3 ضد 4-4-2` : "Draw a 4-3-3 high press vs 4-4-2",
         ],
       },
     ]);
@@ -411,17 +424,19 @@ export default function TacticalAIChatbot({
   };
 
   const activeModelLabel =
-    AI_MODELS.find((m) => m.id === selectedModel)?.[isAr ? "ar" : "en"] || selectedModel;
+    aiModels.find((m) => m.id === selectedModel)?.[isAr ? "ar" : "en"] || selectedModel;
 
   if (!isOpen) {
     return (
       <button
         type="button"
         onClick={onToggleOpen}
-        className="fixed bottom-5 end-5 z-50 flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs shadow-2xl shadow-emerald-950/80 border border-emerald-300 transition transform hover:scale-[1.03]"
+        aria-label={isAr ? "المساعد التكتيكي الذكي (AI)" : "AI Tactical Analyst"}
+        className="fixed bottom-20 md:bottom-5 end-3 md:end-5 z-40 flex items-center gap-2 px-3.5 md:px-4 py-2.5 md:py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs shadow-2xl shadow-emerald-950/80 border border-emerald-300 transition transform hover:scale-[1.03]"
       >
         <Bot className="w-5 h-5" />
-        <span>{isAr ? "المساعد التكتيكي الذكي (AI)" : "AI Tactical Analyst"}</span>
+        <span className="hidden sm:inline">{isAr ? "المساعد التكتيكي الذكي (AI)" : "AI Tactical Analyst"}</span>
+        <span className="sm:hidden">{isAr ? "مساعد AI" : "AI"}</span>
       </button>
     );
   }
@@ -429,7 +444,7 @@ export default function TacticalAIChatbot({
   return (
     <div
       dir={isAr ? "rtl" : "ltr"}
-      className="fixed bottom-4 end-4 z-50 w-[95vw] sm:w-[485px] h-[660px] max-h-[88vh] rounded-2xl bg-[#0B101C] border border-emerald-500/40 shadow-2xl shadow-black/90 flex flex-col overflow-hidden"
+      className="fixed bottom-20 md:bottom-4 end-2.5 sm:end-4 z-50 w-[95vw] sm:w-[485px] h-[640px] max-h-[calc(100vh-6rem)] md:max-h-[88vh] rounded-2xl bg-[#0B101C] border border-emerald-500/40 shadow-2xl shadow-black/90 flex flex-col overflow-hidden"
     >
       {/* Header (Clean — Multi-Model Groq Picker, No API key prompt!) */}
       <div className="px-4 py-3 bg-[#111827] border-b border-white/[0.08] space-y-2">
@@ -483,7 +498,7 @@ export default function TacticalAIChatbot({
             onChange={(e) => setSelectedModel(e.target.value)}
             className="w-full bg-[#090D16] border border-emerald-500/35 rounded-lg px-2 py-1 text-[11px] font-bold text-emerald-300 focus:outline-none focus:border-emerald-400"
           >
-            {AI_MODELS.map((m) => (
+            {aiModels.map((m) => (
               <option key={m.id} value={m.id}>
                 {isAr ? m.ar : m.en}
               </option>

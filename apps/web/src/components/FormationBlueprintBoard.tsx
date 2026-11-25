@@ -34,6 +34,7 @@ import {
   BlueprintPassingArrow,
   FormationBlueprintPayload,
   MathValidationResult,
+  useGroqModels,
   UserRole,
 } from "@/lib/api";
 import GlossaryTooltip from "@/components/GlossaryTooltip";
@@ -83,14 +84,6 @@ interface FreehandStroke {
 }
 
 const PRESET_FORMATIONS = ["4-2-3-1", "4-3-3", "3-4-2-1", "3-5-2", "4-4-2", "5-3-2", "4-1-4-1", "4-2-2-2"];
-
-const GROQ_AI_MODELS = [
-  { id: "auto", ar: "تلقائي ذكي (Auto Smart Router)", en: "Auto Smart Router" },
-  { id: "openai/gpt-oss-120b", ar: "GPT-OSS 120B (الأقوى للخطط المبتكرة)", en: "GPT-OSS 120B (Flagship)" },
-  { id: "qwen/qwen3.8-27b", ar: "Qwen 3.8 27B (ذكي وسريع)", en: "Qwen 3.8 27B (Fast Arabic)" },
-  { id: "openai/gpt-oss-20b", ar: "GPT-OSS 20B (فائق السرعة)", en: "GPT-OSS 20B (Turbo)" },
-  { id: "allam-2-7b", ar: "ALLaM 2 7B (نموذج عربي)", en: "ALLaM 2 7B (Arabic)" },
-];
 
 const DRAW_COLORS = [
   { hex: "#10B981", label: "أخضر تكتيكي" },
@@ -151,8 +144,9 @@ export default function FormationBlueprintBoard({
   const [drawTool, setDrawTool] = useState<DrawTool>("drag_player");
   const [showLines, setShowLines] = useState(true);
   const [showRunArrows, setShowRunArrows] = useState(true);
-  const [showPassVectors, setShowPassVectors] = useState(false);
+  const [showPassVectors, setShowPassVectors] = useState(true);
   const [showZones, setShowZones] = useState(false);
+  const [showMiniCardsOnPitch, setShowMiniCardsOnPitch] = useState(false);
 
   const [blueprint, setBlueprint] = useState<FormationBlueprintPayload | null>(externalBlueprint);
   const [nodesA, setNodesA] = useState<BlueprintNode[]>([]);
@@ -188,6 +182,7 @@ export default function FormationBlueprintBoard({
   const [mathValidation, setMathValidation] = useState<MathValidationResult | null>(null);
 
   // AI Live Drawing Prompt + Auto Smart Router (raw models cleanly expandable!)
+  const { models: groqModels } = useGroqModels(role);
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiModel, setAiModel] = useState<string>("auto");
   const [showAdvancedModel, setShowAdvancedModel] = useState<boolean>(false);
@@ -403,6 +398,9 @@ export default function FormationBlueprintBoard({
       if (externalBlueprint.tactical_mode) {
         setStyleA(externalBlueprint.tactical_mode);
       }
+      if ((externalBlueprint.passing_arrows?.length || 0) > 0) {
+        setShowPassVectors(true);
+      }
       setUserArrows(externalBlueprint.custom_arrows || []);
       setUserZones(externalBlueprint.custom_zones || []);
     }
@@ -471,6 +469,8 @@ export default function FormationBlueprintBoard({
         setCustomInputB(res.opponent_formation_code);
       }
       if (res.tactical_mode) setStyleA(res.tactical_mode);
+      if ((res.passing_arrows?.length || 0) > 0) setShowPassVectors(true);
+      setShowLines(true);
       setUserArrows(res.custom_arrows || []);
       setUserZones(res.custom_zones || []);
     } catch {} finally {
@@ -1018,18 +1018,49 @@ export default function FormationBlueprintBoard({
             : isAr
             ? "تحرك تكتيكي"
             : "Run";
-        setUserArrows((prev) => [
-          ...prev,
-          {
-            from_x_m: d.startX_m,
-            from_y_m: d.startY_m,
-            to_x_m: d.curX_m,
-            to_y_m: d.curY_m,
-            kind: drawDashed ? "pass" : kind,
-            color,
-            label_ar: label,
-          },
-        ]);
+        const effectiveKind = drawDashed ? "pass" : kind;
+        const newArrow: BlueprintPassingArrow = {
+          from_x_m: d.startX_m,
+          from_y_m: d.startY_m,
+          to_x_m: d.curX_m,
+          to_y_m: d.curY_m,
+          kind: effectiveKind,
+          color,
+          label_ar: label,
+        };
+        let nextArrows: BlueprintPassingArrow[] = [];
+        setUserArrows((prev) => {
+          nextArrows = [...prev, newArrow];
+          return nextArrows;
+        });
+        if (effectiveKind === "pass") {
+          apiFetch<{ arrows: BlueprintPassingArrow[] }>(
+            "/api/plans/pass-probabilities",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                arrows: [newArrow],
+                nodes_a: nodesA,
+                nodes_b: nodesB,
+                attack_right: true,
+              }),
+            },
+            "club_demo_egypt",
+            role
+          )
+            .then((res) => {
+              const scored = res.arrows?.[0];
+              if (!scored) return;
+              setUserArrows((prev) =>
+                prev.map((a) =>
+                  a.from_x_m === newArrow.from_x_m && a.to_x_m === newArrow.to_x_m && a.from_y_m === newArrow.from_y_m
+                    ? { ...a, xpass_pct: scored.xpass_pct, obv_delta: scored.obv_delta }
+                    : a
+                )
+              );
+            })
+            .catch(() => {});
+        }
       }
     }
   };
@@ -1212,7 +1243,7 @@ export default function FormationBlueprintBoard({
         drawTeamFormationLines(nodesB, hexB, "team_b");
       }
 
-      // Helper to draw an arrow on the pitch
+      // Helper to draw a straight or curved arrow on the pitch with optional xPass % badge
       const drawArrowVector = (
         fx_m: number,
         fy_m: number,
@@ -1220,7 +1251,10 @@ export default function FormationBlueprintBoard({
         ty_m: number,
         color: string,
         dashed: boolean,
-        label?: string
+        label?: string,
+        curved: boolean = false,
+        xpassPct?: number,
+        obvDelta?: number
       ) => {
         const fx = pad + (fx_m / 105) * pw;
         const fy = pad + (fy_m / 68) * ph;
@@ -1228,17 +1262,26 @@ export default function FormationBlueprintBoard({
         const ty = pad + (ty_m / 68) * ph;
         if (Math.hypot(tx - fx, ty - fy) < 8) return;
 
+        const dx = tx - fx;
+        const dy = ty - fy;
+        const cpx = (fx + tx) * 0.5 - dy * 0.14;
+        const cpy = (fy + ty) * 0.5 + dx * 0.14;
+
         ctx.save();
         ctx.strokeStyle = color;
-        ctx.lineWidth = 2.0;
-        if (dashed) ctx.setLineDash([5, 4]);
+        ctx.lineWidth = curved ? 2.4 : 2.0;
+        if (dashed) ctx.setLineDash([6, 4]);
         ctx.beginPath();
         ctx.moveTo(fx, fy);
-        ctx.lineTo(tx, ty);
+        if (curved) {
+          ctx.quadraticCurveTo(cpx, cpy, tx, ty);
+        } else {
+          ctx.lineTo(tx, ty);
+        }
         ctx.stroke();
         ctx.setLineDash([]);
 
-        const ang = Math.atan2(ty - fy, tx - fx);
+        const ang = curved ? Math.atan2(ty - cpy, tx - cpx) : Math.atan2(dy, dx);
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.moveTo(tx, ty);
@@ -1247,33 +1290,66 @@ export default function FormationBlueprintBoard({
         ctx.closePath();
         ctx.fill();
 
-        if (label) {
-          const mx = (fx + tx) * 0.5;
-          const my = (fy + ty) * 0.5 - 6;
-          ctx.font = "700 9px Inter, system-ui, sans-serif";
-          const tw = ctx.measureText(label).width + 10;
-          ctx.fillStyle = "rgba(9, 13, 22, 0.85)";
+        const midX = curved ? 0.25 * fx + 0.5 * cpx + 0.25 * tx : (fx + tx) * 0.5;
+        const midY = (curved ? 0.25 * fy + 0.5 * cpy + 0.25 * ty : (fy + ty) * 0.5) - 7;
+        const shortLabel = label ? (label.length > 18 ? `${label.slice(0, 17)}…` : label) : "";
+        const badgeText =
+          typeof xpassPct === "number"
+            ? `${Math.round(xpassPct)}% xPass`
+            : shortLabel;
+
+        if (badgeText) {
+          ctx.font = "800 9px Inter, system-ui, sans-serif";
+          const tw = ctx.measureText(badgeText).width + 10;
+          ctx.fillStyle = "rgba(9, 13, 22, 0.90)";
           ctx.beginPath();
-          ctx.roundRect(mx - tw / 2, my - 8, tw, 15, 4);
+          ctx.roundRect(midX - tw / 2, midY - 8, tw, 15, 5);
           ctx.fill();
-          ctx.fillStyle = color;
+          ctx.strokeStyle =
+            typeof xpassPct === "number" ? (xpassPct >= 75 ? "#10B981" : xpassPct >= 50 ? "#FACC15" : "#FB7185") : color;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.fillStyle =
+            typeof xpassPct === "number" ? (xpassPct >= 75 ? "#34D399" : xpassPct >= 50 ? "#FACC15" : "#FDA4AF") : color;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText(label, mx, my);
+          ctx.fillText(badgeText, midX, midY);
         }
         ctx.restore();
       };
 
-      // 4. Built-in Style Passing Arrows (only when showPassVectors is toggled ON)
+      // 4. Built-in / AI Passing Arrows with curved arcs & xPass %
       if (showPassVectors) {
         if (scope !== "team_b" && blueprint.passing_arrows) {
           for (const pa of blueprint.passing_arrows) {
-            drawArrowVector(pa.from_x_m, pa.from_y_m, pa.to_x_m, pa.to_y_m, "#FACC15", true, pa.label_ar);
+            drawArrowVector(
+              pa.from_x_m,
+              pa.from_y_m,
+              pa.to_x_m,
+              pa.to_y_m,
+              "#FACC15",
+              true,
+              isAr ? pa.label_ar : pa.label_en || pa.label_ar,
+              true,
+              pa.xpass_pct,
+              pa.obv_delta
+            );
           }
         }
         if (scope !== "team_a" && blueprint.opponent_passing_arrows) {
           for (const pa of blueprint.opponent_passing_arrows) {
-            drawArrowVector(pa.from_x_m, pa.from_y_m, pa.to_x_m, pa.to_y_m, "#38BDF8", true);
+            drawArrowVector(
+              pa.from_x_m,
+              pa.from_y_m,
+              pa.to_x_m,
+              pa.to_y_m,
+              "#38BDF8",
+              true,
+              isAr ? pa.label_ar : pa.label_en || pa.label_ar,
+              true,
+              pa.xpass_pct,
+              pa.obv_delta
+            );
           }
         }
       }
@@ -1281,7 +1357,18 @@ export default function FormationBlueprintBoard({
       if (scope !== "team_b" && (showPassVectors || drawTool !== "drag_player")) {
         for (const ua of userArrows) {
           const col = ua.color || (ua.kind === "pass" ? "#FACC15" : ua.kind === "press" ? "#EF4444" : "#10B981");
-          drawArrowVector(ua.from_x_m, ua.from_y_m, ua.to_x_m, ua.to_y_m, col, ua.kind === "pass", ua.label_ar);
+          drawArrowVector(
+            ua.from_x_m,
+            ua.from_y_m,
+            ua.to_x_m,
+            ua.to_y_m,
+            col,
+            ua.kind === "pass",
+            ua.label_ar,
+            ua.kind === "pass",
+            ua.xpass_pct,
+            ua.obv_delta
+          );
         }
       }
 
@@ -1403,6 +1490,49 @@ export default function FormationBlueprintBoard({
           ctx.lineWidth = 1;
           ctx.stroke();
 
+          if (showMiniCardsOnPitch && tKey === "team_a") {
+            const cw = 42;
+            const ch = 54;
+            const cx0 = px - cw / 2;
+            const cy0 = py - ch / 2;
+            ctx.beginPath();
+            ctx.moveTo(cx0 + 5, cy0);
+            ctx.lineTo(cx0 + cw - 5, cy0);
+            ctx.quadraticCurveTo(cx0 + cw, cy0, cx0 + cw, cy0 + 8);
+            ctx.lineTo(cx0 + cw, cy0 + ch * 0.78);
+            ctx.quadraticCurveTo(cx0 + cw, cy0 + ch * 0.92, px, cy0 + ch);
+            ctx.quadraticCurveTo(cx0, cy0 + ch * 0.92, cx0, cy0 + ch * 0.78);
+            ctx.lineTo(cx0, cy0 + 8);
+            ctx.quadraticCurveTo(cx0, cy0, cx0 + 5, cy0);
+            ctx.closePath();
+            const gCard = ctx.createLinearGradient(cx0, cy0, cx0 + cw, cy0 + ch);
+            gCard.addColorStop(0, "#E7AD77");
+            gCard.addColorStop(1, "#78481D");
+            ctx.fillStyle = gCard;
+            ctx.fill();
+            ctx.lineWidth = isSel ? 2.4 : 1.5;
+            ctx.strokeStyle = isSel ? "#10B981" : "#FEF08A";
+            ctx.stroke();
+
+            ctx.fillStyle = kitHex;
+            ctx.fillRect(cx0 + 4, cy0 + 2, cw - 8, 4);
+            ctx.fillStyle = "#0F172A";
+            ctx.font = "900 11px Inter, sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText(nd.jersey_number ? `${nd.jersey_number}` : nd.slot, px, cy0 + 18);
+            ctx.fillStyle = "rgba(2,6,23,0.88)";
+            ctx.fillRect(cx0 + 4, cy0 + 26, cw - 8, 12);
+            ctx.fillStyle = "#FACC15";
+            ctx.font = "800 7.5px Inter, sans-serif";
+            ctx.fillText(nd.slot.slice(0, 4), px, cy0 + 35);
+            const miniNm = nd.player_label.replace(/\s*\([^)]*\)/g, "").split(" ").pop() || nd.slot;
+            ctx.fillStyle = "#FFFBEB";
+            ctx.font = "700 7.5px Cairo, Inter, sans-serif";
+            ctx.fillText(miniNm.slice(0, 8), px, cy0 + 46);
+            ctx.restore();
+            return;
+          }
+
           ctx.fillStyle = isSel ? "#6EE7B7" : "#F8FAFC";
           ctx.fillText(pillText, px, py + labelOffsetY + 7.5);
           ctx.restore();
@@ -1482,6 +1612,7 @@ export default function FormationBlueprintBoard({
     showRunArrows,
     showPassVectors,
     showZones,
+    showMiniCardsOnPitch,
     userArrows,
     userZones,
     freehandStrokes,
@@ -1593,7 +1724,7 @@ export default function FormationBlueprintBoard({
               onChange={(e) => setAiModel(e.target.value)}
               className="bg-[#111827] border border-emerald-500/35 rounded-lg px-2.5 py-2 text-[11px] font-bold text-emerald-300 focus:outline-none focus:border-emerald-400"
             >
-              {GROQ_AI_MODELS.map((m) => (
+              {groqModels.map((m) => (
                 <option key={m.id} value={m.id}>
                   {isAr ? m.ar : m.en}
                 </option>
@@ -1625,10 +1756,11 @@ export default function FormationBlueprintBoard({
         <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
           <span className="text-slate-400">{isAr ? "نماذج خطط جاهزة:" : "Tactical Presets:"}</span>
           {[
-            `خطة 3-2-4-1 بصندوق وسط وأظهرة عكسية للاستحواذ ضد 4-4-2`,
-            `خطة 4-3-3 بضغط عالي عكسي ومصيدة ضغط على الأطراف ضد 5-3-2`,
-            `خطة 3-5-2 بتيكي تاكا ومثلثات استحواذ واختراق المنطقة 14`,
-            `خطة غير متماثلة بتحميل الجبهة اليسرى بـ 5 لاعبين وعزل الظهير العكسي`,
+            "خطة 4-3-3 ضغط عالي عكسي كلوب بالخطوط والتمريرات والاحتمالات",
+            "خطة إنزاجي 3-5-2 التحولات العمودية السريعة",
+            "خطة مانشستر سيتي جوارديولا 3-2-4-1 بصندوق الوسط والاستحواذ",
+            "خطة باير ليفركوزن تشابي ألونسو 3-4-2-1 بالخطوط والباصات والاحتمالات",
+            "خطة 4-2-3-1 تيكي تاكا واختراق المنطقة 14",
           ].map((preset, idx) => (
             <button
               key={idx}
@@ -1904,6 +2036,17 @@ export default function FormationBlueprintBoard({
               }`}
             >
               {isAr ? "مناطق الملعب" : "Pitch Zones"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowMiniCardsOnPitch((v) => !v)}
+              className={`px-2 py-1 rounded border text-[11px] font-semibold ${
+                showMiniCardsOnPitch
+                  ? "bg-amber-500/20 border-amber-400/50 text-amber-200"
+                  : "bg-[#111827] border-white/10 text-slate-400"
+              }`}
+            >
+              {isAr ? "كروت مصغّرة" : "Mini Cards"}
             </button>
             <button
               type="button"
@@ -2372,8 +2515,10 @@ export default function FormationBlueprintBoard({
             <TacticalMathValidatorCard lang={lang} validation={mathValidation || blueprint.math_validation || null} />
             {/* Editable Plan Title & Philosophy */}
             <div className="p-3.5 rounded-xl bg-[#090D16] border border-emerald-500/30 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-extrabold text-emerald-300">{blueprint.title_ar}</span>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <span className="font-extrabold text-emerald-300 leading-snug min-w-[200px] flex-1">
+                  {blueprint.title_ar}
+                </span>
                 <div className="flex items-center gap-1 shrink-0">
                   {blueprint.ai_provider && (
                     <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
@@ -2412,6 +2557,32 @@ export default function FormationBlueprintBoard({
                 </div>
               ) : (
                 <p className="text-[11px] text-slate-300 leading-relaxed">{blueprint.philosophy_ar}</p>
+              )}
+
+              {blueprint.passing_arrows && blueprint.passing_arrows.length > 0 && (
+                <div className="pt-2 border-t border-white/[0.06] space-y-1">
+                  <div className="text-[10.5px] font-extrabold text-amber-300">
+                    {isAr ? "قنوات التمرير واحتمالات النجاح (xPass):" : "Passing Lanes & xPass Probabilities:"}
+                  </div>
+                  <div className="space-y-1">
+                    {blueprint.passing_arrows.slice(0, 6).map((pa, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between gap-2 text-[10.5px] bg-[#111827]/75 rounded px-2 py-1 border border-white/[0.05]"
+                      >
+                        <span className="text-slate-200 truncate">
+                          {isAr ? pa.label_ar : pa.label_en || pa.label_ar}
+                        </span>
+                        <span dir="ltr" className="shrink-0 font-extrabold tabular-nums text-emerald-300">
+                          {typeof pa.xpass_pct === "number" ? `${Math.round(pa.xpass_pct)}% xPass` : "—"}
+                          {typeof pa.obv_delta === "number"
+                            ? ` (${pa.obv_delta >= 0 ? "+" : ""}${pa.obv_delta.toFixed(2)})`
+                            : ""}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
 

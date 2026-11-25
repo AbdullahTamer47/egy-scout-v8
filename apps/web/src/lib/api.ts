@@ -1,7 +1,51 @@
+import { useEffect, useState } from "react";
+
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8080";
 
 export type UserRole = "coach" | "analyst" | "scout" | "board" | "player";
+
+export interface GroqModelItem {
+  id: string;
+  ar: string;
+  en: string;
+}
+
+export const FALLBACK_GROQ_MODELS: GroqModelItem[] = [
+  { id: "auto", ar: "تلقائي ذكي", en: "Auto Smart Router" },
+  { id: "openai/gpt-oss-120b", ar: "GPT-OSS 120B (للخطط المعقدة)", en: "GPT-OSS 120B (Deep Tactical)" },
+  { id: "qwen/qwen3.8-27b", ar: "Qwen 3.8 27B (سريع بالعربي)", en: "Qwen 3.8 27B (Fast Arabic)" },
+  { id: "openai/gpt-oss-20b", ar: "GPT-OSS 20B (فائق السرعة)", en: "GPT-OSS 20B (Turbo)" },
+  { id: "allam-2-7b", ar: "ALLaM 2 7B (عربي)", en: "ALLaM 2 7B (Arabic)" },
+];
+
+export function useGroqModels(role: UserRole = "analyst") {
+  const [models, setModels] = useState<GroqModelItem[]>(FALLBACK_GROQ_MODELS);
+  const [source, setSource] = useState<"live" | "fallback">("fallback");
+
+  useEffect(() => {
+    let active = true;
+    apiFetch<{ models: GroqModelItem[]; source: "live" | "fallback" }>(
+      "/api/chat/models",
+      {},
+      "club_demo_egypt",
+      role
+    )
+      .then((res) => {
+        if (!active) return;
+        if (Array.isArray(res.models) && res.models.length > 0) {
+          setModels(res.models);
+          setSource(res.source === "live" ? "live" : "fallback");
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [role]);
+
+  return { models, source };
+}
 
 export async function apiFetch<T>(
   path: string,
@@ -40,6 +84,11 @@ export function trackCropUrl(matchId: string, trackId: number): string {
 
 export function matchVideoUrl(matchId: string): string {
   return `${API_BASE}/api/matches/${encodeURIComponent(matchId)}/video`;
+}
+
+export function playerPhotoUrl(matchId: string, trackId: number, cacheBust?: string | number): string {
+  const base = `${API_BASE}/api/matches/${encodeURIComponent(matchId)}/players/${trackId}/photo`;
+  return cacheBust !== undefined ? `${base}?v=${encodeURIComponent(String(cacheBust))}` : base;
 }
 
 export interface DetectionRow {
@@ -550,6 +599,9 @@ export interface BlueprintPassingArrow {
   kind?: "run" | "pass" | "press" | "freehand";
   color?: string;
   label_ar: string;
+  label_en?: string;
+  xpass_pct?: number;
+  obv_delta?: number;
 }
 
 export interface BlueprintCustomZone {
@@ -818,4 +870,83 @@ export interface MultiMatchTrendsPayload {
     recurring_vulnerabilities_ar: string[];
     coach_focus_points_ar: string[];
   }>;
+}
+
+export interface PlayerCardPercentiles {
+  spd: number | null;
+  dst: number | null;
+  wrk: number | null;
+  spr: number | null;
+  avg: number | null;
+  min: number | null;
+}
+
+export interface VerifiedClubRoster {
+  club_id: string;
+  name_ar: string;
+  name_en: string;
+  kit_hex: string;
+  season: string;
+  source: string;
+  verified_at: string;
+  is_tactical_template?: boolean;
+  players: Array<{
+    jersey_number: number;
+    name_ar: string;
+    name_en: string;
+    position: string;
+    is_starter?: boolean;
+  }>;
+}
+
+export interface VerifiedRostersResponse {
+  schema_version: string;
+  updated_at: string;
+  clubs: Record<string, VerifiedClubRoster>;
+}
+
+export interface PlayerCardSummary {
+  match_id: string;
+  track_id: number;
+  base_track_id: number;
+  team: "team_a" | "team_b";
+  team_name_ar: string;
+  team_name_en: string;
+  kit_hex: string;
+  role: string;
+  jersey_number: number | null;
+  verified_name: string | null;
+  verified: boolean;
+  identity_source?: "qa_verified" | "ocr_verified" | "gk_role_match" | "roster_spatial" | "unverified";
+  display_label: string;
+  display_label_en?: string;
+  position_label: { code: string; ar: string; en: string };
+  photo_url: string;
+  photo_source: "upload" | "video";
+  crop_is_low_res?: boolean;
+  peak_frame_id?: number;
+  first_frame: number;
+  first_time_s: number;
+  merged_track_ids?: number[];
+  kind: "measured";
+  tier: "gold" | "silver" | "bronze";
+  observed_s: number;
+  observed_min: number;
+  distance_m: number | null;
+  top_speed_kmh: number | null;
+  avg_speed_kmh: number | null;
+  work_rate_m_per_min: number | null;
+  sprints: number | null;
+  avg_position: { x_m: number; y_m: number } | null;
+  percentiles: PlayerCardPercentiles;
+  quality: {
+    calibrated_ratio: number;
+    samples: number;
+    low_sample: boolean;
+  };
+  reason: string | null;
+}
+
+export interface PlayerCardPayload extends PlayerCardSummary {
+  heatmap: number[][] | null;
 }

@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Bookmark, Crosshair, FileText, Film, Play, RotateCcw, ShieldAlert, Trash2, Upload, UserCheck, X } from "lucide-react";
 import { EChartsPlayerRadar, EChartsVaepScatter } from "@/components/TacticalCharts";
+import EstimateBadge from "@/components/ui/EstimateBadge";
 import HeadToHeadComparisonPanel from "@/components/HeadToHeadComparisonPanel";
 import {
   API_BASE,
@@ -94,7 +95,7 @@ export default function FairScoutingScreen({ lang, matchId, role, onJumpToClip }
   const isAr = lang === "ar";
   const isReadOnly = role === "board" || role === "player";
 
-  const [subTab, setSubTab] = useState<SubTab>("benchmark");
+  const [subTab, setSubTab] = useState<SubTab>("video_tracks");
   const [showAllTracks, setShowAllTracks] = useState(false);
   const [data, setData] = useState<ScoutingResponse | null>(null);
   const [selectedBenchIds, setSelectedBenchIds] = useState<string[]>([]);
@@ -537,9 +538,15 @@ export default function FairScoutingScreen({ lang, matchId, role, onJumpToClip }
                     <tr className="border-b border-white/[0.08] text-slate-400">
                       <th className="py-3 px-4">{isAr ? "اللاعب" : "Player"}</th>
                       <th className="py-3 px-2">{isAr ? "الدقائق" : "Min"}</th>
-                      <th className="py-3 px-2">{isAr ? "التقييم" : "Rating"}</th>
-                      <th className="py-3 px-2">VAEP/90</th>
-                      <th className="py-3 px-2">xT/90</th>
+                      <th className="py-3 px-2">
+                        <span className="inline-flex items-center gap-1">{isAr ? "التقييم" : "Rating"} <EstimateBadge lang={lang} /></span>
+                      </th>
+                      <th className="py-3 px-2">
+                        <span className="inline-flex items-center gap-1">VAEP/90 <EstimateBadge lang={lang} /></span>
+                      </th>
+                      <th className="py-3 px-2">
+                        <span className="inline-flex items-center gap-1">xT/90 <EstimateBadge lang={lang} /></span>
+                      </th>
                       <th className="py-3 px-2">PAdj Def</th>
                       <th className="py-3 px-2">HIR</th>
                       <th className="py-3 px-2">{isAr ? "جاهزية الإيقاع" : "Pace Fit"}</th>

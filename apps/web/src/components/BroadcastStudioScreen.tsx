@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Hls from "hls.js";
 import {
   ArrowUpRight,
@@ -29,10 +30,20 @@ import {
   ZoomIn,
 } from "lucide-react";
 import { EChartsMatchMomentum } from "@/components/TacticalCharts";
-import FormationBlueprintBoard from "@/components/FormationBlueprintBoard";
+import EstimateBadge from "@/components/ui/EstimateBadge";
 import GlossaryTooltip from "@/components/GlossaryTooltip";
 import TaggingPlaylistPanel from "@/components/TaggingPlaylistPanel";
 import TacticalTwinCanvas, { SetPieceSimState } from "@/components/TacticalTwinCanvas";
+import PlayerCard from "@/components/PlayerCard";
+
+const FormationBlueprintBoard = dynamic(() => import("@/components/FormationBlueprintBoard"), {
+  ssr: false,
+  loading: () => (
+    <div className="studio-panel p-8 text-center text-xs text-slate-400 animate-pulse">
+      Loading Tactical Board...
+    </div>
+  ),
+});
 import {
   API_BASE,
   apiFetch,
@@ -43,13 +54,13 @@ import {
   MomentsAndBriefPayload,
   MomentStatePayload,
   OpponentDossierPayload,
+  PlayerCardSummary,
   PositioningAnalysisPayload,
   TimelineBall,
   TimelineFrame,
   TimelinePayload,
   TimelineTrack,
   UserRole,
-  WorkspaceMode,
 } from "@/lib/api";
 import {
   draw3DCurvedArrow,
@@ -69,15 +80,17 @@ interface Props {
   lang: "ar" | "en";
   matchId: string;
   role: UserRole;
-  workspaceMode?: WorkspaceMode;
   externalBlueprint?: FormationBlueprintPayload | null;
   jumpToTimeSec?: number | null;
   onJumpHandled?: () => void;
+  pinnedCard?: PlayerCardSummary | null;
+  onClearPinnedCard?: () => void;
 }
 
 type ToolMode = "spotlight" | "chain" | "arrow" | "tape" | "zone" | "ghost" | "zoom";
 type ArDensity = "focus" | "all" | "clean";
 type StudioPreset = "video_twin" | "dissect" | "tactics_board" | "locker_room" | "split";
+type AnalysisTab = "moments" | "state" | "metrics" | "tags" | "board";
 
 interface TelestratorDrawing {
   kind: "arrow" | "tape" | "zone";
@@ -474,16 +487,17 @@ export default function BroadcastStudioScreen({
   lang,
   matchId,
   role,
-  workspaceMode = "analyst",
   externalBlueprint = null,
   jumpToTimeSec = null,
   onJumpHandled,
+  pinnedCard = null,
+  onClearPinnedCard,
 }: Props) {
   const isAr = lang === "ar";
   const isReadOnly = role === "board" || role === "player";
-  const [studioPreset, setStudioPreset] = useState<StudioPreset>(
-    workspaceMode === "coach" ? "dissect" : "video_twin"
-  );
+  const [studioPreset, setStudioPreset] = useState<StudioPreset>("video_twin");
+  const [analysisTab, setAnalysisTab] = useState<AnalysisTab>("moments");
+  const [boardEverOpened, setBoardEverOpened] = useState<boolean>(false);
   const [pinnedZoom, setPinnedZoom] = useState<{ vx: number; vy: number } | null>(null);
   const [quickTagSignal, setQuickTagSignal] = useState<number>(0);
   const [presentQueue, setPresentQueue] = useState<ClipTagItem[] | null>(null);
@@ -730,14 +744,10 @@ export default function BroadcastStudioScreen({
     isAr,
   };
 
-  // Switch preset cleanly when Workspace Mode or external AI blueprint changes
-  useEffect(() => {
-    if (workspaceMode === "coach") setStudioPreset("dissect");
-  }, [workspaceMode]);
-
   useEffect(() => {
     if (externalBlueprint) {
-      setStudioPreset((cur) => (cur === "split" ? "split" : "tactics_board"));
+      setBoardEverOpened(true);
+      setAnalysisTab("board");
     }
   }, [externalBlueprint]);
 
@@ -1920,7 +1930,7 @@ export default function BroadcastStudioScreen({
             <h1 className="text-lg font-bold text-white">
               {data
                 ? isAr ? data.analysis_title_ar : data.analysis_title_en
-                : isAr ? "استوديو البث التكتيكي 60FPS" : "60FPS Broadcast Tactical Studio"}
+                : isAr ? "استوديو البث التكتيكي" : "Broadcast Tactical Studio"}
             </h1>
             {timelineMeta.tEnd > timelineMeta.tStart && (
               <span
@@ -1942,15 +1952,15 @@ export default function BroadcastStudioScreen({
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
             {isAr
-              ? "ملاحظة: المباريات المدمجة هي نماذج تجريبية لاستعراض الأدوات — اضغط «+ ارفع فيديو مباراتك الخاصة» في الشريط العلوي لتحليل أي فيديو أو رابط خاص بك."
-              : "Note: Pre-loaded matches are reference demos — click '+ Upload Your Match Video' in the top bar to analyze your own match video or URL."}
+              ? "اختر «مباراة جديدة» من الشريط العلوي لتحليل أي فيديو أو رابط خاص بك."
+              : "Click 'New Match' in the top bar to analyze your own match video or URL."}
           </p>
         </div>
 
         <div className="flex items-center gap-1.5 bg-[#111827] border border-white/[0.08] rounded-xl p-1 text-xs">
           {(
             [
-              { id: "focus" as ArDensity, ar: "بث مركّز (أنيق)", en: "Focus Broadcast" },
+              { id: "focus" as ArDensity, ar: "بث مركّز", en: "Focus" },
               { id: "all" as ArDensity, ar: "كامل الطبقات", en: "All Layers" },
               { id: "clean" as ArDensity, ar: "فيديو صافي", en: "Clean Video" },
             ]
@@ -1969,34 +1979,8 @@ export default function BroadcastStudioScreen({
         </div>
       </div>
 
-      {/* V8.3 Panel Presets Bar (Metrica Nexus style — zero vertical clutter!) */}
-      <div className="flex flex-wrap items-center gap-1.5 p-1.5 rounded-2xl bg-[#0C1220] border border-white/[0.09] text-xs">
-        {(
-          [
-            { id: "video_twin" as StudioPreset, ar: "المشاهدة والرسم (فيديو + 2D/3D)", en: "Video & 2D/3D Twin" },
-            { id: "dissect" as StudioPreset, ar: "التشريح التكتيكي (لحظة + فعل/لم يفعل)", en: "Moment Dissection" },
-            { id: "tactics_board" as StudioPreset, ar: "السبورتان التكتيكيتان (فريقي | الخصم)", en: "Dual Tactical Boards" },
-            { id: "locker_room" as StudioPreset, ar: "التكويد وقائمة غرفة الملابس", en: "Tagging & Locker-Room" },
-            { id: "split" as StudioPreset, ar: "عرض مقسم (فيديو + سبورة معاً)", en: "Split View (Video + Board)" },
-          ]
-        ).map((pr) => (
-          <button
-            key={pr.id}
-            type="button"
-            onClick={() => setStudioPreset(pr.id)}
-            className={`px-3 py-2 rounded-xl font-bold transition whitespace-nowrap ${
-              studioPreset === pr.id
-                ? "bg-emerald-500 text-slate-950 shadow-md shadow-emerald-950/60"
-                : "text-slate-300 hover:text-white hover:bg-white/[0.05]"
-            }`}
-          >
-            {isAr ? pr.ar : pr.en}
-          </button>
-        ))}
-      </div>
-
-      {/* Main 12-Col Broadcast Studio Grid (kept mounted when hidden so video state stays warm!) */}
-      <div className={`${studioPreset === "tactics_board" ? "hidden" : "grid"} grid-cols-1 xl:grid-cols-12 gap-5 items-start`}>
+      {/* Main 12-Col Broadcast Studio Grid */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
         {/* Left 70%: Video AR Canvas + Docked Broadcast Telestrator Bar (no video obstruction!) */}
         <div className="xl:col-span-8 studio-panel p-3 space-y-3">
           <div className="relative rounded-lg overflow-hidden bg-black border border-white/[0.08]">
@@ -2018,6 +2002,23 @@ export default function BroadcastStudioScreen({
                   : "cursor-crosshair"
               }`}
             />
+            {pinnedCard && (
+              <div className="absolute top-3 end-3 z-20 flex flex-col items-end gap-1 pointer-events-auto">
+                {onClearPinnedCard && (
+                  <button
+                    type="button"
+                    aria-label={isAr ? "إزالة الكارت المثبت" : "Unpin player card"}
+                    onClick={onClearPinnedCard}
+                    className="w-6 h-6 rounded-full bg-slate-950/90 hover:bg-rose-500 border border-white/25 text-white flex items-center justify-center shadow-lg transition"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <div className="drop-shadow-[0_10px_24px_rgba(0,0,0,0.85)]">
+                  <PlayerCard card={pinnedCard} lang={lang} size="mini" />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Docked SkyPad Broadcast Studio Bar (strictly below video frame so players stay 100% visible) */}
@@ -2191,7 +2192,7 @@ export default function BroadcastStudioScreen({
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition whitespace-nowrap"
                 >
                   {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                  {isPlaying ? (isAr ? "إيقاف" : "Pause") : isAr ? "تشغيل 60FPS" : "Play 60FPS"}
+                  {isPlaying ? (isAr ? "إيقاف" : "Pause") : isAr ? "تشغيل المقطع" : "Play Clip"}
                 </button>
                 <button
                   type="button"
@@ -2400,14 +2401,17 @@ export default function BroadcastStudioScreen({
 
             <div className="grid grid-cols-2 gap-2.5 text-xs tabular-nums">
               <div className="bg-[#090D16] border border-white/[0.06] rounded-lg p-2.5">
-                <div className="text-[11px] text-slate-400">
-                  {isPlaying
-                    ? isAr
-                      ? "السيطرة الهجومية"
-                      : "Zone Control"
-                    : isAr
-                    ? "إزاحة اللاعب (فريقي / الخصم)"
-                    : "Ghost Player Offset (Both Teams)"}
+                <div className="text-[11px] text-slate-400 flex items-center justify-between gap-1">
+                  <span>
+                    {isPlaying
+                      ? isAr
+                        ? "السيطرة الهجومية"
+                        : "Zone Control"
+                      : isAr
+                      ? "إزاحة اللاعب (فريقي / الخصم)"
+                      : "Ghost Player Offset (Both Teams)"}
+                  </span>
+                  {isPlaying && <EstimateBadge lang={lang} />}
                 </div>
                 <div dir="ltr" className="font-bold text-emerald-400 mt-0.5 inline-block">
                   {isPlaying
@@ -2416,7 +2420,7 @@ export default function BroadcastStudioScreen({
                 </div>
               </div>
               <div className="bg-[#090D16] border border-white/[0.06] rounded-lg p-2.5">
-                <div className="text-[11px] text-slate-400">
+                <div className="text-[11px] text-slate-400 flex items-center justify-between gap-1">
                   <GlossaryTooltip term="xg" lang={lang}>
                     <span>
                       {isAr ? (
@@ -2428,6 +2432,7 @@ export default function BroadcastStudioScreen({
                       )}
                     </span>
                   </GlossaryTooltip>
+                  <EstimateBadge lang={lang} />
                 </div>
                 <div dir="ltr" className="font-bold text-white mt-0.5 inline-block">
                   {isCloseUpUi
@@ -2471,7 +2476,10 @@ export default function BroadcastStudioScreen({
             {setPieceSim ? (
               <div className="grid grid-cols-2 gap-2 tabular-nums">
                 <div className="bg-[#090D16] border border-white/[0.06] rounded-lg p-2">
-                  <div className="text-[11px] text-slate-400">{isAr ? "احتمال الهدف (أساسي ← محسّن)" : "Goal Prob (Base → Opt)"}</div>
+                  <div className="text-[11px] text-slate-400 flex items-center justify-between gap-1">
+                    <span>{isAr ? "احتمال الهدف (أساسي ← محسّن)" : "Goal Prob (Base → Opt)"}</span>
+                    <EstimateBadge lang={lang} />
+                  </div>
                   <div dir="ltr" className="font-bold text-emerald-400 mt-0.5 inline-block">
                     {`${setPieceSim.baseline_goal_prob_pct}% → ${setPieceSim.optimized_goal_prob_pct}% (+${setPieceSim.uplift_pct_points}%)`}
                   </div>
@@ -2498,15 +2506,49 @@ export default function BroadcastStudioScreen({
         </div>
       </div>
 
-      {/* Section Below Studio: Oracle Match Momentum + UEFA 4-Moment Events + Grounded Coach Brief & Playbook */}
-      {(studioPreset === "video_twin" || studioPreset === "dissect") && (
+      {/* Segmented Analysis Tabs Bar (Replaces stacked vertical scroll) */}
+      <div
+        role="tablist"
+        aria-label={isAr ? "تبويبات التحليل" : "Analysis sections"}
+        className="flex flex-wrap items-center gap-1.5 p-1.5 rounded-2xl bg-[#0C1220] border border-white/[0.09] text-xs"
+      >
+        {(
+          [
+            { id: "moments" as AnalysisTab, ar: "اللحظات والموجز", en: "Moments & Brief" },
+            { id: "state" as AnalysisTab, ar: "تشريح الفريقين", en: "Team State" },
+            { id: "metrics" as AnalysisTab, ar: "مقاييس OBV و xPass", en: "OBV & xPass" },
+            { id: "tags" as AnalysisTab, ar: "التكويد والقوائم", en: "Tags & Playlists" },
+            { id: "board" as AnalysisTab, ar: "مرسم الخطط", en: "Tactical Board" },
+          ]
+        ).map((tItem) => (
+          <button
+            key={tItem.id}
+            type="button"
+            role="tab"
+            aria-selected={analysisTab === tItem.id}
+            onClick={() => {
+              setAnalysisTab(tItem.id);
+              if (tItem.id === "board") setBoardEverOpened(true);
+            }}
+            className={`px-3.5 py-2 rounded-xl font-bold transition whitespace-nowrap ${
+              analysisTab === tItem.id
+                ? "bg-emerald-500 text-slate-950 shadow-md shadow-emerald-950/60"
+                : "text-slate-300 hover:text-white hover:bg-white/[0.05]"
+            }`}
+          >
+            {isAr ? tItem.ar : tItem.en}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab 1: Match Momentum + Moments + Coach Brief & Playbook */}
+      {analysisTab === "moments" && (
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
-        {/* Interactive Oracle Momentum & Clickable UEFA 4-Moment Strip */}
         <div className="xl:col-span-7 studio-panel p-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
             <div>
               <h2 className="text-sm font-bold text-white">
-                {isAr ? "زخم المباراة والأحداث المكتشفة (Oracle Momentum + UEFA 4-Moments)" : "Oracle Match Momentum & Detected Moments"}
+                {isAr ? "زخم المباراة والأحداث المكتشفة" : "Match Momentum & Detected Moments"}
               </h2>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 {isAr ? "اضغط على أي شريط زخم أو لحظة للقفز الفوري للفريم داخل استوديو البث." : "Click any momentum bar or moment pill to jump straight to that timestamp."}
@@ -2525,12 +2567,14 @@ export default function BroadcastStudioScreen({
             )}
           </div>
 
-          {/* Interactive Apache ECharts Oracle Match Momentum (Click to Seek!) */}
           {timelineMeta.frames.length > 0 && (
             <div dir="ltr" className="bg-[#090D16] border border-white/[0.06] rounded-lg p-2.5">
               <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
                 <span>{timelineMeta.teamAName}</span>
-                <span>{isAr ? "مخطط زخم المباراة التفاعلي (Apache ECharts)" : "Interactive Oracle Momentum (Apache ECharts)"}</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span>{isAr ? "مخطط زخم المباراة التفاعلي" : "Interactive Match Momentum"}</span>
+                  <EstimateBadge lang={lang} />
+                </span>
                 <span>{timelineMeta.teamBName}</span>
               </div>
               <EChartsMatchMomentum
@@ -2600,7 +2644,7 @@ export default function BroadcastStudioScreen({
           {momentsBrief && momentsBrief.coach_brief.length > 0 && (
             <div className="space-y-2">
               <div className="font-bold text-white text-sm">
-                {isAr ? "ملخص ما بين الشوطين الموثّق (Grounded Coach Brief)" : "Grounded Half-Time Coach Brief"}
+                {isAr ? "ملخص ما بين الشوطين الموثّق" : "Match Half-Time Coach Brief"}
               </div>
               {momentsBrief.coach_brief.map((b) => (
                 <div key={b.id} className="bg-[#090D16] border border-white/[0.06] rounded-lg p-2.5">
@@ -2637,8 +2681,8 @@ export default function BroadcastStudioScreen({
       </div>
       )}
 
-      {/* PDF Pages 25-26: Two-Team Live Moment State Analyzer (Did / Did Not / Where & Why for BOTH Teams simultaneously!) */}
-      {momentState && (studioPreset === "dissect" || studioPreset === "video_twin") && (
+      {/* Tab 2: Two-Team Live Moment State Analyzer */}
+      {momentState && analysisTab === "state" && (
         <div className="studio-panel p-5 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -2646,14 +2690,14 @@ export default function BroadcastStudioScreen({
                 <Target className="w-4 h-4 text-emerald-400" />
                 <h2 className="text-sm font-bold text-white">
                   {isAr
-                    ? `تشريح الحالة التكتيكية للفريقين معاً (${momentState.team_a_name_ar} × ${momentState.team_b_name_ar} — عمل إيه / معملش إيه / غلط فين وليه)`
+                    ? `تشريح الحالة التكتيكية للفريقين معاً (${momentState.team_a_name_ar} × ${momentState.team_b_name_ar})`
                     : `Two-Team Live Moment State Analyzer (${momentState.team_a_name} vs ${momentState.team_b_name})`}
                 </h2>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
                 {isAr
-                  ? `تحليل متزامن للاعبي الفريقين معاً عند الثانية ${momentState.moment_summary.time_s}s (الفريم #${momentState.moment_summary.frame_id}) — اختر أي لاعب من الفريق الأول أو الفريق الثاني لتشريح موقفه التكتيكي.`
-                  : `Simultaneous analysis of both teams at t=${momentState.moment_summary.time_s}s — click any player from either team to inspect their tactical state.`}
+                  ? `تحليل متزامن للاعبي الفريقين عند الثانية ${momentState.moment_summary.time_s}s (الفريم #${momentState.moment_summary.frame_id}).`
+                  : `Simultaneous analysis of both teams at t=${momentState.moment_summary.time_s}s — click any player to inspect.`}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -2662,10 +2706,13 @@ export default function BroadcastStudioScreen({
                   ? `التشكيل الحي: ${momentState.moment_summary.attacking_team_name} (${momentState.moment_summary.attacking_formation_live}) × ${momentState.moment_summary.defending_team_name} (${momentState.moment_summary.defending_formation_live})`
                   : `Live Shape: ${momentState.moment_summary.attacking_formation_live} vs ${momentState.moment_summary.defending_formation_live}`}
               </span>
-              <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 font-bold tabular-nums">
-                {isAr
-                  ? `خفض الخطر عند التصحيح: -${momentState.moment_summary.risk_reduction_if_corrected_pct}% (xG: ${momentState.moment_summary.shot_xg_before} ← ${momentState.moment_summary.shot_xg_after_correction})`
-                  : `Correction Impact: -${momentState.moment_summary.risk_reduction_if_corrected_pct}% Risk`}
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 font-bold tabular-nums">
+                <span>
+                  {isAr
+                    ? `خفض الخطر عند التصحيح: -${momentState.moment_summary.risk_reduction_if_corrected_pct}% (xG: ${momentState.moment_summary.shot_xg_before} ← ${momentState.moment_summary.shot_xg_after_correction})`
+                    : `Correction Impact: -${momentState.moment_summary.risk_reduction_if_corrected_pct}% Risk`}
+                </span>
+                <EstimateBadge lang={lang} />
               </span>
             </div>
           </div>
@@ -2778,7 +2825,8 @@ export default function BroadcastStudioScreen({
                               setDrillSeedNote(
                                 `تمرين تصحيح خطأ ${activePs.player_label}: ${activePs.where_and_why_ar}`
                               );
-                              setStudioPreset("tactics_board");
+                              setBoardEverOpened(true);
+                              setAnalysisTab("board");
                             }}
                             className="px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold whitespace-nowrap"
                           >
@@ -2800,21 +2848,22 @@ export default function BroadcastStudioScreen({
         </div>
       )}
 
-      {/* V9.5 Open-Formula OBV, xPass, CxP & Defensive Responsibility Panel (100% Free Math-First!) */}
-      {advMetrics && (studioPreset === "dissect" || studioPreset === "video_twin") && (
+      {/* Tab 3: OBV, xPass, CxP & Defensive Responsibility */}
+      {advMetrics && analysisTab === "metrics" && (
         <div className="studio-panel p-4 space-y-3 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="font-extrabold text-sm text-white flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-emerald-400" />
               <span>
                 {isAr
-                  ? "نماذج القيمة والتمرير والمسؤولية الدفاعية (OBV • xPass • Defensive Responsibility)"
-                  : "Open-Formula OBV, Expected Pass (xPass) & Defensive Responsibility"}
+                  ? "نماذج القيمة والتمرير والمسؤولية الدفاعية (OBV • xPass)"
+                  : "OBV, Expected Pass (xPass) & Defensive Responsibility"}
               </span>
+              <EstimateBadge lang={lang} />
             </div>
             <span className="text-[10.5px] px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 tabular-nums">
               {isAr
-                ? `${advMetrics.passes_detected} تمريرة • ${advMetrics.carries_detected} حمل كرة مقاس هندسياً`
+                ? `${advMetrics.passes_detected} تمريرة • ${advMetrics.carries_detected} حمل كرة`
                 : `${advMetrics.passes_detected} Passes • ${advMetrics.carries_detected} Carries`}
             </span>
           </div>
@@ -2824,8 +2873,9 @@ export default function BroadcastStudioScreen({
               <div key={tk} className="p-3 rounded-xl bg-[#090D16] border border-white/[0.08] space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-extrabold text-white">{ts.team_name}</span>
-                  <span dir="ltr" className={`font-black tabular-nums ${ts.net_obv >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                    OBV {ts.net_obv >= 0 ? "+" : ""}{ts.net_obv.toFixed(3)}
+                  <span dir="ltr" className={`inline-flex items-center gap-1.5 font-black tabular-nums ${ts.net_obv >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                    <EstimateBadge lang={lang} />
+                    <span>OBV {ts.net_obv >= 0 ? "+" : ""}{ts.net_obv.toFixed(3)}</span>
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-1.5 text-center tabular-nums text-[11px]">
@@ -2834,11 +2884,17 @@ export default function BroadcastStudioScreen({
                     <div className="font-bold text-white">{ts.pass_accuracy_pct}%</div>
                   </div>
                   <div className="p-1.5 rounded bg-[#111827]">
-                    <div className="text-[10px] text-slate-400">xPass %</div>
+                    <div className="text-[10px] text-slate-400 flex items-center justify-center gap-1">
+                      <span>xPass %</span>
+                      <EstimateBadge lang={lang} />
+                    </div>
                     <div className="font-bold text-sky-300">{ts.expected_pass_pct}%</div>
                   </div>
                   <div className="p-1.5 rounded bg-[#111827]">
-                    <div className="text-[10px] text-slate-400">{isAr ? "فوق المتوقع CxP" : "CxP"}</div>
+                    <div className="text-[10px] text-slate-400 flex items-center justify-center gap-1">
+                      <span>{isAr ? "CxP" : "CxP"}</span>
+                      <EstimateBadge lang={lang} />
+                    </div>
                     <div className={`font-bold ${ts.cxp_above_expected_pct >= 0 ? "text-emerald-300" : "text-amber-300"}`}>
                       {ts.cxp_above_expected_pct >= 0 ? "+" : ""}{ts.cxp_above_expected_pct}%
                     </div>
@@ -2849,8 +2905,11 @@ export default function BroadcastStudioScreen({
           </div>
 
           {advMetrics.defensive_responsibility_alerts.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 pt-1 border-t border-white/[0.06] text-[11px]">
-              <span className="text-rose-300 font-bold">{isAr ? "تنبيهات المسؤولية الدفاعية:" : "Defensive Responsibility:"}</span>
+            <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-white/[0.06] text-[11px]">
+              <span className="text-rose-300 font-bold inline-flex items-center gap-1">
+                <span>{isAr ? "تنبيهات المسؤولية الدفاعية:" : "Defensive Responsibility:"}</span>
+                <EstimateBadge lang={lang} />
+              </span>
               {advMetrics.defensive_responsibility_alerts.slice(0, 3).map((al, idx) => (
                 <button
                   key={idx}
@@ -2858,7 +2917,7 @@ export default function BroadcastStudioScreen({
                   onClick={() => seekToTime(al.time_s)}
                   className="px-2 py-0.5 rounded bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-200"
                 >
-                  ⏱ {al.time_s}s • {al.defender_label} ({al.responsibility_pct}%) — {isAr ? al.note_ar : al.note_en}
+                  {al.time_s}s • {al.defender_label} ({al.responsibility_pct}%) — {isAr ? al.note_ar : al.note_en}
                 </button>
               ))}
             </div>
@@ -2866,8 +2925,8 @@ export default function BroadcastStudioScreen({
         </div>
       )}
 
-      {/* V8.4 Tagging Panel, Locker-Room Playlists, Voiceover & Sportscode XML */}
-      {(studioPreset === "locker_room" || studioPreset === "video_twin" || studioPreset === "dissect") && (
+      {/* Tab 4: Tagging Panel, Locker-Room Playlists, Voiceover & Sportscode XML */}
+      {analysisTab === "tags" && (
         <TaggingPlaylistPanel
           lang={lang}
           matchId={matchId}
@@ -2885,22 +2944,23 @@ export default function BroadcastStudioScreen({
           onStartPresentMode={(queue) => {
             setPresentQueue(queue);
             setPresentIdx(0);
-            setStudioPreset("video_twin");
           }}
         />
       )}
 
-      {/* Interactive 22-Player Freeform Animated Tactical Board & Training Lab (V8.5) */}
-      {(studioPreset === "tactics_board" || studioPreset === "split") && (
-        <FormationBlueprintBoard
-          lang={lang}
-          matchId={matchId}
-          role={role}
-          defaultFormation={blueprintFormation}
-          externalBlueprint={externalBlueprint}
-          initialDrillNote={drillSeedNote}
-          onAttachBoardSlide={(png) => setBoardSlidePng(png)}
-        />
+      {/* Tab 5: Interactive 22-Player Tactical Board (kept mounted once opened or blueprint applied) */}
+      {(boardEverOpened || analysisTab === "board" || Boolean(externalBlueprint)) && (
+        <div className={analysisTab === "board" ? "block" : "hidden"}>
+          <FormationBlueprintBoard
+            lang={lang}
+            matchId={matchId}
+            role={role}
+            defaultFormation={blueprintFormation}
+            externalBlueprint={externalBlueprint}
+            initialDrillNote={drillSeedNote}
+            onAttachBoardSlide={(png) => setBoardSlidePng(png)}
+          />
+        </div>
       )}
     </div>
   );

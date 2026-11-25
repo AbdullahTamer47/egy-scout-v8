@@ -414,13 +414,7 @@ export default function AccuracyProofScreen({ lang, matchId, role }: Props) {
                 )}
               </span>
               <span dir={isAr ? "rtl" : "ltr"} className="text-emerald-400 font-semibold">
-                {isAr ? (
-                  <>
-                    يمين — بعد: درع <bdi dir="ltr">V8</bdi> المعزول
-                  </>
-                ) : (
-                  "AFTER: V8 Isolation Shield"
-                )}
+                {isAr ? "يمين — بعد: درع عزل الحكام الذكي" : "AFTER: Referee Isolation Shield"}
               </span>
             </div>
 
@@ -559,7 +553,7 @@ export default function AccuracyProofScreen({ lang, matchId, role }: Props) {
               {`${benchmark.max_observed_speed_kmh} / ${benchmark.max_speed_cap_kmh} km/h`}
             </div>
             <div className="text-[11px] text-emerald-400 mt-0.5">
-              {benchmark.speed_cap_compliant ? (isAr ? "مطابق 100% للفيزياء" : "100% Compliant") : "Capped"}
+              {benchmark.speed_cap_compliant ? (isAr ? "ضمن الحد الفيزيائي (≤36 كم/س)" : "Physics Compliant") : "Capped"}
             </div>
           </div>
           <div className="studio-panel p-4">

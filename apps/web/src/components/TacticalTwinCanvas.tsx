@@ -1,11 +1,20 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { Box, Compass, Eye, RotateCcw, Zap } from "lucide-react";
-import ThreePitchTwin from "@/components/ThreePitchTwin";
 import GlossaryTooltip from "@/components/GlossaryTooltip";
 import { MomentStatePayload, TimelineBall } from "@/lib/api";
 import { hexToRgba, RenderPlayer } from "@/lib/broadcastRenderer";
+
+const ThreePitchTwin = dynamic(() => import("@/components/ThreePitchTwin"), {
+  ssr: false,
+  loading: () => (
+    <div className="h-[260px] rounded-lg bg-[#090D16] border border-white/[0.06] flex items-center justify-center text-xs text-slate-400">
+      Loading 3D Pitch...
+    </div>
+  ),
+});
 
 export type TwinViewMode = "2d" | "3d" | "pov";
 

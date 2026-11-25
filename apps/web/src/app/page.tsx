@@ -1,107 +1,121 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   Activity,
+  AlertTriangle,
   Bot,
-  Compass,
+  ChevronDown,
   Eye,
   FileText,
   Film,
   Globe,
   Keyboard,
-  PlusCircle,
+  MoreHorizontal,
+  Plus,
+  RefreshCw,
   Search,
   ShieldCheck,
   Sparkles,
+  Trophy,
   UploadCloud,
   Users,
   X,
 } from "lucide-react";
-import AccuracyProofScreen from "@/components/AccuracyProofScreen";
 import BroadcastStudioScreen from "@/components/BroadcastStudioScreen";
-import FairScoutingScreen from "@/components/FairScoutingScreen";
-import QuickAnalysisScreen from "@/components/QuickAnalysisScreen";
 import TacticalAIChatbot from "@/components/TacticalAIChatbot";
+import CompetitorBenchmarkModal from "@/components/CompetitorBenchmarkModal";
 import {
   API_BASE,
   apiFetch,
   FormationBlueprintPayload,
   MatchListItem,
+  PlayerCardSummary,
   UserRole,
-  WorkspaceMode,
 } from "@/lib/api";
 
-type TabKey = "accuracy" | "studio" | "scouting" | "quick";
+const PlayersScreen = dynamic(() => import("@/components/PlayersScreen"), {
+  ssr: false,
+  loading: () => (
+    <div className="studio-panel p-8 text-center text-xs text-slate-400 animate-pulse">
+      Loading Players...
+    </div>
+  ),
+});
 
-const FALLBACK_MATCHES: MatchListItem[] = [
-  {
-    match_id: "m2_ahly_enppi",
-    team_a_name: "Al Ahly",
-    team_b_name: "ENPPI",
-    team_a_name_ar: "الأهلي",
-    team_b_name_ar: "إنبي",
-    title_ar: "الأهلي × إنبي (الدوري المصري)",
-    kit_colors: { team_a_hex: "#EF4444", team_b_hex: "#38BDF8" },
-    fps: 25,
-    has_video: true,
-    has_telemetry: true,
-  },
-  {
-    match_id: "m1_ahly_sekka",
-    team_a_name: "El Sekka",
-    team_b_name: "Al Ahly",
-    team_a_name_ar: "السكة الحديد",
-    team_b_name_ar: "الأهلي",
-    title_ar: "الأهلي × السكة الحديد (3-0)",
-    kit_colors: { team_a_hex: "#F59E0B", team_b_hex: "#EF4444" },
-    fps: 25,
-    has_video: true,
-    has_telemetry: true,
-  },
-  {
-    match_id: "m3_enppi_mokawloon",
-    team_a_name: "Al Mokawloon",
-    team_b_name: "ENPPI",
-    team_a_name_ar: "المقاولون العرب",
-    team_b_name_ar: "إنبي",
-    title_ar: "إنبي × المقاولون العرب (الدوري المصري)",
-    kit_colors: { team_a_hex: "#FACC15", team_b_hex: "#38BDF8" },
-    fps: 25,
-    has_video: true,
-    has_telemetry: true,
-  },
-];
+const QuickAnalysisScreen = dynamic(() => import("@/components/QuickAnalysisScreen"), {
+  ssr: false,
+  loading: () => (
+    <div className="studio-panel p-8 text-center text-xs text-slate-400 animate-pulse">
+      Loading Import Studio...
+    </div>
+  ),
+});
+
+const AccuracyProofScreen = dynamic(() => import("@/components/AccuracyProofScreen"), {
+  ssr: false,
+  loading: () => (
+    <div className="studio-panel p-8 text-center text-xs text-slate-400 animate-pulse">
+      Loading Identity QA...
+    </div>
+  ),
+});
+
+type TabKey = "studio" | "players" | "quick" | "accuracy";
 
 export default function HomePage() {
   const [lang, setLang] = useState<"ar" | "en">("ar");
   const [tab, setTab] = useState<TabKey>("studio");
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("analyst");
   const [matchId, setMatchId] = useState("m2_ahly_enppi");
-  const [matches, setMatches] = useState<MatchListItem[]>(FALLBACK_MATCHES);
+  const [matches, setMatches] = useState<MatchListItem[]>([]);
+  const [apiOffline, setApiOffline] = useState(false);
+  const [loadingMatches, setLoadingMatches] = useState(true);
   const [role, setRole] = useState<UserRole>("analyst");
   const [chatOpen, setChatOpen] = useState(false);
   const [aiBlueprint, setAiBlueprint] = useState<FormationBlueprintPayload | null>(null);
   const [jumpTimeSec, setJumpTimeSec] = useState<number | null>(null);
+  const [pinnedStudioCard, setPinnedStudioCard] = useState<PlayerCardSummary | null>(null);
+  const [benchmarkOpen, setBenchmarkOpen] = useState(false);
 
-  // V8.3 Command Palette (Ctrl+K) & Keyboard Cheatsheet (?)
+  const [moreOpen, setMoreOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [cmdQuery, setCmdQuery] = useState("");
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement | null>(null);
 
   const loadMatches = useCallback(() => {
+    setLoadingMatches(true);
     apiFetch<{ matches: MatchListItem[] }>("/api/matches", {}, "club_demo_egypt", role)
       .then((res) => {
-        if (res.matches?.length) setMatches(res.matches);
+        const list = res.matches || [];
+        setMatches(list);
+        setApiOffline(false);
+        if (list.length > 0) {
+          setMatchId((prev) => (list.some((m) => m.match_id === prev) ? prev : list[0].match_id));
+        }
       })
-      .catch(() => {});
+      .catch(() => {
+        setApiOffline(true);
+        setMatches([]);
+      })
+      .finally(() => setLoadingMatches(false));
   }, [role]);
 
   useEffect(() => {
     loadMatches();
   }, [loadMatches]);
 
-  // Global Keyboard Shortcuts: Ctrl+K (Command Palette), ? (Cheatsheet), Escape (Close modals)
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setMoreOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
@@ -115,6 +129,7 @@ export default function HomePage() {
       if (e.key === "Escape") {
         setCmdOpen(false);
         setShortcutsOpen(false);
+        setMoreOpen(false);
         return;
       }
       if (!isInput && e.key === "?") {
@@ -126,102 +141,70 @@ export default function HomePage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  const handleWorkspaceModeChange = (mode: WorkspaceMode) => {
-    setWorkspaceMode(mode);
-    if (mode === "coach") {
-      setTab("studio");
-    } else if (mode === "scout") {
-      setTab("scouting");
-    }
-  };
-
   const isAr = lang === "ar";
   const isReadOnly = role === "board" || role === "player";
 
-  const navItems: Array<{ id: TabKey; ar: string; en: string; icon: React.ReactNode; hideInCoach?: boolean }> = [
-    { id: "studio", ar: "استوديو البث والخطط", en: "Broadcast & Tactics", icon: <Film className="w-5 h-5" /> },
-    { id: "accuracy", ar: "الدقة وتأكيد الهوية", en: "Accuracy & QA", icon: <ShieldCheck className="w-5 h-5" />, hideInCoach: true },
-    { id: "scouting", ar: "الكشافة والمقارنات", en: "Scouting & H2H", icon: <Users className="w-5 h-5" /> },
-    { id: "quick", ar: "استيراد مباراة جديدة", en: "Import New Match", icon: <UploadCloud className="w-5 h-5" /> },
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = lang;
+      document.documentElement.dir = isAr ? "rtl" : "ltr";
+    }
+  }, [lang, isAr]);
+
+  const navItems: Array<{ id: TabKey; ar: string; en: string; icon: React.ReactNode }> = [
+    { id: "studio", ar: "الاستوديو", en: "Studio", icon: <Film className="w-5 h-5" /> },
+    { id: "players", ar: "اللاعبين", en: "Players", icon: <Users className="w-5 h-5" /> },
+    { id: "quick", ar: "استيراد مباراة", en: "Import", icon: <UploadCloud className="w-5 h-5" /> },
+    { id: "accuracy", ar: "مراجعة الهويات", en: "Identity QA", icon: <ShieldCheck className="w-5 h-5" /> },
   ];
 
-  const activeNavItems = navItems.filter((it) => !(workspaceMode === "coach" && it.hideInCoach));
+  const customMatches = matches.filter((m) => Boolean(m.is_custom || m.match_id.startsWith("custom_")));
+  const demoMatches = matches.filter((m) => !Boolean(m.is_custom || m.match_id.startsWith("custom_")));
+  const activeMatch = matches.find((m) => m.match_id === matchId);
 
-  // Command palette actions
   const cmdActions = [
-    { id: "go-studio", label: isAr ? "افتح استوديو البث والسبورة التكتيكية المزدوجة" : "Open Broadcast Studio & Dual Tactical Boards", run: () => setTab("studio") },
-    { id: "go-qa", label: isAr ? "افتح عزل الحكام وورقة تأكيد الهوية (QA)" : "Open Referee Isolation & Identity QA", run: () => setTab("accuracy") },
-    { id: "go-scout", label: isAr ? "افتح الكشافة والمقارنة وجهاً لوجه (H2H)" : "Open Fair Scouting & Head-to-Head", run: () => setTab("scouting") },
-    { id: "go-quick", label: isAr ? "ارفع فيديو مباراتك الخاصة (MP4 أو رابط YouTube / بث مباشر)" : "Upload Your Own Match Video (MP4 / YouTube / Live Stream)", run: () => setTab("quick") },
-    { id: "mode-coach", label: isAr ? "التبديل إلى وضع المدرب السريع (Coach Mode)" : "Switch to Coach Quick Mode", run: () => handleWorkspaceModeChange("coach") },
-    { id: "mode-analyst", label: isAr ? "التبديل إلى وضع المحلل الكامل (Analyst Pro)" : "Switch to Analyst Pro Mode", run: () => handleWorkspaceModeChange("analyst") },
-    { id: "mode-scout", label: isAr ? "التبديل إلى وضع الكشاف (Scout Mode)" : "Switch to Scout Mode", run: () => handleWorkspaceModeChange("scout") },
-    { id: "toggle-chat", label: isAr ? "فتح / إغلاق المساعد التكتيكي الذكي" : "Toggle AI Tactical Assistant", run: () => setChatOpen((v) => !v) },
-    { id: "shortcuts", label: isAr ? "عرض اختصارات الكيبورد الاحترافية" : "Show Pro Keyboard Shortcuts", run: () => setShortcutsOpen(true) },
+    { id: "go-studio", label: isAr ? "الانتقال إلى الاستوديو" : "Go to Studio", run: () => setTab("studio") },
+    { id: "go-players", label: isAr ? "الانتقال إلى كروت اللاعبين" : "Go to Player Cards", run: () => setTab("players") },
+    { id: "go-quick", label: isAr ? "استيراد مباراة أو رابط فيديو" : "Import Match Video / URL", run: () => setTab("quick") },
+    { id: "go-qa", label: isAr ? "مراجعة الهويات وعزل الحكام" : "Open Identity QA", run: () => setTab("accuracy") },
+    { id: "toggle-chat", label: isAr ? "فتح / إغلاق المساعد التكتيكي" : "Toggle AI Tactical Analyst", run: () => setChatOpen((v) => !v) },
+    { id: "benchmark", label: isAr ? "مقارنة مع المنصات العالمية" : "Compare vs Global Platforms", run: () => setBenchmarkOpen(true) },
+    { id: "shortcuts", label: isAr ? "عرض اختصارات الكيبورد" : "Show Keyboard Shortcuts", run: () => setShortcutsOpen(true) },
     ...matches.map((m) => ({
       id: `match-${m.match_id}`,
-      label: `${isAr ? "انتقل لمباراة:" : "Switch match:"} ${isAr ? m.title_ar || m.team_a_name : `${m.team_a_name} vs ${m.team_b_name}`}`,
+      label: `${isAr ? "مباراة:" : "Match:"} ${isAr ? m.title_ar || m.team_a_name : `${m.team_a_name} vs ${m.team_b_name}`}`,
       run: () => setMatchId(m.match_id),
     })),
   ].filter((a) => !cmdQuery.trim() || a.label.toLowerCase().includes(cmdQuery.toLowerCase()));
 
-  const onboardingStep = tab === "quick" ? 1 : tab === "accuracy" ? 2 : 3;
-
   return (
-    <div dir={isAr ? "rtl" : "ltr"} className="min-h-screen flex bg-[#090D16] text-slate-100">
-      {/* Slim Pro Analytics Sidebar */}
-      <aside className="w-16 md:w-56 shrink-0 bg-[#0C1220] border-e border-white/[0.08] flex flex-col justify-between py-4 px-2 md:px-3">
-        <div className="space-y-5">
+    <div dir={isAr ? "rtl" : "ltr"} className="min-h-screen flex bg-[#090D16] text-slate-100 overflow-x-hidden">
+      {/* Clean 4-Tab Pro Sidebar (Desktop/Tablet) */}
+      <aside className="hidden md:flex w-52 shrink-0 bg-[#0C1220] border-e border-white/[0.08] flex-col justify-between py-4 px-3">
+        <div className="space-y-6">
           <div className="flex items-center gap-2.5 px-2">
             <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
               <Activity className="w-4 h-4" />
             </div>
             <div className="hidden md:block leading-tight">
               <div className="text-sm font-extrabold tracking-tight text-white">EGY-SCOUT</div>
-              <div className="text-[11px] text-emerald-400 font-semibold">V9.5 Pro Studio</div>
+              <div className="text-[11px] text-emerald-400 font-semibold">Pro Studio</div>
             </div>
           </div>
 
-          {/* V8.3 Workspace Mode Switcher */}
-          <div className="hidden md:block space-y-1.5 px-1">
-            <div className="text-[10px] font-bold text-slate-500 px-1 uppercase tracking-wider">
-              {isAr ? "وضع العمل الذكي" : "Workspace Mode"}
-            </div>
-            <div className="grid grid-cols-3 gap-1 bg-[#090D16] p-1 rounded-lg border border-white/[0.08] text-[10.5px]">
-              {(
-                [
-                  { id: "coach", ar: "مدرب", en: "Coach" },
-                  { id: "analyst", ar: "محلل", en: "Pro" },
-                  { id: "scout", ar: "كشاف", en: "Scout" },
-                ] as Array<{ id: WorkspaceMode; ar: string; en: string }>
-              ).map((wm) => (
-                <button
-                  key={wm.id}
-                  type="button"
-                  onClick={() => handleWorkspaceModeChange(wm.id)}
-                  className={`py-1 rounded font-bold transition ${
-                    workspaceMode === wm.id
-                      ? "bg-emerald-500 text-slate-950"
-                      : "text-slate-400 hover:text-white"
-                  }`}
-                >
-                  {isAr ? wm.ar : wm.en}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <nav className="space-y-1">
-            {activeNavItems.map((item) => {
+          <nav className="space-y-1.5" aria-label={isAr ? "التنقل الرئيسي" : "Main navigation"}>
+            {navItems.map((item) => {
               const active = tab === item.id;
               return (
                 <button
                   key={item.id}
+                  type="button"
                   onClick={() => setTab(item.id)}
                   title={isAr ? item.ar : item.en}
-                  className={`w-full flex items-center gap-3 px-2.5 py-2.5 rounded-lg text-sm font-medium transition ${
+                  aria-current={active ? "page" : undefined}
+                  className={`w-full flex items-center gap-3 px-2.5 py-2.5 rounded-xl text-sm font-semibold transition ${
                     active
-                      ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                      ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/35"
                       : "text-slate-400 hover:text-slate-100 hover:bg-white/[0.04] border border-transparent"
                   }`}
                 >
@@ -241,234 +224,284 @@ export default function HomePage() {
           >
             <span className="flex items-center gap-1.5">
               <Search className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{isAr ? "بحث وأوامر سريعة" : "Quick Search"}</span>
+              <span>{isAr ? "بحث سريع" : "Quick Search"}</span>
             </span>
             <kbd dir="ltr" className="px-1.5 py-0.5 rounded bg-white/[0.07] text-[10px] font-mono">
               Ctrl+K
             </kbd>
           </button>
-          <button
-            type="button"
-            onClick={() => setShortcutsOpen(true)}
-            className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-[#090D16] hover:bg-white/[0.05] border border-white/[0.08] text-[11px] text-slate-400 hover:text-white transition"
-          >
-            <span className="flex items-center gap-1.5">
-              <Keyboard className="w-3.5 h-3.5 text-sky-400" />
-              <span>{isAr ? "اختصارات الكيبورد" : "Shortcuts"}</span>
-            </span>
-            <kbd className="px-1.5 py-0.5 rounded bg-white/[0.07] text-[10px] font-mono">?</kbd>
-          </button>
-          <div className="px-1 text-[10.5px] text-slate-500">
-            {isAr ? "بيانات موثّقة • حساب هندسي أولاً" : "Verified Data • Math-First Engine"}
-          </div>
         </div>
       </aside>
 
-      {/* Main Workspace Area */}
+      {/* Main Workspace */}
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* Top Header Bar + 3-Step Onboarding + Multi-Match Switcher */}
-        <header className="shrink-0 bg-[#0C1220]/95 backdrop-blur border-b border-white/[0.08] px-4 lg:px-6 py-2.5 space-y-2.5">
+        {/* Single Clean Header Row */}
+        <header className="shrink-0 bg-[#0C1220]/95 backdrop-blur border-b border-white/[0.08] px-4 lg:px-6 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            {/* V8.3 3-Step Match Workflow Bar */}
-            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            {/* Start: Match Selector + New Match CTA */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex items-center gap-2 bg-[#111827] border border-white/[0.1] rounded-xl px-3 py-1.5">
+                {activeMatch && (
+                  <span className="flex items-center -space-x-1 rtl:space-x-reverse shrink-0" aria-hidden="true">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full border border-white/50 inline-block"
+                      style={{ backgroundColor: activeMatch.kit_colors?.team_a_hex || "#EF4444" }}
+                    />
+                    <span
+                      className="w-2.5 h-2.5 rounded-full border border-white/50 inline-block"
+                      style={{ backgroundColor: activeMatch.kit_colors?.team_b_hex || "#38BDF8" }}
+                    />
+                  </span>
+                )}
+                <select
+                  value={matchId}
+                  onChange={(e) => setMatchId(e.target.value)}
+                  disabled={matches.length === 0}
+                  aria-label={isAr ? "اختيار المباراة" : "Select match"}
+                  className="bg-transparent text-xs font-bold text-slate-100 focus:outline-none max-w-[260px] truncate"
+                >
+                  {matches.length === 0 ? (
+                    <option value={matchId} className="bg-[#0C1220]">
+                      {loadingMatches ? (isAr ? "جاري تحميل المباريات..." : "Loading matches...") : isAr ? "لا توجد مباريات" : "No matches"}
+                    </option>
+                  ) : (
+                    <>
+                      {customMatches.length > 0 && (
+                        <optgroup label={isAr ? "مبارياتي" : "My Matches"} className="bg-[#0C1220] text-emerald-300">
+                          {customMatches.map((m) => (
+                            <option key={m.match_id} value={m.match_id} className="bg-[#0C1220] text-slate-100">
+                              {isAr ? m.title_ar || `${m.team_a_name} × ${m.team_b_name}` : `${m.team_a_name} × ${m.team_b_name}`}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {demoMatches.length > 0 && (
+                        <optgroup label={isAr ? "أمثلة تجريبية" : "Demo Samples"} className="bg-[#0C1220] text-slate-400">
+                          {demoMatches.map((m) => (
+                            <option key={m.match_id} value={m.match_id} className="bg-[#0C1220] text-slate-100">
+                              {isAr ? m.title_ar || `${m.team_a_name} × ${m.team_b_name}` : `${m.team_a_name} × ${m.team_b_name}`}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </>
+                  )}
+                </select>
+              </div>
+
               <button
                 type="button"
                 onClick={() => setTab("quick")}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border font-bold transition ${
-                  onboardingStep === 1
-                    ? "bg-sky-500/20 border-sky-400/50 text-sky-300"
-                    : "bg-[#090D16] border-white/[0.08] text-slate-400 hover:text-white"
-                }`}
-              >
-                <span className="w-4 h-4 rounded-full bg-white/10 inline-flex items-center justify-center text-[10px]">1</span>
-                <span>{isAr ? "الفيديو والتشكيلة" : "Import Video"}</span>
-              </button>
-              <span className="text-slate-600">←</span>
-              <button
-                type="button"
-                onClick={() => setTab("accuracy")}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border font-bold transition ${
-                  onboardingStep === 2
-                    ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-300"
-                    : "bg-[#090D16] border-white/[0.08] text-slate-400 hover:text-white"
-                }`}
-              >
-                <span className="w-4 h-4 rounded-full bg-white/10 inline-flex items-center justify-center text-[10px]">2</span>
-                <span>{isAr ? "تأكيد الهويات QA" : "30s Identity QA"}</span>
-              </button>
-              <span className="text-slate-600">←</span>
-              <button
-                type="button"
-                onClick={() => setTab("studio")}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border font-bold transition ${
-                  onboardingStep === 3
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold border transition ${
+                  tab === "quick"
                     ? "bg-emerald-500 text-slate-950 border-emerald-400"
-                    : "bg-[#090D16] border-white/[0.08] text-slate-400 hover:text-white"
+                    : "bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/40"
                 }`}
               >
-                <span className="w-4 h-4 rounded-full bg-black/15 inline-flex items-center justify-center text-[10px]">3</span>
-                <span>{isAr ? "الاستوديو والخطط" : "Studio & Tactics"}</span>
+                <Plus className="w-3.5 h-3.5" />
+                <span>{isAr ? "مباراة جديدة" : "New Match"}</span>
               </button>
 
               {isReadOnly && (
                 <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full bg-slate-800/90 border border-white/[0.1] text-slate-300">
                   <Eye className="w-3.5 h-3.5 text-emerald-400" />
-                  {role === "player"
-                    ? isAr ? "وضع قراءة فقط (حساب اللاعب)" : "Read-Only Mode (Player View)"
-                    : isAr ? "وضع قراءة فقط (إدارة النادي)" : "Read-Only Mode (Board View)"}
+                  <span>
+                    {role === "player"
+                      ? isAr ? "معاينة: حساب اللاعب" : "Preview: Player"
+                      : isAr ? "معاينة: الإدارة" : "Preview: Board"}
+                  </span>
                 </span>
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            {/* End: AI Assistant + Language + More Menu */}
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => setChatOpen((v) => !v)}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-extrabold transition ${
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-extrabold transition ${
                   chatOpen
-                    ? "bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-950/60"
+                    ? "bg-emerald-500 text-slate-950"
                     : "bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300"
                 }`}
               >
                 <Bot className="w-4 h-4" />
-                <span>{isAr ? "المساعد التكتيكي الذكي" : "AI Tactical Analyst"}</span>
+                <span>{isAr ? "المساعد الذكي" : "AI Analyst"}</span>
               </button>
 
-              <div className="hidden sm:inline-flex items-center bg-[#111827] border border-white/[0.1] rounded-lg overflow-hidden text-xs">
-                <a
-                  href={`${API_BASE}/api/matches/${encodeURIComponent(matchId)}/export-report?audience=${role === "player" ? "player" : "admin"}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 hover:bg-slate-800 px-2.5 py-1.5 font-semibold text-emerald-400 transition"
-                  title={isAr ? "تقرير النادي الكامل للإدارة والجهاز الفني" : "Full Club Technical Report"}
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  {isAr ? "تقرير النادي" : "Club Report"}
-                </a>
-                {role !== "player" && (
-                  <a
-                    href={`${API_BASE}/api/matches/${encodeURIComponent(matchId)}/export-report?audience=player`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="border-s border-white/[0.08] hover:bg-slate-800 px-2 py-1.5 text-[11px] font-semibold text-sky-300 transition"
-                    title={isAr ? "نسخة اللاعب فقط (ملاحظات الإدارة والمخاطر مخفية تلقائياً)" : "Player-Safe Redacted Report"}
-                  >
-                    {isAr ? "نسخة اللاعب" : "Player PDF"}
-                  </a>
-                )}
-              </div>
-
-              <select
-                value={role}
-                onChange={(e) => setRole(e.target.value as UserRole)}
-                aria-label="Role"
-                className="bg-[#111827] border border-white/[0.1] rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/60"
-              >
-                <option value="analyst">{isAr ? "محلل أداء" : "Analyst"}</option>
-                <option value="coach">{isAr ? "المدير الفني" : "Head Coach"}</option>
-                <option value="scout">{isAr ? "كشاف" : "Scout"}</option>
-                <option value="board">{isAr ? "مجلس الإدارة (عرض فقط)" : "Board (Read-Only)"}</option>
-                <option value="player">{isAr ? "حساب اللاعب (عرض فقط)" : "Player (Read-Only)"}</option>
-              </select>
-
-              <button
-                onClick={() => setLang(isAr ? "en" : "ar")}
-                className="inline-flex items-center gap-1.5 bg-[#111827] hover:bg-slate-800 border border-white/[0.1] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-200 transition"
-              >
-                <Globe className="w-3.5 h-3.5 text-slate-400" />
-                {isAr ? "EN" : "عربي"}
-              </button>
-            </div>
-          </div>
-
-          {/* User Upload Primary Action + Clear Separation of User Matches vs Demo Reference Samples */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
-            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => setTab("quick")}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-extrabold border transition ${
-                  tab === "quick"
-                    ? "bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-950/60"
-                    : "bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/45"
-                }`}
+                onClick={() => setLang(isAr ? "en" : "ar")}
+                aria-label={isAr ? "تبديل اللغة إلى الإنجليزية" : "Switch to Arabic"}
+                className="inline-flex items-center gap-1.5 bg-[#111827] hover:bg-slate-800 border border-white/[0.1] rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-200 transition"
               >
-                <UploadCloud className="w-3.5 h-3.5" />
-                <span>{isAr ? "+ ارفع فيديو مباراتك الخاصة (MP4 / YouTube / بث مباشر)" : "+ Upload Your Match Video (MP4 / URL)"}</span>
+                <Globe className="w-3.5 h-3.5 text-slate-400" />
+                <span>{isAr ? "EN" : "عربي"}</span>
               </button>
 
-              <span className="text-[11px] font-semibold text-slate-400 ps-1">
-                {isAr ? "أو استعرض نماذج تجريبية جاهزة (أمثلة):" : "Or explore built-in Demo Samples:"}
-              </span>
+              {/* More Overflow Menu */}
+              <div className="relative" ref={moreMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setMoreOpen((v) => !v)}
+                  aria-expanded={moreOpen}
+                  aria-haspopup="menu"
+                  aria-label={isAr ? "المزيد" : "More options"}
+                  className="inline-flex items-center gap-1 bg-[#111827] hover:bg-slate-800 border border-white/[0.1] rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-200 transition"
+                >
+                  <MoreHorizontal className="w-4 h-4" />
+                  <span className="hidden sm:inline">{isAr ? "المزيد" : "More"}</span>
+                  <ChevronDown className="w-3 h-3 text-slate-400" />
+                </button>
 
-              {matches.map((m) => {
-                const active = m.match_id === matchId;
-                const isCustom = Boolean(m.is_custom || m.match_id.startsWith("custom_"));
-                const labelAr = m.title_ar || `${m.team_a_name_ar || m.team_a_name} × ${m.team_b_name_ar || m.team_b_name}`;
-                const labelEn = `${m.team_a_name} × ${m.team_b_name}`;
-                const hexA = m.kit_colors?.team_a_hex || "#EF4444";
-                const hexB = m.kit_colors?.team_b_hex || "#38BDF8";
-
-                return (
-                  <button
-                    key={m.match_id}
-                    type="button"
-                    onClick={() => setMatchId(m.match_id)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition ${
-                      active
-                        ? "bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-950/60"
-                        : "bg-[#111827] hover:bg-white/[0.06] text-slate-200 border-white/[0.1] hover:border-emerald-500/40"
-                    }`}
+                {moreOpen && (
+                  <div
+                    role="menu"
+                    className="absolute end-0 mt-2 w-64 rounded-2xl bg-[#0C1220] border border-white/[0.12] shadow-2xl p-2 space-y-1 z-50 text-xs"
                   >
-                    <span className="flex items-center -space-x-1 rtl:space-x-reverse">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full border border-white/50 inline-block"
-                        style={{ backgroundColor: hexA }}
-                      />
-                      <span
-                        className="w-2.5 h-2.5 rounded-full border border-white/50 inline-block"
-                        style={{ backgroundColor: hexB }}
-                      />
-                    </span>
-                    <span>{isAr ? labelAr : labelEn}</span>
-                    <span
-                      className={`text-[9.5px] px-1.5 py-0.2 rounded font-bold ${
-                        active
-                          ? "bg-black/20 text-slate-950"
-                          : isCustom
-                          ? "bg-emerald-500/20 text-emerald-300"
-                          : "bg-white/[0.07] text-slate-400"
-                      }`}
+                    <a
+                      role="menuitem"
+                      href={`${API_BASE}/api/matches/${encodeURIComponent(matchId)}/export-report?audience=${role === "player" ? "player" : "admin"}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={() => setMoreOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/[0.06] text-emerald-300 font-semibold"
                     >
-                      {isCustom ? (isAr ? "مباراتك" : "Custom") : isAr ? "مثال تجريبي" : "Demo"}
-                    </span>
-                  </button>
-                );
-              })}
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>{isAr ? "تقرير النادي الكامل" : "Club Report"}</span>
+                    </a>
+                    {role !== "player" && (
+                      <a
+                        role="menuitem"
+                        href={`${API_BASE}/api/matches/${encodeURIComponent(matchId)}/export-report?audience=player`}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={() => setMoreOpen(false)}
+                        className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/[0.06] text-sky-300 font-semibold"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        <span>{isAr ? "نسخة تقرير اللاعب" : "Player Report"}</span>
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMoreOpen(false);
+                        setBenchmarkOpen(true);
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-white/[0.06] text-amber-300 font-semibold"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                        <span>{isAr ? "مقارنة المنصات العالمية" : "Global Benchmark"}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMoreOpen(false);
+                        setCmdOpen(true);
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-white/[0.06] text-slate-200"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Search className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>{isAr ? "لوحة الأوامر" : "Command Palette"}</span>
+                      </span>
+                      <kbd dir="ltr" className="text-[10px] text-slate-400 font-mono">Ctrl+K</kbd>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMoreOpen(false);
+                        setShortcutsOpen(true);
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-white/[0.06] text-slate-200"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Keyboard className="w-3.5 h-3.5 text-sky-400" />
+                        <span>{isAr ? "اختصارات الكيبورد" : "Keyboard Shortcuts"}</span>
+                      </span>
+                      <kbd className="text-[10px] text-slate-400 font-mono">?</kbd>
+                    </button>
+
+                    <div className="border-t border-white/[0.08] pt-2 mt-1 px-2 pb-1 space-y-1">
+                      <label htmlFor="role-preview-select" className="block text-[10.5px] text-slate-400 font-semibold">
+                        {isAr ? "عرض كـ (معاينة الواجهة فقط):" : "View as (UI Preview only):"}
+                      </label>
+                      <select
+                        id="role-preview-select"
+                        value={role}
+                        onChange={(e) => setRole(e.target.value as UserRole)}
+                        className="w-full bg-[#111827] border border-white/[0.1] rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/60"
+                      >
+                        <option value="analyst">{isAr ? "محلل أداء" : "Analyst"}</option>
+                        <option value="coach">{isAr ? "المدير الفني" : "Head Coach"}</option>
+                        <option value="scout">{isAr ? "كشاف" : "Scout"}</option>
+                        <option value="board">{isAr ? "مجلس الإدارة (عرض فقط)" : "Board (Read-Only)"}</option>
+                        <option value="player">{isAr ? "حساب اللاعب (عرض فقط)" : "Player (Read-Only)"}</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </header>
 
-        <main className="flex-1 p-4 lg:p-6 max-w-[1600px] w-full mx-auto">
-          {tab === "accuracy" && <AccuracyProofScreen lang={lang} matchId={matchId} role={role} />}
+        {/* Honest Server Offline Banner (Never fakes matches) */}
+        {apiOffline && (
+          <div
+            role="alert"
+            className="mx-4 lg:mx-6 mt-4 rounded-xl bg-rose-500/15 border border-rose-500/40 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs"
+          >
+            <div className="flex items-center gap-2 text-rose-200 font-semibold">
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>
+                {isAr
+                  ? "السيرفر غير متصل — شغّل start_egy_scout.bat"
+                  : "Backend server offline — run start_egy_scout.bat"}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={loadMatches}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-rose-500 hover:bg-rose-400 text-slate-950 font-bold transition"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>{isAr ? "إعادة المحاولة" : "Retry"}</span>
+            </button>
+          </div>
+        )}
+
+        <main className="flex-1 p-3 sm:p-4 lg:p-6 pb-24 md:pb-6 max-w-[1600px] w-full mx-auto">
           {tab === "studio" && (
             <BroadcastStudioScreen
               lang={lang}
               matchId={matchId}
               role={role}
-              workspaceMode={workspaceMode}
               externalBlueprint={aiBlueprint}
               jumpToTimeSec={jumpTimeSec}
               onJumpHandled={() => setJumpTimeSec(null)}
+              pinnedCard={pinnedStudioCard}
+              onClearPinnedCard={() => setPinnedStudioCard(null)}
             />
           )}
-          {tab === "scouting" && (
-            <FairScoutingScreen
+          {tab === "players" && (
+            <PlayersScreen
               lang={lang}
               matchId={matchId}
               role={role}
               onJumpToClip={(tSec) => {
                 setJumpTimeSec(tSec);
+                setTab("studio");
+              }}
+              onNavigateQA={() => setTab("accuracy")}
+              onPinCardToStudio={(card) => {
+                setPinnedStudioCard(card);
                 setTab("studio");
               }}
             />
@@ -484,6 +517,7 @@ export default function HomePage() {
               }}
             />
           )}
+          {tab === "accuracy" && <AccuracyProofScreen lang={lang} matchId={matchId} role={role} />}
         </main>
 
         {/* Grounded AI Tactical Chatbot */}
@@ -491,15 +525,13 @@ export default function HomePage() {
           lang={lang}
           matchId={matchId}
           matchTitleAr={
-            matches.find((m) => m.match_id === matchId)?.title_ar ||
-            `${matches.find((m) => m.match_id === matchId)?.team_a_name || "Al Ahly"} × ${
-              matches.find((m) => m.match_id === matchId)?.team_b_name || "ENPPI"
-            }`
+            activeMatch?.title_ar ||
+            `${activeMatch?.team_a_name || "Team A"} × ${activeMatch?.team_b_name || "Team B"}`
           }
           role={role}
           isOpen={chatOpen}
           onToggleOpen={() => setChatOpen((v) => !v)}
-          onNavigateTab={(targetTab) => setTab(targetTab)}
+          onNavigateTab={(targetTab) => setTab(targetTab === "scouting" ? "players" : targetTab)}
           onAiBlueprintDrawn={(bp) => {
             setAiBlueprint(bp);
             setTab("studio");
@@ -507,9 +539,12 @@ export default function HomePage() {
         />
       </div>
 
-      {/* V8.3 Command Palette Modal (Ctrl+K) */}
+      {/* Command Palette Modal (Ctrl+K) */}
       {cmdOpen && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={isAr ? "لوحة الأوامر" : "Command Palette"}
           className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-start justify-center pt-20 px-4"
           onClick={() => setCmdOpen(false)}
         >
@@ -524,10 +559,15 @@ export default function HomePage() {
                 type="text"
                 value={cmdQuery}
                 onChange={(e) => setCmdQuery(e.target.value)}
-                placeholder={isAr ? "ابحث عن صفحة، مباراة، وضع عمل، أو أداة..." : "Search pages, matches, modes, tools..."}
+                placeholder={isAr ? "ابحث عن صفحة، مباراة، أو أداة..." : "Search pages, matches, tools..."}
                 className="flex-1 bg-transparent text-sm text-white focus:outline-none"
               />
-              <button type="button" onClick={() => setCmdOpen(false)} className="text-slate-400 hover:text-white">
+              <button
+                type="button"
+                aria-label={isAr ? "إغلاق" : "Close"}
+                onClick={() => setCmdOpen(false)}
+                className="text-slate-400 hover:text-white"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -556,9 +596,12 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* V8.3 Keyboard Shortcuts Cheatsheet Modal (?) */}
+      {/* Keyboard Shortcuts Modal (?) */}
       {shortcutsOpen && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={isAr ? "اختصارات الكيبورد" : "Keyboard Shortcuts"}
           className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={() => setShortcutsOpen(false)}
         >
@@ -569,24 +612,29 @@ export default function HomePage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-extrabold text-sm text-white">
                 <Keyboard className="w-4 h-4 text-sky-400" />
-                <span>{isAr ? "اختصارات الكيبورد الاحترافية" : "Pro Keyboard Shortcuts"}</span>
+                <span>{isAr ? "اختصارات الكيبورد" : "Keyboard Shortcuts"}</span>
               </div>
-              <button type="button" onClick={() => setShortcutsOpen(false)} className="text-slate-400 hover:text-white">
+              <button
+                type="button"
+                aria-label={isAr ? "إغلاق" : "Close"}
+                onClick={() => setShortcutsOpen(false)}
+                className="text-slate-400 hover:text-white"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="grid grid-cols-1 gap-1.5 text-xs">
               {[
-                ["Ctrl + K", isAr ? "فتح شريط الأوامر السريعة" : "Open Command Palette"],
-                ["Space", isAr ? "تشغيل / إيقاف الفيديو في الاستوديو" : "Play / Pause broadcast video"],
-                ["← / →", isAr ? "تقديم أو تأخير فريم واحد بدقة" : "Step backward / forward 1 frame"],
-                ["S", isAr ? "أداة تسليط الضوء المتتبع (Spotlight)" : "Motion-Tracked Spotlight tool"],
-                ["G", isAr ? "أداة تحريك الشبح (Ghost What-If)" : "Ghost What-If tool (both teams)"],
-                ["A", isAr ? "أداة رسم سهم تكتيكي على الفيديو" : "Draw tactical arrow on video"],
-                ["Z", isAr ? "تثبيت العدسة المكبّرة (Pinned Zoom)" : "Pinned 2.2x Zoom Loupe"],
-                ["T", isAr ? "تكويد اللقطة الحالية وإضافتها للـ Playlist" : "Tag current moment to Playlist"],
-                ["Ctrl+Z / Ctrl+Y", isAr ? "تراجع / إعادة (50 خطوة) في مرسم الخطط" : "50-step Undo / Redo on Tactical Board"],
-                ["?", isAr ? "إظهار قائمة الاختصارات" : "Show shortcuts modal"],
+                ["Ctrl + K", isAr ? "لوحة الأوامر السريعة" : "Open Command Palette"],
+                ["Space", isAr ? "تشغيل / إيقاف الفيديو" : "Play / Pause video"],
+                ["← / →", isAr ? "تقديم أو تأخير فريم واحد" : "Step backward / forward 1 frame"],
+                ["S", isAr ? "تسليط الضوء المتتبع" : "Motion-Tracked Spotlight"],
+                ["G", isAr ? "تحريك الشبح التكتيكي" : "Ghost What-If tool"],
+                ["A", isAr ? "رسم سهم تكتيكي" : "Draw tactical arrow"],
+                ["Z", isAr ? "العدسة المكبّرة" : "Pinned Zoom Loupe"],
+                ["T", isAr ? "تكويد اللقطة الحالية" : "Tag current moment"],
+                ["Ctrl+Z / Ctrl+Y", isAr ? "تراجع / إعادة في مرسم الخطط" : "Undo / Redo on Tactical Board"],
+                ["?", isAr ? "قائمة الاختصارات" : "Show shortcuts modal"],
               ].map(([k, desc]) => (
                 <div key={k} className="flex items-center justify-between py-1.5 px-2.5 rounded-lg bg-[#090D16] border border-white/[0.06]">
                   <span className="text-slate-300">{desc}</span>
@@ -599,6 +647,34 @@ export default function HomePage() {
           </div>
         </div>
       )}
+      {/* Mobile Bottom Navigation Bar */}
+      <nav
+        aria-label={isAr ? "التنقل السريع للموبايل" : "Mobile bottom navigation"}
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-[#0C1220]/95 backdrop-blur-md border-t border-white/[0.1] grid grid-cols-4 px-1 py-1.5"
+      >
+        {navItems.map((item) => {
+          const active = tab === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setTab(item.id)}
+              aria-current={active ? "page" : undefined}
+              className={`flex flex-col items-center justify-center gap-0.5 py-1.5 rounded-lg text-[10.5px] font-bold transition ${
+                active ? "text-emerald-400 bg-emerald-500/15" : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              {item.icon}
+              <span className="truncate max-w-[84px]">
+                {isAr ? (item.id === "accuracy" ? "الهويات" : item.ar) : item.en}
+              </span>
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* Global Platform Benchmark Modal */}
+      <CompetitorBenchmarkModal open={benchmarkOpen} onClose={() => setBenchmarkOpen(false)} lang={lang} />
     </div>
   );
 }

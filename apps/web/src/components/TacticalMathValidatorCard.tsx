@@ -26,7 +26,7 @@ export default function TacticalMathValidatorCard({ lang, validation }: Props) {
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 font-extrabold text-indigo-300">
           <ShieldAlert className="w-4 h-4" />
-          <span>{isAr ? "مدقق واقعية الخطة الهندسي (Math-First)" : "Tactical Math Validator"}</span>
+          <span>{isAr ? "مدقق واقعية الخطة الهندسي" : "Tactical Math Validator"}</span>
         </div>
         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${riskStyle}`}>
           {validation.risk_level === "high"

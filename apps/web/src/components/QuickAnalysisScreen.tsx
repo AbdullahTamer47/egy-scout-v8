@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { Download, FileVideo, Globe, Link2, Loader2, Play, UploadCloud } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Cloud, Download, FileVideo, Globe, Link2, Loader2, Play, Settings2, UploadCloud } from "lucide-react";
 import { API_BASE, apiFetch, UserRole } from "@/lib/api";
 
 interface Props {
@@ -13,6 +13,7 @@ interface Props {
 interface LiveProofResponse {
   match_id?: string;
   elapsed_s: number;
+  processed_seconds?: number;
   rows_exported: number;
   players_tracked: number;
   officials_isolated: number;
@@ -41,6 +42,52 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
   const [exportingClip, setExportingClip] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [result, setResult] = useState<LiveProofResponse | null>(null);
+  const [computeStatus, setComputeStatus] = useState<{
+    active_mode: string;
+    has_groq_vision: boolean;
+    has_roboflow_key: boolean;
+    has_cloud_worker_url: boolean;
+    cloud_worker_host?: string | null;
+    local_cuda_available: boolean;
+  } | null>(null);
+  const [cloudOpen, setCloudOpen] = useState(false);
+  const [cloudWorkerUrl, setCloudWorkerUrl] = useState("");
+  const [roboflowKey, setRoboflowKey] = useState("");
+  const [savingCloud, setSavingCloud] = useState(false);
+  const [cloudMsg, setCloudMsg] = useState("");
+
+  useEffect(() => {
+    apiFetch<typeof computeStatus>("/api/compute/status", {}, "club_demo_egypt", role)
+      .then((res) => setComputeStatus(res))
+      .catch(() => {});
+  }, [role]);
+
+  const handleSaveCloudConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isReadOnly) return;
+    setSavingCloud(true);
+    setCloudMsg("");
+    try {
+      const res = await apiFetch<NonNullable<typeof computeStatus>>(
+        "/api/compute/config",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            cloud_worker_url: cloudWorkerUrl.trim(),
+            roboflow_api_key: roboflowKey.trim(),
+          }),
+        },
+        "club_demo_egypt",
+        role
+      );
+      setComputeStatus(res);
+      setCloudMsg(isAr ? "تم تحديث إعدادات المعالجة السحابية." : "Cloud compute settings updated.");
+    } catch (err) {
+      setCloudMsg(String(err));
+    } finally {
+      setSavingCloud(false);
+    }
+  };
 
   const exportWatermarkedMp4 = async () => {
     setExportingClip(true);
@@ -153,16 +200,104 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-lg font-bold text-white">
-          {isAr ? "رفع وتحليل مباراتك الخاصة (الوظيفة الأساسية للنظام)" : "Upload & Analyze Your Match Video (Primary Hub)"}
-        </h1>
-        <p className="text-xs text-slate-300 mt-0.5">
-          {isAr
-            ? "هذا البرنامج مصمم أساساً لرفع فيديو مباراتك الخاصة (ملف MP4 أو رابط YouTube / بث مباشر) وتحليله بالكامل. المباريات الأخرى الموجودة في القائمة العلوية هي نماذج تجريبية فقط لاستعراض الأدوات."
-            : "EGY-SCOUT is built to analyze your own uploaded match videos (MP4 or YouTube/Live Stream URL). Pre-loaded matches in the top bar are reference demos."}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-bold text-white">
+            {isAr ? "رفع وتحليل مباراتك الخاصة (الوظيفة الأساسية للنظام)" : "Upload & Analyze Your Match Video (Primary Hub)"}
+          </h1>
+          <p className="text-xs text-slate-300 mt-0.5">
+            {isAr
+              ? "هذا البرنامج مصمم أساساً لرفع فيديو مباراتك الخاصة (ملف MP4 أو رابط YouTube / بث مباشر) وتحليله سحابياً بالكامل. المباريات الأخرى في القائمة العلوية هي نماذج تجريبية."
+              : "EGY-SCOUT analyzes your uploaded match videos (MP4 or YouTube/Stream URL) with Cloud-First acceleration."}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-[11px] font-bold text-emerald-300">
+            <Cloud className="w-3.5 h-3.5" />
+            <span>
+              {computeStatus?.has_cloud_worker_url
+                ? isAr
+                  ? `سحابة GPU متصلة (${computeStatus.cloud_worker_host || "Modal L4"})`
+                  : `Cloud GPU (${computeStatus.cloud_worker_host || "Worker"})`
+                : computeStatus?.has_roboflow_key
+                ? isAr
+                  ? "Roboflow Serverless GPU + Groq Vision"
+                  : "Roboflow Cloud GPU + Groq Vision"
+                : computeStatus?.has_groq_vision
+                ? isAr
+                  ? "الذكاء السحابي Groq Vision نشط (خفيف على جهازك)"
+                  : "Groq Cloud Vision Active (CPU-Safe)"
+                : isAr
+                ? "وضع المعالجة السحابية جاهز"
+                : "Cloud-First Ready"}
+            </span>
+          </div>
+          {!isReadOnly && (
+            <button
+              type="button"
+              onClick={() => setCloudOpen((v) => !v)}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#0C1220] hover:bg-white/[0.06] border border-white/[0.12] text-[11px] font-semibold text-slate-200"
+            >
+              <Settings2 className="w-3.5 h-3.5 text-sky-400" />
+              <span>{isAr ? "ربط GPU سحابي" : "Cloud GPU Setup"}</span>
+            </button>
+          )}
+        </div>
       </div>
+
+      {cloudOpen && !isReadOnly && (
+        <form onSubmit={handleSaveCloudConfig} className="studio-panel p-4 border-sky-500/30 space-y-3 text-xs">
+          <div className="font-bold text-sky-300">
+            {isAr
+              ? "ربط المعالجة السحابية (لتشغيل تحليل كامل بدون ضغط على جهازك أو كارت شاشة قوي)"
+              : "Connect Online Cloud GPU (Modal L4 / Roboflow Serverless) — zero local GPU needed"}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label className="space-y-1">
+              <span className="block text-[11px] text-slate-300">
+                {isAr ? "رابط Modal / Cloud GPU Worker (اختياري)" : "Modal / Cloud GPU Worker Endpoint URL"}
+              </span>
+              <input
+                type="url"
+                dir="ltr"
+                value={cloudWorkerUrl}
+                onChange={(e) => setCloudWorkerUrl(e.target.value)}
+                placeholder="https://your-workspace--egy-scout-cv-worker-analyze-clip.modal.run"
+                className="w-full bg-[#090D16] border border-white/[0.12] rounded-lg px-3 py-1.5 text-slate-100"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="block text-[11px] text-slate-300">
+                {isAr ? "مفتاح Roboflow Serverless API (اختياري — باقة مجانية)" : "Roboflow Serverless API Key (Optional Free Tier)"}
+              </span>
+              <input
+                type="password"
+                dir="ltr"
+                value={roboflowKey}
+                onChange={(e) => setRoboflowKey(e.target.value)}
+                placeholder="rf_..."
+                className="w-full bg-[#090D16] border border-white/[0.12] rounded-lg px-3 py-1.5 text-slate-100"
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[11px] text-slate-400">
+              {isAr
+                ? "ملاحظة: قراءة الأرقام ولوحة النتيجة أونلاين عبر Groq Cloud Vision تعمل بالفعل تلقائياً."
+                : "Note: Online jersey & scoreboard reading via Groq Cloud Vision is already active."}
+            </span>
+            <button
+              type="submit"
+              disabled={savingCloud}
+              className="px-4 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-extrabold disabled:opacity-50"
+            >
+              {savingCloud ? (isAr ? "جاري الحفظ..." : "Saving...") : isAr ? "حفظ وتفعيل" : "Save & Activate"}
+            </button>
+          </div>
+          {cloudMsg && <div className="text-[11px] text-emerald-300">{cloudMsg}</div>}
+        </form>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
         <div className="xl:col-span-5 studio-panel p-5 space-y-4">
@@ -340,6 +475,12 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
             />
           </div>
 
+          <div className="rounded-lg bg-sky-500/10 border border-sky-500/25 px-3 py-2 text-[11px] text-sky-200">
+            {isAr
+              ? "يتم تحليل المقطع بالكامل (حتى 260 لقطة متتبعة) بمعايرة الملعب 32 نقطة وفصل ألوان القمصان وقراءة الأرقام آلياً."
+              : "Analyzes the uploaded clip (up to 260 tracked frames) with 32-keypoint homography, kit separation, and OCR."}
+          </div>
+
           <div className="flex flex-wrap gap-2.5">
             {sourceMode === "url" ? (
               <button
@@ -349,8 +490,8 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
               >
                 {ingestingMatch ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
                 {ingestingMatch
-                  ? isAr ? "جاري التحميل والمعالجة وفتح الاستوديو..." : "Downloading, Analyzing & Opening Studio..."
-                  : isAr ? "استيراد من الرابط وفتح في الاستوديو" : "Import URL & Open in Broadcast Studio"}
+                  ? isAr ? "جاري التحميل وتحليل العينة وفتح الاستوديو..." : "Downloading & analyzing sample..."
+                  : isAr ? "تحليل عيّنة من الرابط وفتح الاستوديو" : "Analyze URL sample & open Studio"}
               </button>
             ) : (
               <button
@@ -360,8 +501,8 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
               >
                 {ingestingMatch ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileVideo className="w-4 h-4" />}
                 {ingestingMatch
-                  ? isAr ? "جاري المعالجة وفتح الاستوديو..." : "Building Match & Opening Studio..."
-                  : isAr ? "معالجة كمباراة كاملة وفتح الاستوديو" : "Analyze & Open in Broadcast Studio"}
+                  ? isAr ? "جاري تحليل العينة وفتح الاستوديو..." : "Analyzing sample & opening Studio..."
+                  : isAr ? "تحليل عيّنة سريعة وفتح الاستوديو" : "Analyze quick sample & open Studio"}
               </button>
             )}
             <button
@@ -393,7 +534,19 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
             </div>
           )}
 
-          {errorMsg && <div className="text-xs text-red-400">{errorMsg}</div>}
+          {errorMsg && (
+            <div className="rounded-lg bg-rose-500/15 border border-rose-500/35 px-3 py-2 text-xs text-rose-300">
+              {errorMsg.includes("413")
+                ? isAr
+                  ? "حجم ملف الفيديو يتجاوز الحد الأقصى المسموح به."
+                  : "Uploaded video exceeds the maximum allowed size."
+                : errorMsg.includes("400")
+                ? isAr
+                  ? `تعذّر قبول الملف أو الرابط: ${errorMsg}`
+                  : `Invalid file or URL: ${errorMsg}`
+                : errorMsg}
+            </div>
+          )}
         </div>
 
         <div className="xl:col-span-7 studio-panel p-5 space-y-4">
@@ -421,9 +574,15 @@ export default function QuickAnalysisScreen({ lang, role, onMatchIngested }: Pro
               )}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs tabular-nums">
                 <div className="bg-[#090D16] border border-white/[0.06] rounded-lg p-3">
-                  <div className="text-[11px] text-slate-400">{isAr ? "زمن المعالجة" : "Latency"}</div>
+                  <div className="text-[11px] text-slate-400">
+                    {result.processed_seconds !== undefined
+                      ? isAr ? "المدة المحلّلة / الزمن" : "Sample / Latency"
+                      : isAr ? "زمن المعالجة" : "Latency"}
+                  </div>
                   <div dir="ltr" className="text-lg font-bold text-emerald-400 mt-0.5 inline-block">
-                    {`${result.elapsed_s}s`}
+                    {result.processed_seconds !== undefined
+                      ? `${result.processed_seconds}s • ${result.elapsed_s}s`
+                      : `${result.elapsed_s}s`}
                   </div>
                 </div>
                 <div className="bg-[#090D16] border border-white/[0.06] rounded-lg p-3">

@@ -1,6 +1,6 @@
 {
-  "name": "egy-scout-v8-web",
-  "version": "8.0.0",
+  "name": "egy-scout-web",
+  "version": "10.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
