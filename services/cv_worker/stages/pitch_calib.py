@@ -81,15 +81,15 @@ def get_pitch_keypoint_model() -> Any:
 
 
 class KeypointPitchCalibrator:
-    """Temporal RANSAC homography estimator with smooth blending & shot-cut reset."""
+    """Temporal RANSAC homography estimator with centered collinearity check & smooth blending."""
 
     def __init__(
         self,
         pitch_length_m: float = PITCH_LENGTH_M,
         pitch_width_m: float = PITCH_WIDTH_M,
-        conf: float = 0.45,
-        imgsz: int = 640,
-        max_err_m: float = 2.4,
+        conf: float = 0.30,
+        imgsz: int = 960,
+        max_err_m: float = 3.2,
         alpha: float = 0.4,
     ):
         self.pitch_length_m = float(pitch_length_m)
@@ -104,6 +104,7 @@ class KeypointPitchCalibrator:
         self.last_kp_count: int = 0
         self.last_err_m: float = float("nan")
         self.frames_since_calib: int = 999
+        self._prev_gray: Optional[np.ndarray] = None
 
     @property
     def available(self) -> bool:
@@ -112,12 +113,48 @@ class KeypointPitchCalibrator:
     def reset(self) -> None:
         self.H = None
         self.frames_since_calib = 999
+        self._prev_gray = None
+
+    def solve_homography_from_correspondences(
+        self,
+        src_px: np.ndarray,
+        dst_m: np.ndarray,
+        frame_shape: tuple[int, int] = (720, 1280),
+    ) -> Optional[np.ndarray]:
+        """Solve RANSAC pixel->meter homography with centered 2D non-collinearity validation."""
+        if len(src_px) < 4 or len(dst_m) < 4:
+            return None
+        # Centered 2D SVD avoids the uncentered [x, y, 1] singular-value collapse near x=0 penalty boxes
+        centered = dst_m.astype(np.float64) - np.mean(dst_m, axis=0, keepdims=True)
+        sv = np.linalg.svd(centered, compute_uv=False)
+        if len(sv) < 2 or float(sv[1]) < 1.2:
+            return None
+
+        H, inl = cv2.findHomography(
+            src_px.astype(np.float32),
+            dst_m.astype(np.float32),
+            cv2.RANSAC,
+            3.0,
+        )
+        if H is None or inl is None or int(inl.sum()) < 4 or abs(float(H[2, 2])) < 1e-9:
+            return None
+        keep = inl.reshape(-1).astype(bool)
+        proj = cv2.perspectiveTransform(src_px[keep].reshape(-1, 1, 2).astype(np.float32), H).reshape(-1, 2)
+        err = float(np.mean(np.linalg.norm(proj - dst_m[keep], axis=1)))
+        if not np.isfinite(err) or err > self.max_err_m:
+            return None
+        h, w = int(frame_shape[0]), int(frame_shape[1])
+        bc = cv2.perspectiveTransform(np.array([[[w * 0.5, h * 0.88]]], dtype=np.float32), H).reshape(2)
+        if not (-35.0 <= bc[0] <= self.pitch_length_m + 35.0 and -35.0 <= bc[1] <= self.pitch_width_m + 35.0):
+            return None
+        self.last_err_m = err
+        return (H / H[2, 2]).astype(np.float64)
 
     def detect(self, frame_bgr: np.ndarray) -> tuple[Optional[np.ndarray], int, float]:
         if self.model is None or frame_bgr is None or frame_bgr.size == 0:
             return None, 0, float("nan")
         try:
-            res = self.model.predict(frame_bgr, verbose=False, conf=0.25, imgsz=self.imgsz)[0]
+            res = self.model.predict(frame_bgr, verbose=False, conf=0.20, imgsz=self.imgsz)[0]
         except Exception:
             return None, 0, float("nan")
         if res.keypoints is None or len(res.keypoints) == 0 or res.keypoints.conf is None:
@@ -129,34 +166,56 @@ class KeypointPitchCalibrator:
         mask = cf > self.conf
         n = int(mask.sum())
         if n < 4:
-            return None, n, float("nan")
+            # Try slightly softer keypoint confidence (0.22) if 3 strong + 1 moderate keypoint exist
+            mask = cf > max(0.20, self.conf * 0.72)
+            n = int(mask.sum())
+            if n < 4:
+                return None, n, float("nan")
         src = xy[mask].astype(np.float32)
         dst = self.vertices[mask]
-        if np.linalg.matrix_rank(np.c_[dst, np.ones(len(dst))], tol=1.0) < 3:
-            return None, n, float("nan")
-        H, inl = cv2.findHomography(src, dst, cv2.RANSAC, 2.0)
-        if H is None or inl is None or int(inl.sum()) < 4:
-            return None, n, float("nan")
-        keep = inl.reshape(-1).astype(bool)
-        proj = cv2.perspectiveTransform(src[keep].reshape(-1, 1, 2), H).reshape(-1, 2)
-        err = float(np.mean(np.linalg.norm(proj - dst[keep], axis=1)))
-        if not np.isfinite(err) or err > self.max_err_m:
-            return None, n, err
         h, w = frame_bgr.shape[:2]
-        bc = cv2.perspectiveTransform(np.array([[[w * 0.5, h * 0.92]]], dtype=np.float32), H).reshape(2)
-        if not (-28.0 <= bc[0] <= self.pitch_length_m + 28.0 and -28.0 <= bc[1] <= self.pitch_width_m + 28.0):
-            return None, n, err
-        return (H / H[2, 2]).astype(np.float64), int(keep.sum()), err
+        H_solved = self.solve_homography_from_correspondences(src, dst, frame_shape=(h, w))
+        if H_solved is None:
+            return None, n, self.last_err_m
+        return H_solved, n, self.last_err_m
 
-    def update(self, frame_bgr: np.ndarray, max_hold_frames: int = 8) -> bool:
+    def _propagate_with_camera_motion(self, gray: np.ndarray) -> bool:
+        """Propagate previous homography across brief camera pans using sparse Lucas-Kanade turf features."""
+        if self.H is None or self._prev_gray is None or self._prev_gray.shape != gray.shape:
+            return False
+        pts0 = cv2.goodFeaturesToTrack(self._prev_gray, maxCorners=120, qualityLevel=0.02, minDistance=14)
+        if pts0 is None or len(pts0) < 8:
+            return False
+        pts1, st, _ = cv2.calcOpticalFlowPyrLK(self._prev_gray, gray, pts0, None, winSize=(21, 21), maxLevel=3)
+        if pts1 is None or st is None:
+            return False
+        good = st.reshape(-1) == 1
+        if int(good.sum()) < 8:
+            return False
+        M_pix, inl = cv2.findHomography(pts1[good], pts0[good], cv2.RANSAC, 3.0)
+        if M_pix is None or inl is None or int(inl.sum()) < 6:
+            return False
+        H_prop = self.H @ M_pix
+        if abs(float(H_prop[2, 2])) < 1e-9:
+            return False
+        self.H = (H_prop / H_prop[2, 2]).astype(np.float64)
+        return True
+
+    def update(self, frame_bgr: np.ndarray, max_hold_frames: int = 12) -> bool:
+        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         H_new, n, err = self.detect(frame_bgr)
         self.last_kp_count = n
         self.last_err_m = err
         if H_new is None:
             self.frames_since_calib += 1
+            if self.frames_since_calib <= max_hold_frames and self._propagate_with_camera_motion(gray):
+                self._prev_gray = gray
+                return True
             if self.frames_since_calib > max_hold_frames:
                 self.H = None
+            self._prev_gray = gray
             return self.H is not None
+
         self.frames_since_calib = 0
         if self.H is None:
             self.H = H_new
@@ -168,21 +227,19 @@ class KeypointPitchCalibrator:
             )
             p_old = cv2.perspectiveTransform(grid.reshape(-1, 1, 2), self.H).reshape(-1, 2)
             p_new = cv2.perspectiveTransform(grid.reshape(-1, 1, 2), H_new).reshape(-1, 2)
-            if float(np.max(np.linalg.norm(p_new - p_old, axis=1))) > 12.0:
+            if float(np.max(np.linalg.norm(p_new - p_old, axis=1))) > 15.0:
                 self.H = H_new
             else:
                 blended = ((1.0 - self.alpha) * p_old + self.alpha * p_new).astype(np.float32)
                 self.H = cv2.getPerspectiveTransform(grid, blended).astype(np.float64)
+        self._prev_gray = gray
         return True
 
     def project_point(self, u: float, v: float) -> Optional[tuple[float, float]]:
         if self.H is None:
             return None
         pt = np.array([[[float(u), float(v)]]], dtype=np.float32)
-        out = cv2.perspectiveTransform(pt, self.H).reshape(2)
-        x_m, y_m = float(out[0]), float(out[1])
-        if not (np.isfinite(x_m) and np.isfinite(y_m)):
+        out = cv2.perspectiveTransform(pt, self.H)[0, 0]
+        if not np.all(np.isfinite(out)):
             return None
-        if -12.0 <= x_m <= self.pitch_length_m + 12.0 and -12.0 <= y_m <= self.pitch_width_m + 12.0:
-            return round(x_m, 2), round(y_m, 2)
-        return None
+        return round(float(out[0]), 2), round(float(out[1]), 2)

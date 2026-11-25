@@ -1,0 +1,15 @@
+player_id,display_name,team_name,position,archetype_en,archetype_ar,data_source,minutes_analyzed,vaep_per90,xt_per90,team_xt_share_pct,padj_defensive_actions_per90,hir_distance_m_per90,avg_speed_kmh,max_speed_kmh,positional_discipline_score,progressive_runs_per90
+epl_ahly_shenawy,محمد الشناوي (Mohamed El Shenawy),Al Ahly,GK,Sweeper Shot-Stopper,حارس مرمى وقائد خط الدفاع,EPL 2025/26 Reference (>=450m),720,0.22,0.04,4.2,3.4,240,4.8,24.6,92.4,0.8
+epl_ahly_ashour,إمام عاشور (Emam Ashour),Al Ahly,CM,Box-to-Box Carrier,وسط محرك هجومي وحامل كرة,EPL 2025/26 Reference (>=450m),685,0.44,0.26,18.9,9.8,920,7.8,32.6,85.2,7.4
+epl_ahly_attia,مروان عطية (Marwan Attia),Al Ahly,DM,Ball-Winning Anchor,ارتكاز قاطع كرات ومنظم,EPL 2025/26 Reference (>=450m),710,0.29,0.14,11.6,14.6,845,7.5,30.8,89.4,4.9
+epl_ahly_sherif,محمد شريف (Mohamed Sherif),Al Ahly,ST,Channel Runner Striker,مهاجم متحرك في القنوات,EPL 2025/26 Reference (>=450m),560,0.41,0.23,15.8,4.6,890,7.2,33.4,82.1,6.1
+epl_ahly_attiyat,يحيى عطية الله (Yahia Attiyat Allah),Al Ahly,FB,Progressive Overlapping LB,ظهير أيسر هجومي وعرضيات,EPL 2025/26 Reference (>=450m),630,0.35,0.24,16.4,11.2,935,7.6,33.1,84.8,6.8
+epl_enppi_kamal,زياد كمال (Ziad Kamal),ENPPI,DM,Deep-Lying Shield,ارتكاز دفاعي وموزع كرات,EPL 2025/26 Reference (>=450m),640,0.26,0.13,11.2,13.8,820,7.4,30.4,87.6,4.4
+epl_enppi_kalosha,أحمد كالوشا (Ahmed Kalosha),ENPPI,CB,Aerial & Line-Leading CB,قلب دفاع قيادي في الصندوق,EPL 2025/26 Reference (>=450m),705,0.24,0.09,8.4,12.5,695,6.8,31.2,89.8,3.2
+epl_enppi_hawash,أحمد نادر حواش (Ahmed Nader Hawash),ENPPI,W,Inverted Transition Winger,جناح سريع في التحولات,EPL 2025/26 Reference (>=450m),540,0.34,0.21,15.2,7.1,910,7.5,33.6,81.4,6.5
+epl_enppi_samir,عبد الرحمن سمير (Abdelrahman Samir),ENPPI,GK,Reflex Shot-Stopper,حارس مرمى بردود فعل سريعة,EPL 2025/26 Reference (>=450m),720,0.21,0.03,3.6,3.1,215,4.6,23.8,90.5,0.5
+epl_pyr_mayele,فيستون ماييلي (Fiston Mayele),Pyramids FC,ST,Penalty-Box Poacher,مهاجم صندوق وهداف حاسم,EPL 2025/26 Reference (>=450m),675,0.47,0.25,17.5,4.8,875,7.3,33.2,83.4,5.9
+epl_pyr_chibi,محمد الشيبي (Mohamed Chibi),Pyramids FC,FB,Creative Playmaking RB,ظهير أيمن صانع عرضيات,EPL 2025/26 Reference (>=450m),690,0.43,0.30,20.2,10.6,905,7.4,32.4,86.1,6.7
+epl_masry_hamada,محمود حمادة (Mahmoud Hamada),Al Masry,CM,Tempo Controller,لاعب وسط ضابط للإيقاع,EPL 2025/26 Reference (>=450m),660,0.33,0.19,14.8,11.4,840,7.4,30.9,87.9,5.3
+epl_mok_salem,محمد سالم (Mohamed Salem),Al Mokawloon,ST,Direct Transition Forward,مهاجم تحولات مباشرة,EPL 2025/26 Reference (>=450m),580,0.31,0.18,14.1,5.2,850,7.2,32.7,81.0,5.4
+epl_gaish_stouhi,خالد سطوحي (Khaled Stouhi),Tala'ea El Gaish,CB,Low-Block Organizer,قلب دفاع منظم للتكتل,EPL 2025/26 Reference (>=450m),690,0.23,0.08,7.9,13.1,680,6.7,30.2,88.9,2.8

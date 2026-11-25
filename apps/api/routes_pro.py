@@ -271,13 +271,42 @@ async def api_ingest_custom_match(
     ctx: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
     ctx.require("run:live_proof")
+    import os
+    import tempfile
+    from pathlib import Path
     from apps.api.main import service
 
+    allowed_exts = {".mp4", ".mov", ".mkv", ".avi", ".webm"}
+    fname = (file.filename or "custom_clip.mp4").strip()
+    ext = Path(fname).suffix.lower() or ".mp4"
+    if ext not in allowed_exts:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported video extension '{ext}'. Allowed: {', '.join(sorted(allowed_exts))}",
+        )
+
+    max_mb = max(1, int(os.environ.get("EGY_SCOUT_MAX_UPLOAD_MB", "1024") or "1024"))
+    max_bytes = max_mb * 1024 * 1024
+    tmp_path: Optional[Path] = None
     try:
-        raw = await file.read()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+            tmp_path = Path(tmp.name)
+            total = 0
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Uploaded video exceeds {max_mb} MB limit",
+                    )
+                tmp.write(chunk)
+
         res = service.ingest_custom_match(
-            video_bytes=raw,
-            filename=file.filename or "custom_clip.mp4",
+            video_file_path=tmp_path,
+            filename=fname,
             team_a_name=team_a_name,
             team_b_name=team_b_name,
             match_format=match_format,
@@ -291,6 +320,12 @@ async def api_ingest_custom_match(
         return res
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        if tmp_path is not None and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
 
 
 @router.get("/api/custom-matches/{match_id}/parquet")

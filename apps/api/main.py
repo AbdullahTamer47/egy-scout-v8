@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from apps.api.rbac import TenantContext, get_tenant_context
+from apps.api.routes_players import router as players_router
 from apps.api.routes_pro import router as pro_router
 from apps.api.routes_v9 import router as v9_router
 from apps.api.service import ScoutV8Service
@@ -15,7 +16,7 @@ from packages.scouting_core.fair_engine import import_external_scouting_csv
 from packages.tactics_engine.matchup_optimizer import recommend_matchup_plan
 from packages.tactics_engine.playbook import get_playbook_catalog
 
-app = FastAPI(title="EGY-SCOUT V9 Pro Studio API", version="9.0.0")
+app = FastAPI(title="EGY-SCOUT Pro Studio API", version="10.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,13 +30,14 @@ app.add_middleware(
 service = ScoutV8Service()
 app.include_router(pro_router)
 app.include_router(v9_router)
+app.include_router(players_router)
 
 
 @app.get("/api/health")
 def health(ctx: TenantContext = Depends(get_tenant_context)) -> dict[str, Any]:
     return {
         "status": "ok",
-        "version": "9.0.0",
+        "version": "10.0.0",
         "tenant_id": ctx.tenant_id,
         "role": ctx.role,
         "read_only": ctx.is_read_only,

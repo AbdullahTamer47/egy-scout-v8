@@ -168,11 +168,17 @@ def build_profiles_from_match_parquet(
     t_poss = team_possession_pct or {"team_a": 50.0, "team_b": 50.0}
     lineup = lineup_names or {}
 
-    valid = df[
-        df["role"].isin(["player", "goalkeeper"])
-        & df["team"].isin(["team_a", "team_b"])
-        & df["x_m"].notna()
-        & df["y_m"].notna()
+    from packages.scouting_core.player_card import (
+        compute_clean_trajectory_kinematics,
+        stabilize_dataframe_homography_drift,
+    )
+
+    valid = stabilize_dataframe_homography_drift(df)
+    valid = valid[
+        valid["role"].isin(["player", "goalkeeper"])
+        & valid["team"].isin(["team_a", "team_b"])
+        & valid["x_m"].notna()
+        & valid["y_m"].notna()
     ].copy()
     if valid.empty:
         return []
@@ -188,29 +194,33 @@ def build_profiles_from_match_parquet(
         grp = grp.sort_values("frame_id")
         role = str(grp["role"].mode().iloc[0])
         team = str(grp["team"].mode().iloc[0])
-        xs = grp["x_m"].to_numpy(dtype=np.float64)
-        ys = grp["y_m"].to_numpy(dtype=np.float64)
+        xs_raw = grp["x_m"].to_numpy(dtype=np.float64)
+        ys_raw = grp["y_m"].to_numpy(dtype=np.float64)
         ts = grp["time_s"].to_numpy(dtype=np.float64)
         fids = grp["frame_id"].to_numpy(dtype=np.int32)
 
-        dt = np.diff(ts)
-        dt = np.where(dt <= 1e-3, 0.16, dt)
+        from packages.scouting_core.player_card import compute_clean_trajectory_kinematics
+
+        kin = compute_clean_trajectory_kinematics(fids, ts, xs_raw, ys_raw, fps=25.0)
+        xs = kin["xs"]
+        ys = kin["ys"]
+        in_frame_dist_m = float(kin["distance_m"])
+        avg_spd = float(kin["avg_speed_kmh"])
+        max_spd = min(float(kin["top_speed_kmh"]), MAX_PHYSICAL_SPEED_KMH)
+
+        dt_raw = np.diff(ts)
+        dt_raw = np.where(dt_raw <= 1e-3, 0.16, dt_raw)
         step_dist = np.hypot(np.diff(xs), np.diff(ys))
-        raw_speeds_kmh = (step_dist / dt) * 3.6
-
-        # Strict physical validity filter: reject any tracking jump > 36.0 km/h
-        phys_ok = raw_speeds_kmh <= MAX_PHYSICAL_SPEED_KMH
-        valid_steps = step_dist[phys_ok]
-        valid_speeds = raw_speeds_kmh[phys_ok]
-
-        in_frame_dist_m = round(float(valid_steps.sum()), 1) if len(valid_steps) else 0.0
-        avg_spd = round(float(valid_speeds.mean()), 1) if len(valid_speeds) else 0.0
-        max_spd = round(float(np.percentile(valid_speeds, 95)), 1) if len(valid_speeds) else 0.0
-        max_spd = min(max_spd, MAX_PHYSICAL_SPEED_KMH)
+        raw_speeds_kmh = kin["speeds_kmh"]
 
         obs_seconds = round(float(max(ts[-1] - ts[0], len(grp) * 0.16)), 1)
         obs_minutes = round(obs_seconds / 60.0, 2)
-        active_moves = int(np.sum(valid_speeds >= 14.0)) if len(valid_speeds) else 0
+        active_moves = int(np.sum(raw_speeds_kmh >= 14.0)) if len(raw_speeds_kmh) else 0
+        phys_ok = kin["step_ok"]
+        valid_steps = step_dist[phys_ok] if len(phys_ok) == len(step_dist) else step_dist
+        valid_speeds = (step_dist / dt_raw) * 3.6
+        if len(phys_ok) == len(valid_speeds):
+            valid_speeds = valid_speeds[phys_ok]
 
         on_pitch_ratio = float(grp["on_pitch"].mean())
         discipline = round(float(np.clip(0.55 + 0.40 * on_pitch_ratio, 0.4, 0.96)) * 100.0, 1)
@@ -219,9 +229,9 @@ def build_profiles_from_match_parquet(
         display_name = lineup.get(int(tid)) or f"Track #{int(tid)} ({t_names.get(team, team)})"
 
         # Peak valid movement frame closest to reported max_spd (ensures 100% numeric consistency!)
-        if len(raw_speeds_kmh) and np.any(phys_ok):
+        if len(valid_speeds) and len(phys_ok) == len(step_dist) and np.any(phys_ok):
             valid_indices = np.where(phys_ok)[0]
-            diffs = np.abs(raw_speeds_kmh[valid_indices] - max_spd)
+            diffs = np.abs(valid_speeds - max_spd)
             peak_i = int(valid_indices[int(np.argmin(diffs))])
             peak_fid = int(fids[min(peak_i + 1, len(fids) - 1)])
             peak_t = float(ts[min(peak_i + 1, len(ts) - 1)])

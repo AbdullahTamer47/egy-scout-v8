@@ -3,11 +3,15 @@ from __future__ import annotations
 
 import base64
 from bisect import bisect_right
+import ipaddress
 import json
 import os
 import re
+import shutil
+import socket
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Optional
@@ -22,6 +26,15 @@ from packages.scouting_core.fair_engine import (
     import_external_scouting_csv,
 )
 from packages.scouting_core.input_gate import assess_video_input_mode
+from packages.scouting_core.player_card import (
+    MIN_WORK_RATE_SECONDS,
+    assign_team_relative_positions,
+    build_player_card_stats,
+    compute_clean_trajectory_kinematics,
+    compute_match_percentiles,
+    get_position_label_dict,
+    stabilize_dataframe_homography_drift,
+)
 from packages.shared_contracts.config import (
     get_data_paths,
     get_repo_root,
@@ -52,9 +65,12 @@ from packages.tactics_engine.counterfactual import (
 )
 from packages.tactics_engine.matchup_optimizer import recommend_matchup_plan
 from packages.tactics_engine.moment_analyzer import (
+    _assign_roster_by_position,
     analyze_frame_moment_state,
     build_formation_blueprint,
     detect_live_team_formation,
+    enrich_arrows_with_probabilities,
+    match_masterclass_preset,
 )
 from packages.tactics_engine.playbook import diagnose_frame_tactics
 from services.cv_worker.local_pipeline import (
@@ -99,88 +115,76 @@ FRIENDLY_TEAM_NAMES: dict[str, tuple[str, str]] = {
 }
 
 FRIENDLY_TEAM_NAMES_AR: dict[str, tuple[str, str, str]] = {
-    "m1_ahly_sekka": ("السكة الحديد", "الأهلي", "الأهلي × السكة الحديد (3-0)"),
+    "m1_ahly_sekka": ("السكة الحديد", "الأهلي", "السكة الحديد × الأهلي (3-0)"),
     "m2_ahly_enppi": ("الأهلي", "إنبي", "الأهلي × إنبي (الدوري المصري)"),
-    "m3_enppi_mokawloon": ("المقاولون العرب", "إنبي", "إنبي × المقاولون العرب (الدوري المصري)"),
+    "m3_enppi_mokawloon": ("المقاولون العرب", "إنبي", "المقاولون العرب × إنبي (الدوري المصري)"),
 }
 
-# Real Verified 2025/2026 Egyptian Premier League Squads (Transfermarkt / LiveScore verified)
-AL_AHLY_2025_26 = [
-    {"jersey_number": 1, "name": "محمد الشناوي (GK)", "position": "GK", "is_starter": True},
-    {"jersey_number": 30, "name": "محمد هاني (RB)", "position": "RB", "is_starter": True},
-    {"jersey_number": 6, "name": "ياسر إبراهيم (CB)", "position": "CB", "is_starter": True},
-    {"jersey_number": 13, "name": "أشرف داري (CB)", "position": "CB", "is_starter": True},
-    {"jersey_number": 5, "name": "رامي ربيعة (CB)", "position": "CB", "is_starter": True},
-    {"jersey_number": 21, "name": "يحيى عطية الله (LB)", "position": "LB", "is_starter": True},
-    {"jersey_number": 17, "name": "مروان عطية (DM)", "position": "DM", "is_starter": True},
-    {"jersey_number": 36, "name": "أحمد نبيل كوكا (CM)", "position": "CM", "is_starter": True},
-    {"jersey_number": 22, "name": "إمام عاشور (CM)", "position": "CM", "is_starter": True},
-    {"jersey_number": 19, "name": "محمد مجدي أفشة (CAM)", "position": "CAM", "is_starter": True},
-    {"jersey_number": 14, "name": "حسين الشحات (LW)", "position": "LW", "is_starter": True},
-    {"jersey_number": 7, "name": "محمود تريزيجيه (LW)", "position": "LW", "is_starter": True},
-    {"jersey_number": 27, "name": "طاهر محمد طاهر (RW)", "position": "RW", "is_starter": True},
-    {"jersey_number": 9, "name": "محمد شريف (ST)", "position": "ST", "is_starter": True},
-]
+_PERSON_SEG_MODEL: Any = False
 
-ENPPI_2025_26 = [
-    {"jersey_number": 1, "name": "عبد الرحمن سمير (إنبي GK)", "position": "GK", "is_starter": True},
-    {"jersey_number": 31, "name": "أحمد محمود (إنبي RB)", "position": "RB", "is_starter": True},
-    {"jersey_number": 4, "name": "أحمد كالوشا (إنبي CB)", "position": "CB", "is_starter": True},
-    {"jersey_number": 5, "name": "أحمد صبيحة (إنبي CB)", "position": "CB", "is_starter": True},
-    {"jersey_number": 24, "name": "مهند بكري (إنبي CB)", "position": "CB", "is_starter": True},
-    {"jersey_number": 3, "name": "مروان داود (إنبي LB)", "position": "LB", "is_starter": True},
-    {"jersey_number": 6, "name": "زياد كمال (إنبي DM)", "position": "DM", "is_starter": True},
-    {"jersey_number": 17, "name": "عمار حمدي (إنبي CM)", "position": "CM", "is_starter": True},
-    {"jersey_number": 22, "name": "أحمد العجوز (إنبي CM)", "position": "CM", "is_starter": True},
-    {"jersey_number": 47, "name": "محمد حمدي (إنبي LM)", "position": "LW", "is_starter": True},
-    {"jersey_number": 7, "name": "أحمد نادر حواش (إنبي RW)", "position": "RW", "is_starter": True},
-    {"jersey_number": 11, "name": "محمد حتحوت (إنبي LW)", "position": "LW", "is_starter": True},
-    {"jersey_number": 9, "name": "محمد النحاس (إنبي ST)", "position": "ST", "is_starter": True},
-    {"jersey_number": 44, "name": "يوسف لبيب (إنبي ST)", "position": "ST", "is_starter": True},
-]
 
-PYRAMIDS_2025_26 = [
-    {"jersey_number": 1, "name": "أحمد الشناوي (بيراميدز GK)", "position": "GK", "is_starter": True},
-    {"jersey_number": 15, "name": "محمد الشيبي (بيراميدز RB)", "position": "RB", "is_starter": True},
-    {"jersey_number": 4, "name": "أحمد سامي (بيراميدز CB)", "position": "CB", "is_starter": True},
-    {"jersey_number": 5, "name": "علي جبر (بيراميدز CB)", "position": "CB", "is_starter": True},
-    {"jersey_number": 24, "name": "أسامة جلال (بيراميدز CB)", "position": "CB", "is_starter": True},
-    {"jersey_number": 21, "name": "محمد حمدي (بيراميدز LB)", "position": "LB", "is_starter": True},
-    {"jersey_number": 14, "name": "مهند لاشين (بيراميدز DM)", "position": "DM", "is_starter": True},
-    {"jersey_number": 8, "name": "بلاتي توريه (بيراميدز CM)", "position": "CM", "is_starter": True},
-    {"jersey_number": 18, "name": "وليد الكرتي (بيراميدز CAM)", "position": "CAM", "is_starter": True},
-    {"jersey_number": 10, "name": "رمضان صبحي (بيراميدز LW)", "position": "LW", "is_starter": True},
-    {"jersey_number": 11, "name": "مصطفى زيكو (بيراميدز RW)", "position": "RW", "is_starter": True},
-    {"jersey_number": 9, "name": "فيستون ماييلي (بيراميدز ST)", "position": "ST", "is_starter": True},
-]
+def _get_person_seg_model(data_dir: Path) -> Any:
+    """Lazy-load yolo11n-seg.pt when available on disk to isolate target player portraits from background clutter."""
+    global _PERSON_SEG_MODEL
+    if _PERSON_SEG_MODEL is not False:
+        return _PERSON_SEG_MODEL
+    seg_path = data_dir / "weights" / "yolo11n-seg.pt"
+    if not seg_path.is_file():
+        _PERSON_SEG_MODEL = None
+        return None
+    try:
+        from ultralytics import YOLO
 
-AL_MASRY_2025_26 = [
-    {"jersey_number": 1, "name": "عصام ثروت (المصري GK)", "position": "GK", "is_starter": True},
-    {"jersey_number": 7, "name": "كريم العراقي (المصري RB)", "position": "RB", "is_starter": True},
-    {"jersey_number": 2, "name": "باهر المحمدي (المصري CB)", "position": "CB", "is_starter": True},
-    {"jersey_number": 5, "name": "خالد صبحي (المصري CB)", "position": "CB", "is_starter": True},
-    {"jersey_number": 3, "name": "محمد شكري (المصري LB)", "position": "LB", "is_starter": True},
-    {"jersey_number": 6, "name": "محمد مخلوف (المصري DM)", "position": "DM", "is_starter": True},
-    {"jersey_number": 14, "name": "محمود حمادة (المصري CM)", "position": "CM", "is_starter": True},
-    {"jersey_number": 30, "name": "عبد الرحيم دغموم (المصري CAM)", "position": "CAM", "is_starter": True},
-    {"jersey_number": 11, "name": "محمد الشامي (المصري RW)", "position": "RW", "is_starter": True},
-    {"jersey_number": 10, "name": "كريم بامبو (المصري LW)", "position": "LW", "is_starter": True},
-    {"jersey_number": 9, "name": "صلاح محسن (المصري ST)", "position": "ST", "is_starter": True},
-]
+        _PERSON_SEG_MODEL = YOLO(str(seg_path))
+    except Exception:
+        _PERSON_SEG_MODEL = None
+    return _PERSON_SEG_MODEL
 
-EL_GAISH_2025_26 = [
-    {"jersey_number": 1, "name": "عمر رضوان (طلائع الجيش GK)", "position": "GK", "is_starter": True},
-    {"jersey_number": 3, "name": "عمرو طارق (طلائع الجيش CB)", "position": "CB", "is_starter": True},
-    {"jersey_number": 5, "name": "خالد سطوحي (طلائع الجيش CB)", "position": "CB", "is_starter": True},
-    {"jersey_number": 12, "name": "محمود البدري (طلائع الجيش LB)", "position": "LB", "is_starter": True},
-    {"jersey_number": 2, "name": "أحمد متعب (طلائع الجيش RB)", "position": "RB", "is_starter": True},
-    {"jersey_number": 6, "name": "وليد بن بلة (طلائع الجيش DM)", "position": "DM", "is_starter": True},
-    {"jersey_number": 8, "name": "حسام الدين السويسي (طلائع الجيش CM)", "position": "CM", "is_starter": True},
-    {"jersey_number": 10, "name": "محمود عبد العزيز (طلائع الجيش CAM)", "position": "CAM", "is_starter": True},
-    {"jersey_number": 14, "name": "إسلام محارب (طلائع الجيش LW)", "position": "LW", "is_starter": True},
-    {"jersey_number": 11, "name": "محمود أبو جودة (طلائع الجيش RW)", "position": "RW", "is_starter": True},
-    {"jersey_number": 9, "name": "إسماعيل أورو أجورو (طلائع الجيش ST)", "position": "ST", "is_starter": True},
-]
+_CLUBS_ROSTER_CACHE: Optional[dict[str, Any]] = None
+
+
+def _load_clubs_rosters_json() -> dict[str, Any]:
+    """Load verified club squads from datasets/rosters/clubs_2025_26.json."""
+    global _CLUBS_ROSTER_CACHE
+    if _CLUBS_ROSTER_CACHE is not None:
+        return _CLUBS_ROSTER_CACHE
+    json_path = Path(__file__).resolve().parents[2] / "datasets" / "rosters" / "clubs_2025_26.json"
+    if json_path.is_file():
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        _CLUBS_ROSTER_CACHE = data
+        return data
+    return {"schema_version": "10.5", "updated_at": "", "clubs": {}}
+
+
+def _squad_from_clubs_json(club_id: str, club_tag_ar: Optional[str] = None) -> list[dict[str, Any]]:
+    clubs = _load_clubs_rosters_json().get("clubs", {})
+    club = clubs.get(club_id, {})
+    out: list[dict[str, Any]] = []
+    for p in club.get("players", []):
+        nar = str(p.get("name_ar") or p.get("name") or "").strip()
+        nen = str(p.get("name_en") or nar).strip()
+        pos = str(p.get("position") or "CM").strip().upper()
+        tag = f"({club_tag_ar} {pos})" if club_tag_ar else f"({pos})"
+        out.append(
+            {
+                "jersey_number": int(p.get("jersey_number") or 0),
+                "name": f"{nar} {tag}",
+                "name_ar": nar,
+                "name_en": nen,
+                "position": pos,
+                "is_starter": bool(p.get("is_starter", True)),
+            }
+        )
+    return out
+
+
+AL_AHLY_2025_26 = _squad_from_clubs_json("al_ahly")
+ENPPI_2025_26 = _squad_from_clubs_json("enppi", "إنبي")
+PYRAMIDS_2025_26 = _squad_from_clubs_json("pyramids", "بيراميدز")
+AL_MASRY_2025_26 = _squad_from_clubs_json("al_masry", "المصري")
+EL_GAISH_2025_26 = _squad_from_clubs_json("el_gaish", "طلائع الجيش")
+MOKAWLOON_2025_26 = _squad_from_clubs_json("mokawloon", "المقاولون")
+EL_SEKKA_2025_26 = _squad_from_clubs_json("el_sekka")
 
 
 def _tag_team(squad: list[dict[str, Any]], team_key: str) -> list[dict[str, Any]]:
@@ -191,26 +195,68 @@ DEFAULT_MATCH_ROSTERS: dict[str, list[dict[str, Any]]] = {
     "m2_ahly_enppi": _tag_team(AL_AHLY_2025_26, "team_a") + _tag_team(ENPPI_2025_26, "team_b"),
     "custom_1795438320857": _tag_team(AL_AHLY_2025_26, "team_a") + _tag_team(EL_GAISH_2025_26, "team_b"),
     "custom_1795439012452": _tag_team(PYRAMIDS_2025_26, "team_a") + _tag_team(AL_MASRY_2025_26, "team_b"),
-    "m1_ahly_sekka": [
-        {"jersey_number": 1, "name": "حارس السكة الحديد (GK)", "position": "GK", "team": "team_a", "is_starter": True},
-        {"jersey_number": 4, "name": "مدافع السكة الحديد #4 (CB)", "position": "CB", "team": "team_a", "is_starter": True},
-        {"jersey_number": 5, "name": "مدافع السكة الحديد #5 (CB)", "position": "CB", "team": "team_a", "is_starter": True},
-        {"jersey_number": 6, "name": "ارتكاز السكة الحديد #6 (DM)", "position": "DM", "team": "team_a", "is_starter": True},
-        {"jersey_number": 9, "name": "مهاجم السكة الحديد #9 (ST)", "position": "ST", "team": "team_a", "is_starter": True},
-    ] + _tag_team(AL_AHLY_2025_26, "team_b"),
-    "m3_enppi_mokawloon": [
-        {"jersey_number": 18, "name": "محمود أبو السعود (المقاولون GK)", "position": "GK", "team": "team_a", "is_starter": True},
-        {"jersey_number": 2, "name": "أمير عابد (المقاولون RB)", "position": "RB", "team": "team_a", "is_starter": True},
-        {"jersey_number": 20, "name": "أحمد علاء (المقاولون CB)", "position": "CB", "team": "team_a", "is_starter": True},
-        {"jersey_number": 15, "name": "جوزيف أوشايا (المقاولون LB)", "position": "LB", "team": "team_a", "is_starter": True},
-        {"jersey_number": 6, "name": "عمر فتحي (المقاولون DM)", "position": "DM", "team": "team_a", "is_starter": True},
-        {"jersey_number": 10, "name": "محمد سالم (المقاولون ST)", "position": "ST", "team": "team_a", "is_starter": True},
-    ] + _tag_team(ENPPI_2025_26, "team_b"),
+    "m1_ahly_sekka": _tag_team(EL_SEKKA_2025_26, "team_a") + _tag_team(AL_AHLY_2025_26, "team_b"),
+    "m3_enppi_mokawloon": _tag_team(MOKAWLOON_2025_26, "team_a") + _tag_team(ENPPI_2025_26, "team_b"),
 }
 
 
+DEFAULT_GROQ_MODELS: list[dict[str, str]] = [
+    {"id": "auto", "ar": "تلقائي ذكي", "en": "Auto Smart Router"},
+    {"id": "openai/gpt-oss-120b", "ar": "GPT-OSS 120B (للخطط المعقدة)", "en": "GPT-OSS 120B (Deep Tactical)"},
+    {"id": "qwen/qwen3.8-27b", "ar": "Qwen 3.8 27B (سريع بالعربي)", "en": "Qwen 3.8 27B (Fast Arabic)"},
+    {"id": "openai/gpt-oss-20b", "ar": "GPT-OSS 20B (فائق السرعة)", "en": "GPT-OSS 20B (Turbo)"},
+    {"id": "allam-2-7b", "ar": "ALLaM 2 7B (عربي)", "en": "ALLaM 2 7B (Arabic)"},
+]
+
+
+def _fallback_identity(team: str, team_ar: str, base_track_id: int) -> dict[str, Any]:
+    """Return an honest unverified track identity without inventing jersey numbers or player names."""
+    return {
+        "jersey_number": None,
+        "verified_name": None,
+        "verified": False,
+        "display_label": f"{team_ar} • T{int(base_track_id)}",
+    }
+
+
+def _validate_remote_url(url: str) -> str:
+    """Strict URL allowlist blocking file://, localhost, and private/loopback/link-local IPs (SSRF guard)."""
+    clean_url = (url or "").strip()
+    if not clean_url:
+        raise ValueError("Empty URL")
+    parsed = urllib.parse.urlparse(clean_url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https", "rtsp", "rtmp"):
+        raise ValueError(f"Unsupported URL scheme: {scheme or 'none'}")
+    hostname = (parsed.hostname or "").strip().lower()
+    if not hostname:
+        raise ValueError("URL must contain a valid hostname")
+    if hostname == "localhost" or hostname.endswith((".localhost", ".local", ".internal")):
+        raise ValueError("Localhost and internal hostnames are not allowed")
+    port = parsed.port or (443 if scheme == "https" else (554 if scheme == "rtsp" else (1935 if scheme == "rtmp" else 80)))
+    try:
+        infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise ValueError(f"Cannot resolve hostname: {hostname}") from exc
+    if not infos:
+        raise ValueError(f"No IP addresses resolved for {hostname}")
+    for info in infos:
+        ip_str = info[4][0].split("%")[0]
+        ip_obj = ipaddress.ip_address(ip_str)
+        if (
+            ip_obj.is_private
+            or ip_obj.is_loopback
+            or ip_obj.is_link_local
+            or ip_obj.is_reserved
+            or ip_obj.is_multicast
+            or ip_obj.is_unspecified
+        ):
+            raise ValueError(f"Blocked private or loopback IP address for {hostname}")
+    return clean_url
+
+
 class ScoutV8Service:
-    """Orchestrator over Parquet artifacts, real video crops, and tenant metadata."""
+    """Orchestrator over Parquet artifacts, real video crops, Scouting & Tactics."""
 
     def __init__(self) -> None:
         self.repo_root = get_repo_root()
@@ -224,6 +270,8 @@ class ScoutV8Service:
         self._meta_cache: dict[str, dict[str, Any]] = {}
         self._match_json_meta: dict[str, dict[str, Any]] = {}
         self._phase0_cache: dict[str, dict[str, Any]] = {}
+        self._player_card_pool_cache: dict[tuple[str, float], dict[str, Any]] = {}
+        self._groq_models_cache: tuple[float, list[dict[str, str]], str] | None = None
 
     def _load_env_file(self) -> None:
         """Auto-load backend .env variables (GROQ_API_KEY, GEMINI_API_KEY, etc.) silently."""
@@ -460,73 +508,169 @@ class ScoutV8Service:
                     pass
 
     def render_track_crop_jpeg(
-        self, match_id: str, track_id: int, frame_id: Optional[int] = None
+        self, match_id: str, track_id: int, frame_id: Optional[int] = None, portrait: bool = False
     ) -> bytes:
         """Extract a clean, unoccluded, head-safe portrait crop JPEG from the match video."""
         mid = self._validate_id(match_id)
+        if portrait:
+            cache_tag = f"t{int(track_id)}_p{int(frame_id) if frame_id is not None else 'best'}"
+            cache_path = self.data_paths.cache / "crops_v4" / mid / f"{cache_tag}.jpg"
+            if cache_path.is_file():
+                return cache_path.read_bytes()
+
         _, v8_df = self.get_legacy_and_v8_frames(mid)
         t_rows = v8_df[v8_df["track_id"] == int(track_id)]
         if t_rows.empty:
             raise FileNotFoundError(f"Track {track_id} not found in {mid}")
 
-        if frame_id is not None and (t_rows["frame_id"] == int(frame_id)).any():
-            row = t_rows[t_rows["frame_id"] == int(frame_id)].iloc[0]
-        else:
-            # Score every candidate frame: reward large centered boxes, strongly penalize
-            # border clipping (headless crops) and overlap with neighboring players!
-            best_score = -1.0
-            best_row = t_rows.iloc[0]
-            for _, cand in t_rows.iterrows():
-                cx1, cy1, cx2, cy2 = float(cand["x1"]), float(cand["y1"]), float(cand["x2"]), float(cand["y2"])
-                area = max(1.0, (cx2 - cx1) * (cy2 - cy1))
-                border_ok = 1.0 if (cx1 > 16 and cy1 > 28 and cx2 < 1264 and cy2 < 705) else 0.2
-                others = v8_df[(v8_df["frame_id"] == int(cand["frame_id"])) & (v8_df["track_id"] != int(track_id))]
-                max_iou = 0.0
-                for _, ob in others.iterrows():
-                    ix1, iy1 = max(cx1, float(ob["x1"])), max(cy1, float(ob["y1"]))
-                    ix2, iy2 = min(cx2, float(ob["x2"])), min(cy2, float(ob["y2"]))
-                    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
-                    if inter > 0.0:
-                        max_iou = max(max_iou, inter / area)
-                isolation = 1.0 if max_iou < 0.05 else max(0.1, 1.0 - max_iou * 2.5)
-                sc = area * border_ok * isolation
-                if sc > best_score:
-                    best_score = sc
-                    best_row = cand
-            row = best_row
-
-        fid = int(row["frame_id"])
-        cache_path = self.data_paths.cache / "crops_v3" / mid / f"t{int(track_id)}_f{fid}.jpg"
-        if cache_path.is_file():
-            return cache_path.read_bytes()
+        if not portrait and frame_id is not None and (t_rows["frame_id"] == int(frame_id)).any():
+            fid_exact = int(frame_id)
+            legacy_cache = self.data_paths.cache / "crops_v3" / mid / f"t{int(track_id)}_f{fid_exact}.jpg"
+            if legacy_cache.is_file():
+                return legacy_cache.read_bytes()
 
         vpath = self.get_video_path(mid)
         cap, proxy = open_video_unicode(vpath)
         try:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, fid)
-            ok, frame = cap.read()
-            if not ok or frame is None:
-                raise FileNotFoundError(f"Frame {fid} unreadable")
-            h, w = frame.shape[:2]
-            x1, y1, x2, y2 = float(row["x1"]), float(row["y1"]), float(row["x2"]), float(row["y2"])
-            bw = max(12.0, x2 - x1)
-            bh = max(20.0, y2 - y1)
-            # Asymmetric head-safe padding (extra margin above head!)
-            pad_x = max(16.0, bw * 0.36)
-            pad_top = max(24.0, bh * 0.34)
-            pad_bot = max(14.0, bh * 0.16)
-            cx1 = int(max(0, round(x1 - pad_x)))
-            cy1 = int(max(0, round(y1 - pad_top)))
-            cx2 = int(min(w, round(x2 + pad_x)))
-            cy2 = int(min(h, round(y2 + pad_bot)))
-            crop = frame[cy1:cy2, cx1:cx2]
-            if crop.size == 0:
-                crop = frame[0 : min(180, h), 0 : min(140, w)]
-            target_h = 220
-            scale = target_h / max(1, crop.shape[0])
-            target_w = max(80, min(220, int(round(crop.shape[1] * scale))))
-            resized = cv2.resize(crop, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
-            imwrite_unicode(cache_path, resized, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            vid_w = max(320, int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1280)
+            vid_h = max(240, int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 720)
+            margin_x = max(12.0, vid_w * 0.015)
+            margin_top = max(20.0, vid_h * 0.035)
+            margin_bot = max(12.0, vid_h * 0.025)
+
+            if frame_id is not None and (t_rows["frame_id"] == int(frame_id)).any():
+                candidates = [t_rows[t_rows["frame_id"] == int(frame_id)].iloc[0]]
+            else:
+                # Vectorized/grouped candidate scoring: reward large centered boxes, penalize border clipping & neighbor IoU
+                frame_groups = {
+                    int(fid_k): grp[["track_id", "x1", "y1", "x2", "y2"]].to_numpy(dtype=np.float64)
+                    for fid_k, grp in v8_df[v8_df["frame_id"].isin(t_rows["frame_id"].unique())].groupby("frame_id")
+                }
+                scored: list[tuple[float, Any]] = []
+                tid_f = float(track_id)
+                for _, cand in t_rows.iterrows():
+                    cx1, cy1, cx2, cy2 = float(cand["x1"]), float(cand["y1"]), float(cand["x2"]), float(cand["y2"])
+                    area = max(1.0, (cx2 - cx1) * (cy2 - cy1))
+                    border_ok = (
+                        1.0
+                        if (cx1 > margin_x and cy1 > margin_top and cx2 < (vid_w - margin_x) and cy2 < (vid_h - margin_bot))
+                        else 0.2
+                    )
+                    arr = frame_groups.get(int(cand["frame_id"]))
+                    max_iou = 0.0
+                    if arr is not None and len(arr) > 1:
+                        others = arr[arr[:, 0] != tid_f]
+                        if len(others) > 0:
+                            ix1 = np.maximum(cx1, others[:, 1])
+                            iy1 = np.maximum(cy1, others[:, 2])
+                            ix2 = np.minimum(cx2, others[:, 3])
+                            iy2 = np.minimum(cy2, others[:, 4])
+                            inter = np.maximum(0.0, ix2 - ix1) * np.maximum(0.0, iy2 - iy1)
+                            max_iou = float(np.max(inter / area))
+                    isolation = 1.0 if max_iou < 0.05 else max(0.1, 1.0 - max_iou * 2.5)
+                    scored.append((area * border_ok * isolation, cand))
+                scored.sort(key=lambda item: item[0], reverse=True)
+                candidates = [c for _, c in scored[: (8 if portrait else 1)]]
+
+            def _extract_padded_crop(frame_bgr: np.ndarray, row_obj: Any, is_portrait: bool) -> np.ndarray:
+                fh, fw = frame_bgr.shape[:2]
+                x1, y1, x2, y2 = float(row_obj["x1"]), float(row_obj["y1"]), float(row_obj["x2"]), float(row_obj["y2"])
+                bw = max(12.0, x2 - x1)
+                bh = max(20.0, y2 - y1)
+                if is_portrait:
+                    pad_x = max(18.0, bw * 0.42)
+                    pad_top = max(28.0, bh * 0.38)
+                    pad_bot = max(14.0, bh * 0.16)
+                else:
+                    pad_x = max(16.0, bw * 0.36)
+                    pad_top = max(24.0, bh * 0.34)
+                    pad_bot = max(14.0, bh * 0.16)
+                cx1 = int(max(0, round(x1 - pad_x)))
+                cy1 = int(max(0, round(y1 - pad_top)))
+                cx2 = int(min(fw, round(x2 + pad_x)))
+                cy2 = int(min(fh, round(y2 + pad_bot)))
+                crop_img = frame_bgr[cy1:cy2, cx1:cx2]
+                if crop_img.size == 0:
+                    crop_img = frame_bgr[0 : min(180, fh), 0 : min(140, fw)]
+                return crop_img
+
+            best_crop = None
+            best_fid = int(candidates[0]["frame_id"])
+            if not portrait:
+                fid = int(candidates[0]["frame_id"])
+                cache_path = self.data_paths.cache / "crops_v3" / mid / f"t{int(track_id)}_f{fid}.jpg"
+                if cache_path.is_file():
+                    return cache_path.read_bytes()
+                cap.set(cv2.CAP_PROP_POS_FRAMES, fid)
+                ok, frame = cap.read()
+                if not ok or frame is None:
+                    raise FileNotFoundError(f"Frame {fid} unreadable")
+                crop = _extract_padded_crop(frame, candidates[0], is_portrait=False)
+                target_h = 220
+                scale = target_h / max(1, crop.shape[0])
+                target_w = max(80, min(220, int(round(crop.shape[1] * scale))))
+                resized = cv2.resize(crop, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
+                imwrite_unicode(cache_path, resized, [cv2.IMWRITE_JPEG_QUALITY, 92])
+                return cache_path.read_bytes()
+
+            best_sharp_score = -1.0
+            for cand in candidates:
+                fid_c = int(cand["frame_id"])
+                cap.set(cv2.CAP_PROP_POS_FRAMES, fid_c)
+                ok, frame = cap.read()
+                if not ok or frame is None:
+                    continue
+                crop_c = _extract_padded_crop(frame, cand, is_portrait=True)
+                gray = cv2.cvtColor(crop_c, cv2.COLOR_BGR2GRAY)
+                lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+                area_c = max(1.0, (float(cand["x2"]) - float(cand["x1"])) * (float(cand["y2"]) - float(cand["y1"])))
+                sharp_score = lap_var * (area_c ** 0.5)
+                if sharp_score > best_sharp_score or best_crop is None:
+                    best_sharp_score = sharp_score
+                    best_crop = crop_c
+                    best_fid = fid_c
+
+            if best_crop is None:
+                raise FileNotFoundError(f"Frame {best_fid} unreadable")
+
+            target_h = 360
+            scale = target_h / max(1, best_crop.shape[0])
+            target_w = max(160, min(320, int(round(best_crop.shape[1] * scale))))
+            resized = cv2.resize(best_crop, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
+
+            # Isolate central player with yolo11n-seg when available so neighbouring limbs/grass are softly dimmed
+            seg_model = _get_person_seg_model(self.data_paths.root)
+            if seg_model is not None:
+                try:
+                    s_res = seg_model.predict(resized, classes=[0], conf=0.25, imgsz=320, verbose=False)[0]
+                    if s_res.masks is not None and len(s_res.masks.data) > 0:
+                        masks_np = s_res.masks.data.cpu().numpy()
+                        boxes_np = s_res.boxes.xyxy.cpu().numpy()
+                        cx_t, cy_t = target_w * 0.5, target_h * 0.52
+                        best_m_idx = int(
+                            np.argmin(
+                                [
+                                    np.hypot(0.5 * (b[0] + b[2]) - cx_t, 0.5 * (b[1] + b[3]) - cy_t)
+                                    for b in boxes_np
+                                ]
+                            )
+                        )
+                        raw_mask = cv2.resize(
+                            masks_np[best_m_idx].astype(np.float32),
+                            (target_w, target_h),
+                            interpolation=cv2.INTER_LINEAR,
+                        )
+                        soft_mask = cv2.GaussianBlur(np.clip(raw_mask, 0.0, 1.0), (11, 11), 3.0)[..., None]
+                        bg_dim = (cv2.GaussianBlur(resized, (13, 13), 4.0).astype(np.float32) * 0.34)
+                        resized = np.clip(resized.astype(np.float32) * soft_mask + bg_dim * (1.0 - soft_mask), 0, 255).astype(np.uint8)
+                except Exception:
+                    pass
+
+            blurred = cv2.GaussianBlur(resized, (0, 0), 1.1)
+            sharpened = cv2.addWeighted(resized, 1.22, blurred, -0.22, 0)
+            cache_tag = f"t{int(track_id)}_p{int(frame_id) if frame_id is not None else 'best'}"
+            cache_path = self.data_paths.cache / "crops_v5" / mid / f"{cache_tag}.jpg"
+            imwrite_unicode(cache_path, sharpened, [cv2.IMWRITE_JPEG_QUALITY, 92])
             return cache_path.read_bytes()
         finally:
             cap.release()
@@ -535,6 +679,822 @@ class ScoutV8Service:
                     proxy.unlink()
                 except OSError:
                     pass
+
+    def _player_photo_path(self, tenant_id: str, match_id: str, track_id: int) -> Path:
+        return (
+            self.data_paths.outputs
+            / "player_photos"
+            / self._validate_id(tenant_id)
+            / self._validate_id(match_id)
+            / f"t{int(track_id)}.jpg"
+        )
+
+    def save_player_photo(self, tenant_id: str, match_id: str, track_id: int, raw: bytes) -> Path:
+        """Validate, center-crop 3:4, resize to 720px height, and strip EXIF metadata as JPEG."""
+        if not raw:
+            raise ValueError("Empty image file")
+        if len(raw) > 5 * 1024 * 1024:
+            raise ValueError("Image size exceeds 5 MB limit")
+        arr = np.frombuffer(raw, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None or img.size == 0:
+            raise ValueError("Invalid or unsupported image format")
+
+        h, w = img.shape[:2]
+        target_ratio = 3.0 / 4.0
+        cur_ratio = w / max(1, h)
+        if cur_ratio > target_ratio:
+            new_w = max(1, int(round(h * target_ratio)))
+            x0 = (w - new_w) // 2
+            cropped = img[:, x0 : x0 + new_w]
+        else:
+            new_h = max(1, int(round(w / target_ratio)))
+            y0 = max(0, (h - new_h) // 4)
+            cropped = img[y0 : min(h, y0 + new_h), :]
+
+        out_img = cv2.resize(cropped, (540, 720), interpolation=cv2.INTER_LANCZOS4)
+        dest = self._player_photo_path(tenant_id, match_id, track_id)
+        imwrite_unicode(dest, out_img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        return dest
+
+    def delete_player_photo(self, tenant_id: str, match_id: str, track_id: int) -> bool:
+        dest = self._player_photo_path(tenant_id, match_id, track_id)
+        if dest.is_file():
+            dest.unlink()
+            return True
+        return False
+
+    def get_player_photo_jpeg(self, tenant_id: str, match_id: str, track_id: int) -> tuple[bytes, str]:
+        dest = self._player_photo_path(tenant_id, match_id, track_id)
+        if dest.is_file():
+            return dest.read_bytes(), "upload"
+        pool = self._compute_match_card_pool(match_id)
+        entry = pool["all_tracks"].get(int(track_id))
+        peak_fid = entry.get("peak_frame_id") if isinstance(entry, dict) else None
+        return self.render_track_crop_jpeg(match_id, track_id, frame_id=peak_fid, portrait=True), "video"
+
+    def list_verified_rosters(self) -> dict[str, Any]:
+        """Return verified club squads from datasets/rosters/clubs_2025_26.json."""
+        return _load_clubs_rosters_json()
+
+    def import_match_roster(self, tenant_id: str, match_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Bind verified club rosters or custom player list to a match and refresh consolidated cards."""
+        mid = self._validate_id(match_id)
+        clubs = _load_clubs_rosters_json().get("clubs", {})
+        club_a_id = str(payload.get("club_a_id") or "").strip()
+        club_b_id = str(payload.get("club_b_id") or "").strip()
+        custom_players = payload.get("custom_players") if isinstance(payload.get("custom_players"), list) else []
+
+        roster_entries: list[dict[str, Any]] = []
+        if club_a_id and club_a_id in clubs:
+            roster_entries.extend(_tag_team(_squad_from_clubs_json(club_a_id), "team_a"))
+        if club_b_id and club_b_id in clubs:
+            tag_ar = str(clubs[club_b_id].get("name_ar") or "")
+            roster_entries.extend(_tag_team(_squad_from_clubs_json(club_b_id, tag_ar), "team_b"))
+        for cp in custom_players:
+            if not isinstance(cp, dict):
+                continue
+            nar = str(cp.get("name_ar") or cp.get("name") or "").strip()
+            if not nar:
+                continue
+            nen = str(cp.get("name_en") or nar).strip()
+            pos = str(cp.get("position") or "CM").strip().upper()
+            t_key = "team_b" if str(cp.get("team") or "team_a") == "team_b" else "team_a"
+            roster_entries.append(
+                {
+                    "jersey_number": int(cp.get("jersey_number") or 0),
+                    "name": f"{nar} ({pos})",
+                    "name_ar": nar,
+                    "name_en": nen,
+                    "position": pos,
+                    "team": t_key,
+                    "is_starter": bool(cp.get("is_starter", True)),
+                }
+            )
+        if not roster_entries:
+            raise ValueError("No valid club_a_id, club_b_id, or custom_players supplied")
+
+        saved_lineup = self._load_qa_lineup(tenant_id, mid)
+        saved_lineup["official_roster"] = roster_entries
+        if payload.get("reset_overrides"):
+            saved_lineup["track_overrides"] = {}
+        self._save_qa_lineup(tenant_id, mid, saved_lineup)
+        self._player_card_pool_cache.clear()
+        cards_res = self.list_player_cards(tenant_id, mid)
+        return {"status": "imported", "roster_count": len(roster_entries), **cards_res}
+
+    def save_batch_player_photos(
+        self,
+        tenant_id: str,
+        match_id: str,
+        team: str,
+        items: list[tuple[str, bytes]],
+    ) -> dict[str, Any]:
+        """Bulk-match uploaded filenames (by jersey number or player name) to team tracks and save crops."""
+        mid = self._validate_id(match_id)
+        team_filter = "team_b" if str(team) == "team_b" else "team_a"
+        cards_res = self.list_player_cards(tenant_id, mid)
+        team_cards = [c for c in cards_res.get("players", []) if c.get("team") == team_filter]
+
+        uploaded: list[dict[str, Any]] = []
+        unmatched: list[str] = []
+        for fname, raw in items:
+            stem = Path(fname).stem.lower()
+            norm_stem = re.sub(r"[^a-z0-9\u0600-\u06ff]+", " ", stem).strip()
+            matched_card = None
+
+            nums = re.findall(r"\d+", stem)
+            if nums:
+                j_num = int(nums[0])
+                for c in team_cards:
+                    if c.get("jersey_number") == j_num:
+                        matched_card = c
+                        break
+
+            if matched_card is None and norm_stem:
+                for c in team_cards:
+                    candidates_txt = " ".join(
+                        [
+                            str(c.get("display_label") or "").lower(),
+                            str(c.get("display_label_en") or "").lower(),
+                            str(c.get("verified_name") or "").lower(),
+                        ]
+                    )
+                    if all(tok in candidates_txt for tok in norm_stem.split()[:2]):
+                        matched_card = c
+                        break
+
+            if matched_card is None:
+                unmatched.append(fname)
+                continue
+
+            tid = int(matched_card["track_id"])
+            self.save_player_photo(tenant_id, mid, tid, raw)
+            card = self.get_player_card(tenant_id, mid, tid)
+            uploaded.append(
+                {
+                    "filename": fname,
+                    "track_id": tid,
+                    "jersey_number": card.get("jersey_number"),
+                    "display_label": card.get("display_label"),
+                    "photo_url": card.get("photo_url"),
+                }
+            )
+        return {"uploaded": uploaded, "unmatched": unmatched, "uploaded_count": len(uploaded)}
+
+    def _lookup_public_player_photo_bytes(self, player_name_en: str, player_name_ar: str = "") -> Optional[bytes]:
+        """Fetch licensed/official player cutout or thumbnail from TheSportsDB or Wikipedia REST API."""
+        allowed_img_hosts = {
+            "www.thesportsdb.com",
+            "r2.thesportsdb.com",
+            "upload.wikimedia.org",
+        }
+        headers = {"User-Agent": "EGY-SCOUT-Pro-Studio/10.5 (Football Analytics)"}
+        queries = [q.strip() for q in (player_name_en, player_name_ar) if q and q.strip() and "T" not in q]
+
+        for q in queries:
+            # 1. Try TheSportsDB free v1 search (often returns transparent PNG player cutouts!)
+            try:
+                tsdb_url = f"https://www.thesportsdb.com/api/v1/json/3/searchplayers.php?p={urllib.parse.quote(q)}"
+                req = urllib.request.Request(tsdb_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=4) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                players = data.get("player") or []
+                for p in players:
+                    if str(p.get("strSport") or "").lower() not in ("soccer", ""):
+                        continue
+                    for img_key in ("strCutout", "strThumb", "strRender"):
+                        img_u = str(p.get(img_key) or "").strip()
+                        if not img_u.startswith("https://"):
+                            continue
+                        host = (urllib.parse.urlparse(img_u).hostname or "").lower()
+                        if host in allowed_img_hosts:
+                            img_req = urllib.request.Request(img_u, headers=headers)
+                            with urllib.request.urlopen(img_req, timeout=5) as ir:
+                                raw = ir.read(5 * 1024 * 1024)
+                            if len(raw) > 2048:
+                                return raw
+            except Exception:
+                pass
+
+            # 2. Try Wikipedia REST summary thumbnail (EN / AR)
+            for wiki_lang in ("en", "ar"):
+                try:
+                    title_slug = urllib.parse.quote(q.replace(" ", "_"))
+                    w_url = f"https://{wiki_lang}.wikipedia.org/api/rest_v1/page/summary/{title_slug}"
+                    req = urllib.request.Request(w_url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=4) as resp:
+                        w_data = json.loads(resp.read().decode("utf-8"))
+                    thumb_u = str((w_data.get("thumbnail") or {}).get("source") or "").strip()
+                    if thumb_u.startswith("https://"):
+                        host = (urllib.parse.urlparse(thumb_u).hostname or "").lower()
+                        if host in allowed_img_hosts:
+                            img_req = urllib.request.Request(thumb_u, headers=headers)
+                            with urllib.request.urlopen(img_req, timeout=5) as ir:
+                                raw = ir.read(5 * 1024 * 1024)
+                            if len(raw) > 2048:
+                                return raw
+                except Exception:
+                    pass
+        return None
+
+    def fetch_verified_player_photo(self, tenant_id: str, match_id: str, track_id: int) -> dict[str, Any]:
+        """Auto-fetch real headshot for a verified/GK-matched player from TheSportsDB/Wikimedia."""
+        mid = self._validate_id(match_id)
+        card = self.get_player_card(tenant_id, mid, track_id)
+        if card.get("identity_source") == "unverified":
+            raise ValueError("وثّق هوية اللاعب أولاً (من مراجعة الهويات) قبل جلب صورته الرسمية.")
+        raw = self._lookup_public_player_photo_bytes(
+            str(card.get("display_label_en") or ""),
+            str(card.get("display_label") or ""),
+        )
+        if not raw:
+            raise ValueError("لم يتم العثور على صورة عامة للاعب — يمكنك رفع صورته مباشرة.")
+        self.save_player_photo(tenant_id, mid, int(track_id), raw)
+        updated = self.get_player_card(tenant_id, mid, int(track_id))
+        return {"status": "fetched", "card": updated}
+
+    def fetch_all_verified_photos(self, tenant_id: str, match_id: str) -> dict[str, Any]:
+        mid = self._validate_id(match_id)
+        cards = self.list_player_cards(tenant_id, mid).get("players", [])
+        fetched_count = 0
+        for c in cards:
+            if c.get("identity_source") == "unverified" or c.get("photo_source") == "upload":
+                continue
+            raw = self._lookup_public_player_photo_bytes(
+                str(c.get("display_label_en") or ""),
+                str(c.get("display_label") or ""),
+            )
+            if raw:
+                try:
+                    self.save_player_photo(tenant_id, mid, int(c["track_id"]), raw)
+                    fetched_count += 1
+                except Exception:
+                    pass
+        return {"fetched_count": fetched_count, **self.list_player_cards(tenant_id, mid)}
+
+    def get_compute_status(self) -> dict[str, Any]:
+        """Report Cloud-First acceleration readiness without ever exposing API secrets."""
+        dev = get_compute_provider().get_device_info()
+        has_groq = bool(os.environ.get("GROQ_API_KEY", "").strip().startswith("gsk_"))
+        has_rf = bool(os.environ.get("ROBOFLOW_API_KEY", "").strip())
+        worker_url = os.environ.get("EGY_SCOUT_CLOUD_WORKER_URL", "").strip()
+        if worker_url:
+            mode = "cloud_gpu_worker"
+        elif has_rf:
+            mode = "roboflow_serverless_gpu + groq_vision" if has_groq else "roboflow_serverless_gpu"
+        elif dev.device == "cuda":
+            mode = "local_cuda_gpu + groq_vision" if has_groq else "local_cuda_gpu"
+        elif has_groq:
+            mode = "groq_cloud_vision + edge_light"
+        else:
+            mode = "local_edge_cpu"
+
+        return {
+            "active_mode": mode,
+            "has_groq_vision": has_groq,
+            "has_roboflow_key": has_rf,
+            "has_cloud_worker_url": bool(worker_url),
+            "cloud_worker_host": urllib.parse.urlparse(worker_url).hostname if worker_url else None,
+            "local_cuda_available": dev.device == "cuda",
+            "gpu_name": dev.gpu_name,
+            "recommended_cloud_options": [
+                {
+                    "id": "modal_l4",
+                    "name": "Modal NVIDIA L4 GPU ($30/mo Free Tier)",
+                    "desc_ar": "معالجة كاملة بـ GPU سحابي (4-Class YOLO + 32-KP + SigLIP + OCR) عبر modal deploy services/cv_worker/modal_gpu_app.py",
+                },
+                {
+                    "id": "roboflow",
+                    "name": "Roboflow Serverless Football API (Free Tier)",
+                    "desc_ar": "كشف اللاعبين والكرة ومعايرة الملعب 32 نقطة أونلاين بدون تشغيل PyTorch على جهاز المستخدم.",
+                },
+                {
+                    "id": "groq_vision",
+                    "name": "Groq Cloud Vision LPU (qwen/qwen3.8-27b)",
+                    "desc_ar": "قراءة أرقام القمصان ولوحة النتيجة سحابياً خلال ~1 ثانية.",
+                },
+            ],
+        }
+
+    def configure_cloud_compute(self, tenant_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Safely validate and apply runtime Cloud GPU Worker URL or Roboflow API key."""
+        from services.cv_worker.cloud_cv_engine import _validate_cloud_endpoint_url
+
+        cfg_path = self._tenant_dir(tenant_id) / "cloud_compute.json"
+        existing = {}
+        if cfg_path.is_file():
+            try:
+                existing = json.loads(cfg_path.read_text(encoding="utf-8"))
+            except Exception:
+                existing = {}
+
+        if "cloud_worker_url" in payload:
+            raw_u = str(payload.get("cloud_worker_url") or "").strip()
+            if raw_u:
+                clean_u = _validate_cloud_endpoint_url(raw_u)
+                os.environ["EGY_SCOUT_CLOUD_WORKER_URL"] = clean_u
+                existing["cloud_worker_url"] = clean_u
+            else:
+                os.environ.pop("EGY_SCOUT_CLOUD_WORKER_URL", None)
+                existing["cloud_worker_url"] = ""
+
+        if "roboflow_api_key" in payload:
+            raw_k = str(payload.get("roboflow_api_key") or "").strip()
+            if raw_k:
+                if len(raw_k) < 8 or any(ch.isspace() for ch in raw_k):
+                    raise ValueError("Invalid Roboflow API key format.")
+                os.environ["ROBOFLOW_API_KEY"] = raw_k
+                existing["has_roboflow_key"] = True
+            else:
+                os.environ.pop("ROBOFLOW_API_KEY", None)
+                existing["has_roboflow_key"] = False
+
+        cfg_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"status": "configured", **self.get_compute_status()}
+
+    def _get_v8_parquet_mtime(self, match_id: str) -> float:
+        meta = self._get_match_meta(match_id)
+        candidates = []
+        if meta.get("v8_parquet_path"):
+            candidates.append(Path(meta["v8_parquet_path"]))
+        candidates.append(self.data_paths.outputs / "custom_matches" / match_id / "v8.parquet")
+        candidates.append(self.data_paths.outputs / "v8_4_parquet" / f"{match_id}_v8.parquet")
+        for p in candidates:
+            if p.is_file():
+                return float(p.stat().st_mtime)
+        return 0.0
+
+    @staticmethod
+    def _clean_player_name_only(raw_name: Optional[str]) -> str:
+        s = str(raw_name or "").strip()
+        if not s:
+            return ""
+        return re.sub(r"\s*\([^)]*\)\s*$", "", s).strip() or s
+
+    def _consolidate_track_fragments(
+        self, raw_entries: list[dict[str, Any]], max_per_team: int = 11
+    ) -> list[dict[str, Any]]:
+        """Merge non-overlapping broadcast-cut fragments of the same player and pick top 11 per team."""
+        from packages.scouting_core.player_card import MAX_PHYSICAL_SPEED_KMH
+
+        selected: list[dict[str, Any]] = []
+        for team_key in ("team_a", "team_b"):
+            t_items = sorted(
+                [e for e in raw_entries if e.get("team") == team_key],
+                key=lambda x: float(x.get("observed_s") or 0.0),
+                reverse=True,
+            )
+            clusters: list[dict[str, Any]] = []
+            for frag in t_items:
+                f_tid = int(frag["track_id"])
+                f_shot = f_tid // 1000
+                f_gk = bool(frag.get("is_gk"))
+                f_pos = frag.get("avg_position")
+                merged_into = None
+                for cl in clusters:
+                    if bool(cl.get("is_gk")) != f_gk:
+                        continue
+                    if f_gk:
+                        merged_into = cl
+                        break
+                    if f_shot in cl["_shots"] and not (
+                        frag["first_frame"] > cl["_last_frame"] or frag["last_frame"] < cl["first_frame"]
+                    ):
+                        continue
+                    c_pos = cl.get("avg_position")
+                    if f_pos is None or c_pos is None:
+                        continue
+                    dist = float(np.hypot(float(f_pos["x_m"]) - float(c_pos["x_m"]), float(f_pos["y_m"]) - float(c_pos["y_m"])))
+                    if dist <= 14.0:
+                        merged_into = cl
+                        break
+
+                if merged_into is None:
+                    clusters.append(
+                        {
+                            **frag,
+                            "_shots": {f_shot},
+                            "_last_frame": int(frag.get("last_frame", frag["first_frame"])),
+                            "merged_track_ids": [f_tid],
+                        }
+                    )
+                else:
+                    cl = merged_into
+                    w1 = max(0.05, float(cl.get("observed_s") or 0.0))
+                    w2 = max(0.05, float(frag.get("observed_s") or 0.0))
+                    w_sum = w1 + w2
+                    cl["_shots"].add(f_shot)
+                    cl["_last_frame"] = max(int(cl["_last_frame"]), int(frag.get("last_frame", frag["first_frame"])))
+                    cl["merged_track_ids"].append(f_tid)
+                    cl["observed_s"] = round(float(cl.get("observed_s") or 0.0) + float(frag.get("observed_s") or 0.0), 2)
+                    cl["observed_min"] = round(cl["observed_s"] / 60.0, 2)
+                    if cl.get("distance_m") is not None or frag.get("distance_m") is not None:
+                        cl["distance_m"] = round(float(cl.get("distance_m") or 0.0) + float(frag.get("distance_m") or 0.0), 1)
+                    if cl.get("sprints") is not None or frag.get("sprints") is not None:
+                        cl["sprints"] = int(cl.get("sprints") or 0) + int(frag.get("sprints") or 0)
+                    ts_candidates = [v for v in (cl.get("top_speed_kmh"), frag.get("top_speed_kmh")) if v is not None]
+                    if ts_candidates:
+                        cl["top_speed_kmh"] = round(min(MAX_PHYSICAL_SPEED_KMH, max(float(v) for v in ts_candidates)), 1)
+                    if cl.get("avg_speed_kmh") is not None and frag.get("avg_speed_kmh") is not None:
+                        cl["avg_speed_kmh"] = round((float(cl["avg_speed_kmh"]) * w1 + float(frag["avg_speed_kmh"]) * w2) / w_sum, 1)
+                    if cl.get("distance_m") is not None and cl["observed_s"] >= MIN_WORK_RATE_SECONDS:
+                        cl["work_rate_m_per_min"] = round(float(cl["distance_m"]) / max(cl["observed_s"] / 60.0, 1e-6), 1)
+                    else:
+                        cl["work_rate_m_per_min"] = None
+                    if cl.get("avg_position") is not None and f_pos is not None:
+                        cl["avg_position"] = {
+                            "x_m": round((float(cl["avg_position"]["x_m"]) * w1 + float(f_pos["x_m"]) * w2) / w_sum, 1),
+                            "y_m": round((float(cl["avg_position"]["y_m"]) * w1 + float(f_pos["y_m"]) * w2) / w_sum, 1),
+                        }
+                    if cl.get("heatmap") and frag.get("heatmap"):
+                        hm1 = np.array(cl["heatmap"], dtype=np.float64) * w1
+                        hm2 = np.array(frag["heatmap"], dtype=np.float64) * w2
+                        comb = hm1 + hm2
+                        s_tot = float(comb.sum())
+                        if s_tot > 0:
+                            comb /= s_tot
+                        cl["heatmap"] = [[round(float(v), 4) for v in row] for row in comb]
+                    cl["crop_is_low_res"] = bool(cl.get("crop_is_low_res", True) and frag.get("crop_is_low_res", True))
+                    if not frag.get("crop_is_low_res", True) and frag.get("peak_frame_id") is not None:
+                        cl["peak_frame_id"] = int(frag["peak_frame_id"])
+
+            gks = [c for c in clusters if c.get("is_gk")][:1]
+            outfields = [c for c in clusters if not c.get("is_gk")][: max(1, max_per_team - len(gks))]
+            for cl in gks + outfields:
+                cl.pop("_shots", None)
+                cl.pop("_last_frame", None)
+                selected.append(cl)
+        return selected
+
+    def _compute_match_card_pool(
+        self, match_id: str, min_observed_s: float = 0.5, consolidate: bool = True
+    ) -> dict[str, Any]:
+        mid = self._validate_id(match_id)
+        pq_mtime = self._get_v8_parquet_mtime(mid)
+        cache_key = (mid, pq_mtime, bool(consolidate))
+        if cache_key in self._player_card_pool_cache:
+            return self._player_card_pool_cache[cache_key]
+
+        meta = self._get_match_meta(mid)
+        fps = float(meta.get("fps") or 25.0)
+        _, v8_df = self.get_legacy_and_v8_frames(mid)
+        v8_stab = stabilize_dataframe_homography_drift(v8_df)
+        dir_info = self._infer_attack_direction(v8_df)
+        team_a_attacks_right = bool(dir_info.get("team_a_attacks_right", True))
+
+        eligible = v8_stab[v8_stab["role"].isin(["player", "goalkeeper"]) & (v8_stab["track_id"] >= 0)]
+        raw_entries: list[dict[str, Any]] = []
+        for tid_val, t_df in eligible.groupby("track_id"):
+            tid = int(tid_val)
+            role_mode = str(t_df["role"].mode().iloc[0]) if not t_df["role"].dropna().empty else "player"
+            team_mode = str(t_df["team"].mode().iloc[0]) if not t_df["team"].dropna().empty else "none"
+            if team_mode not in ("team_a", "team_b"):
+                continue
+            atk_right = team_a_attacks_right if team_mode == "team_a" else (not team_a_attacks_right)
+            stats = build_player_card_stats(t_df, fps=fps, attack_right=atk_right)
+            first_frame = int(t_df["frame_id"].min())
+            last_frame = int(t_df["frame_id"].max())
+            first_time_s = round(float(t_df["time_s"].min()), 2) if "time_s" in t_df.columns else round(first_frame / max(1.0, fps), 2)
+            raw_j = None
+            if "jersey_number" in t_df.columns:
+                vj = t_df.loc[t_df["jersey_number"] > 0, "jersey_number"]
+                if not vj.empty:
+                    raw_j = int(vj.mode().iloc[0])
+            raw_entries.append(
+                {
+                    "track_id": tid,
+                    "role": role_mode,
+                    "is_gk": role_mode == "goalkeeper",
+                    "team": team_mode,
+                    "first_frame": first_frame,
+                    "last_frame": last_frame,
+                    "first_time_s": first_time_s,
+                    "parquet_jersey": raw_j,
+                    **stats,
+                }
+            )
+
+        filtered = [e for e in raw_entries if float(e.get("observed_s") or 0.0) >= min_observed_s]
+        if len(filtered) < 6 and raw_entries:
+            filtered = [e for e in raw_entries if float(e.get("observed_s") or 0.0) >= 0.3] or raw_entries
+
+        if consolidate:
+            pool_entries = self._consolidate_track_fragments(filtered, max_per_team=11)
+        else:
+            pool_entries = filtered
+
+        assign_team_relative_positions(pool_entries, team_a_attacks_right=team_a_attacks_right)
+        # Never invent 0-99 FIFA percentiles on short clips (< 5 min / 300s)
+        pcts = compute_match_percentiles(pool_entries, min_pool_size=3, min_observed_s=300.0)
+        by_tid = {int(e["track_id"]): {**e, "percentiles": pcts.get(int(e["track_id"]), {})} for e in pool_entries}
+        raw_pcts = compute_match_percentiles(raw_entries, min_pool_size=3, min_observed_s=300.0)
+        all_by_tid = {int(e["track_id"]): {**e, "percentiles": raw_pcts.get(int(e["track_id"]), {})} for e in raw_entries}
+        for e in pool_entries:
+            all_by_tid[int(e["track_id"])] = by_tid[int(e["track_id"])]
+        pool_obj = {
+            "match_id": mid,
+            "fps": fps,
+            "filtered_tracks": by_tid,
+            "all_tracks": all_by_tid,
+        }
+        self._player_card_pool_cache[cache_key] = pool_obj
+        return pool_obj
+
+    def _resolve_match_auto_roster_map(
+        self, tenant_id: str, match_id: str, entries: list[dict[str, Any]], overrides: dict[str, Any]
+    ) -> dict[int, dict[str, Any]]:
+        """Honest Roster Resolver: ONLY binds a squad name when OCR read a matching jersey number OR track is team's lone GK.
+
+        Never guesses or stamps random star names/numbers onto unverified outfield tracks!
+        """
+        saved_lineup = self._load_qa_lineup(tenant_id, match_id)
+        roster_all = saved_lineup.get("official_roster") or DEFAULT_MATCH_ROSTERS.get(match_id, [])
+        if not roster_all:
+            return {}
+
+        used_jerseys: dict[str, set[int]] = {"team_a": set(), "team_b": set()}
+        for _, ov in overrides.items():
+            if isinstance(ov, dict) and ov.get("verified") and ov.get("jersey_number"):
+                t_k = str(ov.get("team") or "team_a")
+                if t_k in used_jerseys:
+                    used_jerseys[t_k].add(int(ov["jersey_number"]))
+
+        auto_map: dict[int, dict[str, Any]] = {}
+        for team_key in ("team_a", "team_b"):
+            pool_by_jersey = {
+                int(r["jersey_number"]): r
+                for r in roster_all
+                if str(r.get("team") or "team_a") == team_key and int(r.get("jersey_number") or 0) > 0
+            }
+            gk_starters = [
+                r for r in roster_all
+                if str(r.get("team") or "team_a") == team_key and str(r.get("position") or "").upper() == "GK"
+            ]
+            team_entries = [
+                e for e in entries
+                if str((overrides.get(str(e["track_id"])) or {}).get("team") or e.get("team")) == team_key
+                and not ((overrides.get(str(e["track_id"])) or {}).get("verified") and (overrides.get(str(e["track_id"])) or {}).get("verified_name"))
+            ]
+            gk_assigned = False
+            for e in team_entries:
+                tid_i = int(e["track_id"])
+                pq_j = e.get("parquet_jersey")
+                if pq_j is not None and int(pq_j) > 0 and int(pq_j) in pool_by_jersey and int(pq_j) not in used_jerseys[team_key]:
+                    matched_r = pool_by_jersey[int(pq_j)]
+                    auto_map[tid_i] = {**matched_r, "_source": "ocr_verified"}
+                    used_jerseys[team_key].add(int(pq_j))
+                elif e.get("is_gk") and not gk_assigned and len(gk_starters) >= 1:
+                    gk_r = gk_starters[0]
+                    gk_j = int(gk_r.get("jersey_number") or 0)
+                    if gk_j not in used_jerseys[team_key]:
+                        auto_map[tid_i] = {**gk_r, "_source": "gk_role_match"}
+                        gk_assigned = True
+        return auto_map
+
+    def _hydrate_player_card(
+        self,
+        tenant_id: str,
+        match_id: str,
+        entry: dict[str, Any],
+        include_heatmap: bool = True,
+        overrides: Optional[dict[str, Any]] = None,
+        auto_roster_entry: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        meta = self._get_match_meta(match_id)
+        kit_colors = self.get_match_kit_colors(match_id)
+        if overrides is None:
+            saved_lineup = self._load_qa_lineup(tenant_id, match_id)
+            overrides = saved_lineup.get("track_overrides", {}) if isinstance(saved_lineup, dict) else {}
+
+        tid = int(entry["track_id"])
+        ov = overrides.get(str(tid), {}) if isinstance(overrides, dict) else {}
+        team = str(ov.get("team", entry["team"]))
+        role = str(ov.get("role", entry["role"]))
+        if role == "goalkeeper" and entry.get("position_label", {}).get("code") != "GK":
+            pos_label = {"code": "GK", "ar": "حارس مرمى", "en": "Goalkeeper"}
+        else:
+            pos_label = entry["position_label"]
+
+        ta_ar = meta.get("team_a_name_ar", meta["team_a_name"])
+        tb_ar = meta.get("team_b_name_ar", meta["team_b_name"])
+        ta_en = meta.get("team_a_name", "Team A")
+        tb_en = meta.get("team_b_name", "Team B")
+        team_ar = ta_ar if team == "team_a" else tb_ar
+        team_en = ta_en if team == "team_a" else tb_en
+        kit_hex = kit_colors.get("team_a_hex", "#EF4444") if team == "team_a" else kit_colors.get("team_b_hex", "#38BDF8")
+
+        _, base_id, _ = self._clean_display_track_id(tid)
+        v_name = ov.get("verified_name")
+        manual_name = str(v_name).strip() if v_name and str(v_name).strip() else None
+        raw_j = ov.get("jersey_number", entry.get("parquet_jersey"))
+        jersey_number = int(raw_j) if (raw_j is not None and int(raw_j) > 0) else None
+
+        if ov.get("verified") and (manual_name is not None or jersey_number is not None):
+            identity_source = "qa_verified"
+            verified = True
+            clean_ar = self._clean_player_name_only(manual_name) if manual_name else f"{team_ar} #{jersey_number}"
+            clean_en = clean_ar
+            saved_lineup_ref = self._load_qa_lineup(tenant_id, match_id)
+            roster_lookup = saved_lineup_ref.get("official_roster") or DEFAULT_MATCH_ROSTERS.get(match_id, [])
+            for rr in roster_lookup:
+                if rr.get("team") == team and (
+                    (jersey_number and int(rr.get("jersey_number") or 0) == jersey_number)
+                    or (clean_ar and clean_ar in str(rr.get("name_ar") or rr.get("name") or ""))
+                ):
+                    if rr.get("name_en"):
+                        clean_en = str(rr["name_en"])
+                    mapped_pos = get_position_label_dict(rr.get("position"))
+                    if mapped_pos is not None:
+                        pos_label = mapped_pos
+                    break
+            display_label = clean_ar
+            display_label_en = clean_en
+            verified_name = clean_ar
+        elif auto_roster_entry is not None:
+            src_tag = str(auto_roster_entry.get("_source") or "ocr_verified")
+            identity_source = src_tag if src_tag in ("ocr_verified", "gk_role_match") else "ocr_verified"
+            verified = identity_source == "ocr_verified"
+            r_ar = self._clean_player_name_only(auto_roster_entry.get("name_ar") or auto_roster_entry.get("name"))
+            r_en = str(auto_roster_entry.get("name_en") or r_ar).strip()
+            r_j = int(auto_roster_entry.get("jersey_number") or 0)
+            if jersey_number is None and r_j > 0:
+                jersey_number = r_j
+            mapped_pos = get_position_label_dict(auto_roster_entry.get("position"))
+            if mapped_pos is not None:
+                pos_label = mapped_pos
+            display_label = r_ar or f"{team_ar} • T{base_id}"
+            display_label_en = r_en or f"{team_en} • T{base_id}"
+            verified_name = r_ar if verified else None
+        else:
+            identity_source = "unverified"
+            verified = False
+            pos_ar = pos_label.get("ar", "لاعب")
+            pos_code = pos_label.get("code", "PL")
+            j_prefix = f"#{jersey_number} • " if jersey_number else ""
+            display_label = f"{team_ar} • {j_prefix}{pos_ar} (T{base_id})"
+            display_label_en = f"{team_en} • {j_prefix}{pos_code} (T{base_id})"
+            verified_name = None
+
+        photo_path = self._player_photo_path(tenant_id, match_id, tid)
+        if photo_path.is_file():
+            photo_source = "upload"
+            ver = int(photo_path.stat().st_mtime)
+        else:
+            photo_source = "video"
+            ver = int(entry.get("peak_frame_id", entry["first_frame"]))
+        photo_url = f"/api/matches/{match_id}/players/{tid}/photo?v={ver}"
+
+        pcts = dict(entry.get("percentiles") or {})
+        for pk in ("spd", "dst", "wrk", "spr", "avg", "min"):
+            pcts.setdefault(pk, None)
+
+        out = {
+            "match_id": match_id,
+            "track_id": tid,
+            "base_track_id": base_id,
+            "team": team,
+            "team_name_ar": team_ar,
+            "team_name_en": team_en,
+            "kit_hex": kit_hex,
+            "role": role,
+            "jersey_number": jersey_number,
+            "verified_name": verified_name,
+            "verified": verified,
+            "identity_source": identity_source,
+            "display_label": display_label,
+            "display_label_en": display_label_en,
+            "position_label": pos_label,
+            "photo_url": photo_url,
+            "photo_source": photo_source,
+            "crop_is_low_res": bool(entry.get("crop_is_low_res", True)),
+            "peak_frame_id": int(entry.get("peak_frame_id", entry["first_frame"])),
+            "first_frame": entry["first_frame"],
+            "first_time_s": entry["first_time_s"],
+            "merged_track_ids": entry.get("merged_track_ids", [tid]),
+            "kind": entry["kind"],
+            "tier": entry["tier"],
+            "observed_s": entry["observed_s"],
+            "observed_min": entry["observed_min"],
+            "distance_m": entry["distance_m"],
+            "top_speed_kmh": entry["top_speed_kmh"],
+            "avg_speed_kmh": entry["avg_speed_kmh"],
+            "work_rate_m_per_min": entry["work_rate_m_per_min"],
+            "sprints": entry["sprints"],
+            "avg_position": entry["avg_position"],
+            "percentiles": pcts,
+            "quality": entry["quality"],
+            "reason": entry.get("reason"),
+        }
+        if include_heatmap:
+            out["heatmap"] = entry["heatmap"]
+        return out
+
+    def list_player_cards(
+        self, tenant_id: str, match_id: str, min_observed_s: float = 0.5, consolidate: bool = True
+    ) -> dict[str, Any]:
+        """List consolidated honest FIFA/Fantasy style player cards for both teams in a match."""
+        mid = self._validate_id(match_id)
+        pool = self._compute_match_card_pool(mid, min_observed_s=min_observed_s, consolidate=consolidate)
+        meta = self._get_match_meta(mid)
+        saved_lineup = self._load_qa_lineup(tenant_id, mid)
+        overrides = saved_lineup.get("track_overrides", {}) if isinstance(saved_lineup, dict) else {}
+        entries = list(pool["filtered_tracks"].values())
+        auto_map = self._resolve_match_auto_roster_map(tenant_id, mid, entries, overrides)
+        cards = [
+            self._hydrate_player_card(
+                tenant_id,
+                mid,
+                entry,
+                include_heatmap=False,
+                overrides=overrides,
+                auto_roster_entry=auto_map.get(int(entry["track_id"])),
+            )
+            for entry in entries
+        ]
+        team_a = sorted([c for c in cards if c["team"] == "team_a"], key=lambda x: float(x["observed_s"] or 0.0), reverse=True)
+        team_b = sorted([c for c in cards if c["team"] == "team_b"], key=lambda x: float(x["observed_s"] or 0.0), reverse=True)
+        if consolidate:
+            team_a = team_a[:11]
+            team_b = team_b[:11]
+        else:
+            team_a = team_a[:30]
+            team_b = team_b[:30]
+        combined = team_a + team_b
+        return {
+            "match_id": mid,
+            "consolidated": bool(consolidate),
+            "team_a_name": meta["team_a_name"],
+            "team_b_name": meta["team_b_name"],
+            "team_a_name_ar": meta.get("team_a_name_ar", meta["team_a_name"]),
+            "team_b_name_ar": meta.get("team_b_name_ar", meta["team_b_name"]),
+            "kit_colors": self.get_match_kit_colors(mid),
+            "players": combined,
+            "count": len(combined),
+        }
+
+    def get_player_card(self, tenant_id: str, match_id: str, track_id: int) -> dict[str, Any]:
+        mid = self._validate_id(match_id)
+        pool = self._compute_match_card_pool(mid, consolidate=True)
+        entry = pool["filtered_tracks"].get(int(track_id)) or pool["all_tracks"].get(int(track_id))
+        if entry is None:
+            raise FileNotFoundError(f"Track {track_id} not found in {mid}")
+        saved_lineup = self._load_qa_lineup(tenant_id, mid)
+        overrides = saved_lineup.get("track_overrides", {}) if isinstance(saved_lineup, dict) else {}
+        entries = list(pool["filtered_tracks"].values())
+        auto_map = self._resolve_match_auto_roster_map(tenant_id, mid, entries, overrides)
+        return self._hydrate_player_card(
+            tenant_id,
+            mid,
+            entry,
+            include_heatmap=True,
+            overrides=overrides,
+            auto_roster_entry=auto_map.get(int(entry["track_id"])),
+        )
+
+    def get_groq_models(self) -> dict[str, Any]:
+        """Fetch live Groq models from /openai/v1/models with a 10-min cache and clean fallback."""
+        key = os.environ.get("GROQ_API_KEY", "").strip()
+        if not key or not key.startswith("gsk_"):
+            return {"models": DEFAULT_GROQ_MODELS, "source": "fallback", "has_key": False, "live_ids": []}
+
+        now = time.time()
+        if self._groq_models_cache is not None and (now - self._groq_models_cache[0]) < 600.0:
+            _, models, source = self._groq_models_cache
+            return {"models": models, "source": source, "has_key": True}
+
+        try:
+            req = urllib.request.Request(
+                "https://api.groq.com/openai/v1/models",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "User-Agent": "EGY-SCOUT-Pro-Studio/10.0",
+                },
+                method="GET",
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            raw_list = data.get("data", []) if isinstance(data, dict) else []
+            live_ids = {str(m.get("id")) for m in raw_list if isinstance(m, dict) and m.get("id")}
+            if live_ids:
+                curated = [DEFAULT_GROQ_MODELS[0]]
+                known_ids = set()
+                for item in DEFAULT_GROQ_MODELS[1:]:
+                    if item["id"] in live_ids:
+                        curated.append(item)
+                        known_ids.add(item["id"])
+                for mid_id in sorted(live_ids):
+                    if mid_id not in known_ids and not any(
+                        x in mid_id.lower() for x in ("whisper", "guard", "tts", "orpheus", "safeguard", "playai")
+                    ):
+                        curated.append({"id": mid_id, "ar": mid_id, "en": mid_id})
+                self._groq_models_cache = (now, curated, "live")
+                return {"models": curated, "source": "live", "has_key": True}
+        except Exception:
+            pass
+
+        self._groq_models_cache = (now, DEFAULT_GROQ_MODELS, "fallback")
+        return {"models": DEFAULT_GROQ_MODELS, "source": "fallback", "has_key": True}
 
     def _load_qa_lineup(self, tenant_id: str, match_id: str) -> dict[str, Any]:
         """Load QA lineup & overrides from SQLite first, migrating legacy JSON seamlessly."""
@@ -619,39 +1579,29 @@ class ScoutV8Service:
                 cal_fid_set.add(int(fid))
 
         obs_uv_fids = sorted(raw_ball_uv.keys())
-        # Precompute per-track finite-difference velocities & speeds (clamped <= MAX_PHYSICAL_SPEED_KMH)
+        # Precompute clean trajectory velocities & speeds (stabilize homography drift + local regression)
         vel_map: dict[tuple[int, int], tuple[float, float, float]] = {}
-        people_df = v8_df[
-            v8_df["role"].isin(["player", "goalkeeper", "referee", "assistant_referee"])
-            & v8_df["x_m"].notna()
-            & v8_df["y_m"].notna()
+        fps_tl = float(meta.get("fps") or 25.0)
+        v8_tl_stab = stabilize_dataframe_homography_drift(v8_df)
+        people_df = v8_tl_stab[
+            v8_tl_stab["role"].isin(["player", "goalkeeper", "referee", "assistant_referee"])
+            & v8_tl_stab["x_m"].notna()
+            & v8_tl_stab["y_m"].notna()
         ].sort_values(["track_id", "frame_id"])
         for tid, grp in people_df.groupby("track_id", sort=False):
             fids_t = grp["frame_id"].to_numpy(dtype=np.int32)
             ts_t = grp["time_s"].to_numpy(dtype=np.float64)
             xs_t = grp["x_m"].to_numpy(dtype=np.float64)
             ys_t = grp["y_m"].to_numpy(dtype=np.float64)
-            # 3-point smoothed finite-difference velocities (eliminates single-frame homography spikes)
-            n_pts = len(fids_t)
-            for idx in range(n_pts):
-                if n_pts < 2:
-                    vx, vy = 0.0, 0.0
-                else:
-                    i0 = max(0, idx - 1)
-                    i1 = min(n_pts - 1, idx + 1)
-                    dt = max(0.08, float(ts_t[i1] - ts_t[i0]))
-                    vx = float(xs_t[i1] - xs_t[i0]) / dt
-                    vy = float(ys_t[i1] - ys_t[i0]) / dt
-                    spd_mps = float(np.hypot(vx, vy))
-                    max_mps = MAX_PHYSICAL_SPEED_KMH / 3.6
-                    if spd_mps > max_mps and spd_mps > 1e-6:
-                        scale = max_mps / spd_mps
-                        vx *= scale
-                        vy *= scale
+            kin = compute_clean_trajectory_kinematics(fids_t, ts_t, xs_t, ys_t, fps=fps_tl)
+            vx_arr = kin["vx_ms"]
+            vy_arr = kin["vy_ms"]
+            spds_arr = kin["speeds_kmh"]
+            for idx in range(len(fids_t)):
                 vel_map[(int(tid), int(fids_t[idx]))] = (
-                    round(vx, 2),
-                    round(vy, 2),
-                    round(min(MAX_PHYSICAL_SPEED_KMH, float(np.hypot(vx, vy)) * 3.6), 1),
+                    round(float(vx_arr[idx]), 2),
+                    round(float(vy_arr[idx]), 2),
+                    round(float(spds_arr[idx]), 1),
                 )
 
         frames_out = []
@@ -1129,14 +2079,14 @@ class ScoutV8Service:
                 }
                 assigned_count += 1
             else:
-                fallback_j = tr["jersey_number"] or (tr["base_track_id"] if 1 <= tr["base_track_id"] <= 99 else ((idx % 11) + 2))
                 team_ar = qa["team_a_name_ar"] if team == "team_a" else qa["team_b_name_ar"]
+                fb = _fallback_identity(team, team_ar, int(tr["base_track_id"]))
                 overrides[tid_s] = {
                     "role": role,
                     "team": team,
-                    "jersey_number": int(fallback_j),
-                    "verified_name": f"لاعب {team_ar} #{int(fallback_j)}",
-                    "verified": True,
+                    "jersey_number": fb["jersey_number"],
+                    "verified_name": fb["verified_name"],
+                    "verified": fb["verified"],
                 }
                 assigned_count += 1
 
@@ -1326,18 +2276,47 @@ class ScoutV8Service:
             if t.get("verified") and t.get("verified_name")
         }
 
+        # Unify Scouting Video Tracks with the Consolidated <=22 Match Player Pool (zero 83-fragment inflation!)
+        pool = self._compute_match_card_pool(match_id, consolidate=True)
+        merge_remap: dict[int, int] = {}
+        keep_canonical: set[int] = set()
+        for canonical_tid, entry_c in pool["filtered_tracks"].items():
+            keep_canonical.add(int(canonical_tid))
+            for m_tid in entry_c.get("merged_track_ids", [canonical_tid]):
+                merge_remap[int(m_tid)] = int(canonical_tid)
+
+        consolidated_df = v8_df.copy()
+        if merge_remap and not consolidated_df.empty:
+            consolidated_df["track_id"] = consolidated_df["track_id"].map(
+                lambda x: merge_remap.get(int(x), int(x)) if pd.notna(x) else -1
+            )
+            consolidated_df = (
+                consolidated_df[consolidated_df["track_id"].isin(keep_canonical)]
+                .sort_values(["track_id", "frame_id"])
+                .drop_duplicates(subset=["track_id", "frame_id"])
+            )
+
         video_tracks = build_profiles_from_match_parquet(
-            v8_df,
+            consolidated_df if not consolidated_df.empty else v8_df,
             match_id=match_id,
             team_names={"team_a": meta["team_a_name"], "team_b": meta["team_b_name"]},
             lineup_names=verified_names,
         )
 
-        # Verified StatsBomb Open Data CSV (completely separate from 30s video tracks!)
+        # Verified Egyptian Premier League 2025/2026 Reference Pool (strictly separated from short video clips)
         benchmark_players = []
-        default_sb = self.repo_root / "datasets" / "open_samples" / "statsbomb_open_wc2022_sample.csv"
-        if default_sb.is_file():
-            benchmark_players.extend(import_external_scouting_csv(default_sb))
+        default_epl = self.repo_root / "datasets" / "rosters" / "epl_2025_26_scouting_reference.csv"
+        if default_epl.is_file():
+            all_epl = import_external_scouting_csv(default_epl)
+            club_tokens = {
+                str(meta.get("team_a_name", "")).lower(),
+                str(meta.get("team_b_name", "")).lower(),
+            }
+            club_filtered = [
+                p for p in all_epl
+                if any(tok and tok in str(p.team_name).lower() for tok in club_tokens)
+            ]
+            benchmark_players.extend(club_filtered if len(club_filtered) >= 4 else all_epl)
         ext_csv = self._tenant_dir(tenant_id) / "external_scouting.csv"
         if ext_csv.is_file():
             benchmark_players.extend(import_external_scouting_csv(ext_csv))
@@ -1355,8 +2334,8 @@ class ScoutV8Service:
             "match_id": match_id,
             "input_gate": mode_gate.to_dict(),
             "video_tracks": [p.to_dict() for p in video_tracks],
-            "benchmark_source_badge_ar": "عينة StatsBomb Open Data حقيقية للعرض (بيانات كاملة ≥ 500 دقيقة — مفصولة عن المقطع التجريبي)",
-            "benchmark_source_badge_en": "Verified StatsBomb Open Data Demo Sample (>= 500 min — kept strictly separate from short video clips)",
+            "benchmark_source_badge_ar": "قاعدة بيانات الدوري المصري المرجعية 2025/2026 (بيانات موسمية كاملة ≥ 450 دقيقة — مفصولة عن المقطع التجريبي)",
+            "benchmark_source_badge_en": "Verified Egyptian Premier League 2025/26 Reference Pool (>= 450 min — kept strictly separate from short video clips)",
             "benchmark_players": bench_dicts,
             # Backward-compatible alias pointing ONLY to verified video_tracks (no fake ratings!)
             "players": [p.to_dict() for p in video_tracks],
@@ -2006,31 +2985,55 @@ class ScoutV8Service:
 
     def ingest_custom_match(
         self,
-        video_bytes: bytes,
+        video_bytes: Optional[bytes] = None,
         filename: str = "custom_clip.mp4",
         team_a_name: str = "Team A",
         team_b_name: str = "Team B",
         match_format: str = "11v11",
         tenant_id: str = "club_demo_egypt",
+        video_file_path: Optional[Path] = None,
     ) -> dict[str, Any]:
-        """Ingest an uploaded MP4 as a full persistent playable match across Studio, QA, and Scouting."""
-        if not video_bytes:
+        """Ingest an uploaded MP4 as a persistent playable match across Studio, QA, and Players."""
+        if not video_bytes and (video_file_path is None or not Path(video_file_path).is_file()):
             raise ValueError("Uploaded video file is empty")
         t0 = time.perf_counter()
         mid = f"custom_{int(time.time() * 1000)}"
         match_dir = self.data_paths.outputs / "custom_matches" / mid
         match_dir.mkdir(parents=True, exist_ok=True)
         video_path = match_dir / "video.mp4"
-        video_path.write_bytes(video_bytes)
+        if video_file_path is not None and Path(video_file_path).is_file():
+            shutil.copyfile(str(video_file_path), str(video_path))
+        else:
+            video_path.write_bytes(video_bytes or b"")
 
+        cap_probe, proxy_probe = open_video_unicode(video_path)
+        try:
+            total_vid_frames = int(cap_probe.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            probe_fps = float(cap_probe.get(cv2.CAP_PROP_FPS) or 25.0)
+        finally:
+            cap_probe.release()
+            if proxy_probe is not None and proxy_probe.exists():
+                try:
+                    proxy_probe.unlink()
+                except OSError:
+                    pass
+
+        sample_stride = max(2, min(6, total_vid_frames // 180)) if total_vid_frames > 180 else 2
+        sample_frames = max(48, min(260, (total_vid_frames // max(1, sample_stride)) + 2)) if total_vid_frames > 0 else 120
         raw_df, v8_df, preview_frame, kit_colors, fps, extra_meta = ingest_clip_with_football_yolo(
             video_path=video_path,
             run_id=mid,
-            max_sample_frames=48,
-            stride=3,
+            max_sample_frames=sample_frames,
+            stride=sample_stride,
+            team_a_name=team_a_name,
+            team_b_name=team_b_name,
         )
         if v8_df.empty:
             raise ValueError("No trackable frames detected in uploaded clip")
+
+        real_fps = float(fps or probe_fps or 25.0)
+        actual_span_s = float(v8_df["time_s"].max() - v8_df["time_s"].min()) if len(v8_df) > 1 else (sample_frames * sample_stride) / max(1.0, real_fps)
+        processed_seconds = round(max(0.5, actual_span_s), 1)
 
         raw_pq = match_dir / "raw.parquet"
         v8_pq = match_dir / "v8.parquet"
@@ -2061,6 +3064,7 @@ class ScoutV8Service:
             "match_format": match_format,
             "is_custom": True,
             "source_filename": filename,
+            "processed_seconds": processed_seconds,
             **extra_meta,
         }
         (match_dir / "meta.json").write_text(
@@ -2083,7 +3087,9 @@ class ScoutV8Service:
             if ok_e:
                 preview_b64 = "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode("ascii")
 
-        players_tracked = int(v8_df[v8_df["role"].isin(["player", "goalkeeper"])]["track_id"].nunique())
+        raw_tracklets = int(v8_df[v8_df["role"].isin(["player", "goalkeeper"])]["track_id"].nunique())
+        pool_summary = self._compute_match_card_pool(mid, consolidate=True)
+        players_tracked = min(22, max(1, len(pool_summary.get("filtered_tracks", {})) or raw_tracklets))
         officials_isolated = int(v8_df[v8_df["role"].isin(["referee", "assistant_referee"])]["track_id"].nunique())
         ball_obs = int((v8_df["role"] == "ball").sum())
 
@@ -2092,8 +3098,10 @@ class ScoutV8Service:
             "team_a_name": meta_out["team_a_name"],
             "team_b_name": meta_out["team_b_name"],
             "elapsed_s": round(time.perf_counter() - t0, 2),
+            "processed_seconds": processed_seconds,
             "rows_exported": int(len(v8_df)),
             "players_tracked": players_tracked,
+            "raw_tracklets": raw_tracklets,
             "officials_isolated": officials_isolated,
             "ball_detections": ball_obs,
             "kit_colors": kit_colors,
@@ -2237,7 +3245,7 @@ class ScoutV8Service:
         dl_dir.mkdir(parents=True, exist_ok=True)
         tmp_mp4 = dl_dir / f"import_{int(time.time() * 1000)}.mp4"
 
-        clean_url = url.strip()
+        clean_url = _validate_remote_url(url)
         low_url = clean_url.lower()
         is_live_stream = low_url.startswith(("rtsp://", "rtmp://")) or ".m3u8" in low_url
         if is_live_stream:
@@ -2525,6 +3533,53 @@ class ScoutV8Service:
             **state,
         }
 
+    def _build_formation_team_roster(
+        self, qa: dict[str, Any], t_key: str
+    ) -> list[dict[str, Any]]:
+        """Build complete natural-position squad list for tactical blueprint assignment."""
+        t_tracks = [t for t in qa["tracks"] if t["team"] == t_key and t["role"] in ("player", "goalkeeper")]
+        r_list = [r for r in qa["official_roster"] if r.get("team", "team_a") == t_key]
+        gk_ro = [r for r in r_list if str(r.get("position", "")).upper() == "GK"]
+        out_ro = [r for r in r_list if str(r.get("position", "")).upper() != "GK"]
+        ordered_ro = gk_ro + out_ro
+
+        gk_tr = [t for t in t_tracks if t["role"] == "goalkeeper"]
+        out_tr = [t for t in t_tracks if t["role"] != "goalkeeper"]
+        ordered_tr = gk_tr + out_tr
+
+        out_r: list[dict[str, Any]] = []
+        for idx in range(max(11, len(ordered_ro))):
+            ro = ordered_ro[idx] if idx < len(ordered_ro) else None
+            tr = ordered_tr[idx] if idx < len(ordered_tr) else None
+            if idx == 0 and ro is not None:
+                out_r.append(
+                    {
+                        "track_id": gk_tr[0]["track_id"] if gk_tr else None,
+                        "jersey_number": ro.get("jersey_number", 1),
+                        "verified_name": ro.get("name_ar") or ro.get("name"),
+                        "position": ro.get("position", "GK"),
+                    }
+                )
+            elif ro is not None:
+                out_r.append(
+                    {
+                        "track_id": tr["track_id"] if tr else None,
+                        "jersey_number": ro.get("jersey_number") or (idx + 1),
+                        "verified_name": ro.get("name_ar") or ro.get("name"),
+                        "position": ro.get("position") or "CM",
+                    }
+                )
+            elif tr is not None:
+                out_r.append(
+                    {
+                        "track_id": tr["track_id"],
+                        "jersey_number": tr.get("jersey_number") or (idx + 1),
+                        "verified_name": tr.get("verified_name"),
+                        "position": "GK" if tr.get("role") == "goalkeeper" else "CM",
+                    }
+                )
+        return out_r
+
     def get_formation_blueprint(
         self,
         tenant_id: str,
@@ -2544,42 +3599,6 @@ class ScoutV8Service:
         team_name = ta_ar if team == "team_a" else tb_ar
         opp_name = tb_ar if team == "team_a" else ta_ar
 
-        def _build_team_roster(t_key: str) -> list[dict[str, Any]]:
-            t_tracks = [t for t in qa["tracks"] if t["team"] == t_key and t["role"] in ("player", "goalkeeper")]
-            r_list = [r for r in qa["official_roster"] if r.get("team", "team_a") == t_key]
-            # Put Goalkeeper strictly at index 0 so slot 'GK' always gets the real goalkeeper!
-            gk_ro = [r for r in r_list if str(r.get("position", "")).upper() == "GK"]
-            out_ro = [r for r in r_list if str(r.get("position", "")).upper() != "GK"]
-            ordered_ro = gk_ro + out_ro
-
-            gk_tr = [t for t in t_tracks if t["role"] == "goalkeeper"]
-            out_tr = [t for t in t_tracks if t["role"] != "goalkeeper"]
-            ordered_tr = gk_tr + out_tr
-
-            out_r: list[dict[str, Any]] = []
-            for idx in range(max(11, len(ordered_ro))):
-                ro = ordered_ro[idx] if idx < len(ordered_ro) else None
-                tr = ordered_tr[idx] if idx < len(ordered_tr) else None
-                if idx == 0 and ro is not None:
-                    out_r.append(
-                        {
-                            "track_id": gk_tr[0]["track_id"] if gk_tr else None,
-                            "jersey_number": ro.get("jersey_number", 1),
-                            "verified_name": ro.get("name"),
-                            "position": ro.get("position", "GK"),
-                        }
-                    )
-                elif ro is not None or tr is not None:
-                    out_r.append(
-                        {
-                            "track_id": tr["track_id"] if tr else None,
-                            "jersey_number": (ro.get("jersey_number") if ro else None) or (tr.get("jersey_number") if tr else (idx + 1)),
-                            "verified_name": (ro.get("name") if ro else None) or (tr.get("verified_name") if tr else None),
-                            "position": (ro.get("position") if ro else None) or ("GK" if tr and tr.get("role") == "goalkeeper" else "CM"),
-                        }
-                    )
-            return out_r
-
         _, v8_df = self.get_legacy_and_v8_frames(match_id)
         dir_info = self._infer_attack_direction(v8_df)
         attack_right = bool(dir_info["team_a_attacks_right"]) if team == "team_a" else (not bool(dir_info["team_a_attacks_right"]))
@@ -2589,10 +3608,10 @@ class ScoutV8Service:
             team_name=team_name,
             opponent_name=opp_name,
             attack_right=attack_right,
-            roster_players=_build_team_roster(team),
+            roster_players=self._build_formation_team_roster(qa, team),
             tactical_mode=tactical_mode,
             opponent_formation_code=opponent_formation_code,
-            opponent_roster_players=_build_team_roster(opp_team),
+            opponent_roster_players=self._build_formation_team_roster(qa, opp_team),
             opponent_tactical_mode=opponent_tactical_mode,
         )
         bp["match_id"] = match_id
@@ -2725,74 +3744,104 @@ class ScoutV8Service:
         ta_ar = meta.get("team_a_name_ar", meta["team_a_name"])
         tb_ar = meta.get("team_b_name_ar", meta["team_b_name"])
 
-        found_formations = re.findall(r"\b([1-9](?:-[1-9]){1,4})\b", prompt)
+        from packages.tactics_engine.moment_analyzer import _normalize_formation_digits
+
+        found_formations = [
+            _normalize_formation_digits(tok)
+            for tok in re.findall(r"\b([1-9](?:-[1-9]){1,4}|[2-5][1-6][1-6][1-4]?)\b", prompt)
+        ]
         if len(found_formations) >= 2:
             base_f_a, base_f_b = found_formations[0], found_formations[1]
         elif len(found_formations) == 1:
             base_f_a = found_formations[0]
 
-        sys_json = (
-            f"أنت عبقري تكتيك كرة قدم ومهندس رسم خطط حر 100% على ملعب FIFA أبعاده:\n"
-            f"- محور الطول X من 0 (مرمى {ta_ar}) إلى 105 متر (مرمى {tb_ar}).\n"
-            f"- محور العرض Y من 0 (خط التماس العلوي) إلى 68 متر (خط التماس السفلي)، ووسط الملعب عند Y=34.\n"
-            f"- الفريق الأول (team_a — نادينا): {ta_ar} يهاجم من اليسار إلى اليمين (نحو X=105).\n"
-            f"- الفريق الثاني (team_b — الخصم): {tb_ar} يهاجم من اليمين إلى اليسار (نحو X=0).\n\n"
-            "قواعد صارمة لتنفيذ أي خطة تكتيكية (تقليدية أو مبتكرة):\n"
-            "1. ثبّت حارس المرمى (GK) دائماً داخل منطقة الجزاء (x_m=6.0 و y_m=34.0 للفريق الأول، و x_m=99.0 و y_m=34.0 للخصم) بدون سهم حركة (move_to_x_m=x_m) إلا إذا طلب المستخدم صراحةً تقدم الحارس!\n"
-            "2. اجعل أسهم تحرك اللاعبين (move_to_x_m, move_to_y_m) قصيرة ومنطقية (بحد أقصى 8 إلى 10 أمتار في اتجاه التحرك التكتيكي) ولا ترسم أسهماً عشوائية متقاطعة عبر الملعب.\n"
-            "3. إذا طلب المستخدم خطة جديدة أو مبتكرة أو غير متماثلة (مثل 2-1-6-1 أو 3-2-4-1 أو هجوم كاسح على جبهة)، وزّع اللاعبين الـ 10 الميدانيين بدقة هندسية واضحة ومنظمة بدون تداخل.\n"
-            "4. أخرج كائن JSON صالحاً فقط بهذا الشكل بالضبط:\n"
-            "{\n"
-            '  "team_a_formation": "رمز التشكيل مثل 4-2-3-1 أو 3-2-4-1 أو 2-1-6-1",\n'
-            '  "team_b_formation": "تشكيل الخصم مثل 4-4-2 أو 5-4-1",\n'
-            '  "team_a_style": "balanced | aggressive | conservative | tiki_taka | counter_attack | inverted_fullbacks | wing_overload",\n'
-            '  "team_b_style": "balanced | aggressive | conservative | tiki_taka | counter_attack | inverted_fullbacks | wing_overload",\n'
-            '  "title_ar": "اسم واضح للخطة التكتيكية بالعربية",\n'
-            '  "coach_explanation_ar": "شرح تكتيكي واضح ومباشر لكيفية عمل الخطة وتوزيع الأدوار",\n'
-            '  "team_a_nodes": [\n'
-            '    {"slot": "GK", "role_ar": "حارس مرمى", "x_m": 6.0, "y_m": 34.0, "move_to_x_m": 6.0, "move_to_y_m": 34.0, "duty_ar": "حماية المرمى وبناء اللعب الآمن"},\n'
-            '    "... (11 لاعباً بالضبط لـ team_a بإحداثيات منظمة)"\n'
-            "  ],\n"
-            '  "team_a_lines": [\n'
-            '    {"line_type": "backline", "label_ar": "خط الدفاع", "slots": ["LB", "LCB", "RCB", "RB"]},\n'
-            '    {"line_type": "midfield", "label_ar": "خط الوسط", "slots": ["LDM", "RDM", "CAM"]},\n'
-            '    {"line_type": "attack", "label_ar": "خط الهجوم", "slots": ["LW", "ST", "RW"]}\n'
-            "  ],\n"
-            '  "team_b_nodes": [\n'
-            '    {"slot": "GK", "role_ar": "حارس الخصم", "x_m": 99.0, "y_m": 34.0, "move_to_x_m": 99.0, "move_to_y_m": 34.0, "duty_ar": "حماية المرمى"},\n'
-            '    "... (11 لاعباً بالضبط للخصم team_b)"\n'
-            "  ],\n"
-            '  "custom_arrows": [\n'
-            '    {"from_x_m": 38.0, "from_y_m": 34.0, "to_x_m": 62.0, "to_y_m": 24.0, "kind": "pass", "color": "#FACC15", "label_ar": "تمريرة كاسرة للخطوط"}\n'
-            "  ],\n"
-            '  "custom_zones": [\n'
-            '    {"x1_m": 66.0, "y1_m": 18.0, "x2_m": 88.0, "y2_m": 50.0, "color": "#F59E0B", "label_ar": "منطقة التفوق العددي"}\n'
-            "  ],\n"
-            '  "execution_steps_ar": ["1. ...", "2. ...", "3. ..."]\n'
-            "}\n"
-            "مهم جداً: أعطِ 11 لاعباً كاملين في team_a_nodes و11 لاعباً في team_b_nodes، وسهمين تكتيكيين فقط في custom_arrows بدون أي فوضى بصرية!"
-        )
-
-        llm_raw, provider = self._call_external_llm_if_configured(
-            api_key="",
-            system_prompt=sys_json,
-            user_question=prompt or f"ارسم خطة {base_f_a} بأسلوب {base_style} ضد {base_f_b}",
-            json_mode=True,
-            preferred_model=preferred_model,
-            max_tokens=3600,
-        )
-
+        preset = match_masterclass_preset(prompt)
         ai_spec: dict[str, Any] = {}
-        if llm_raw:
-            try:
-                ai_spec = json.loads(llm_raw)
-            except Exception:
-                m_j = re.search(r"\{[\s\S]*\}", llm_raw)
-                if m_j:
-                    try:
-                        ai_spec = json.loads(m_j.group(0))
-                    except Exception:
-                        ai_spec = {}
+        provider = "EGY-SCOUT Tactical Geometry Engine"
+
+        if preset is not None:
+            ai_spec = {
+                "team_a_formation": preset["formation_code"],
+                "team_b_formation": preset.get("opponent_formation_code", base_f_b),
+                "team_a_style": preset.get("style", base_style),
+                "team_b_style": "balanced",
+                "title_ar": preset["title_ar"],
+                "coach_explanation_ar": preset["philosophy_ar"],
+                "team_a_nodes": preset["nodes"],
+                "team_a_lines": preset.get("lines", []),
+                "passing_arrows": preset.get("passes", []),
+                "execution_steps_ar": [
+                    "1. بدء التدرج عبر ثلاثي الدفاع مع ثنائي الارتكاز لاستدراج الضغط العالي.",
+                    "2. تمرير كاسر للخطوط نحو المنطقة 14 واستغلال تحرك الأجنحة العكسية.",
+                    "3. التحول العرضي السريع للجبهة الفارغة وإنهاء الهجمة داخل الصندوق.",
+                ],
+            }
+            provider = "EGY-SCOUT Masterclass Tactical Engine (Xabi / Pep Geometry)"
+        else:
+            sys_json = (
+                f"أنت عبقري تكتيك كرة قدم ومهندس رسم خطط حر 100% على ملعب FIFA أبعاده:\n"
+                f"- محور الطول X من 0 (مرمى {ta_ar}) إلى 105 متر (مرمى {tb_ar}).\n"
+                f"- محور العرض Y من 0 (خط التماس العلوي) إلى 68 متر (خط التماس السفلي)، ووسط الملعب عند Y=34.\n"
+                f"- الفريق الأول (team_a — نادينا): {ta_ar} يهاجم من اليسار إلى اليمين (نحو X=105).\n"
+                f"- الفريق الثاني (team_b — الخصم): {tb_ar} يهاجم من اليمين إلى اليسار (نحو X=0).\n\n"
+                "قواعد صارمة لتنفيذ أي خطة تكتيكية (تقليدية أو مبتكرة):\n"
+                "1. ثبّت حارس المرمى (GK) دائماً داخل منطقة الجزاء (x_m=6.0 و y_m=34.0 للفريق الأول، و x_m=99.0 و y_m=34.0 للخصم) بدون سهم حركة (move_to_x_m=x_m) إلا إذا طلب المستخدم صراحةً تقدم الحارس!\n"
+                "2. اجعل أسهم تحرك اللاعبين (move_to_x_m, move_to_y_m) قصيرة ومنطقية (بحد أقصى 8 إلى 10 أمتار في اتجاه التحرك التكتيكي) ولا ترسم أسهماً عشوائية متقاطعة عبر الملعب.\n"
+                "3. إذا طلب المستخدم خطة جديدة أو مبتكرة أو غير متماثلة (مثل 3-4-2-1 أو 3-2-4-1 أو 2-1-6-1)، وزّع اللاعبين الـ 10 الميدانيين بدقة هندسية واضحة بدون تداخل وأضف مسارات التمرير المتوقعة في passing_arrows.\n"
+                "4. أخرج كائن JSON صالحاً فقط بهذا الشكل بالضبط:\n"
+                "{\n"
+                '  "team_a_formation": "رمز التشكيل مثل 4-2-3-1 أو 3-4-2-1 أو 3-2-4-1",\n'
+                '  "team_b_formation": "تشكيل الخصم مثل 4-4-2 أو 5-4-1",\n'
+                '  "team_a_style": "balanced | aggressive | conservative | tiki_taka | counter_attack | inverted_fullbacks | wing_overload",\n'
+                '  "team_b_style": "balanced | aggressive | conservative | tiki_taka | counter_attack | inverted_fullbacks | wing_overload",\n'
+                '  "title_ar": "اسم واضح للخطة التكتيكية بالعربية",\n'
+                '  "coach_explanation_ar": "شرح تكتيكي واضح ومباشر لكيفية عمل الخطة وتوزيع الأدوار",\n'
+                '  "team_a_nodes": [\n'
+                '    {"slot": "GK", "role_ar": "حارس مرمى", "x_m": 6.0, "y_m": 34.0, "move_to_x_m": 6.0, "move_to_y_m": 34.0, "duty_ar": "حماية المرمى وبناء اللعب الآمن"},\n'
+                '    "... (11 لاعباً بالضبط لـ team_a بإحداثيات منظمة)"\n'
+                "  ],\n"
+                '  "team_a_lines": [\n'
+                '    {"line_type": "backline", "label_ar": "خط الدفاع", "slots": ["LB", "LCB", "RCB", "RB"]},\n'
+                '    {"line_type": "midfield", "label_ar": "خط الوسط", "slots": ["LDM", "RDM", "CAM"]},\n'
+                '    {"line_type": "attack", "label_ar": "خط الهجوم", "slots": ["LW", "ST", "RW"]}\n'
+                "  ],\n"
+                '  "team_b_nodes": [\n'
+                '    {"slot": "GK", "role_ar": "حارس الخصم", "x_m": 99.0, "y_m": 34.0, "move_to_x_m": 99.0, "move_to_y_m": 34.0, "duty_ar": "حماية المرمى"},\n'
+                '    "... (11 لاعباً بالضبط للخصم team_b)"\n'
+                "  ],\n"
+                '  "passing_arrows": [\n'
+                '    {"from_slot": "CB", "to_slot": "LDM", "label_ar": "تدرج البناء"},\n'
+                '    {"from_slot": "LDM", "to_slot": "CAM", "label_ar": "كسر الخطوط"},\n'
+                '    {"from_slot": "CAM", "to_slot": "RW", "label_ar": "تغيير اللعب"},\n'
+                '    {"from_slot": "RW", "to_slot": "ST", "label_ar": "تمريرة حاسمة"}\n'
+                "  ],\n"
+                '  "custom_zones": [\n'
+                '    {"x1_m": 66.0, "y1_m": 18.0, "x2_m": 88.0, "y2_m": 50.0, "color": "#F59E0B", "label_ar": "منطقة التفوق العددي"}\n'
+                "  ],\n"
+                '  "execution_steps_ar": ["1. ...", "2. ...", "3. ..."]\n'
+                "}\n"
+                "مهم جداً: أعطِ 11 لاعباً كاملين في team_a_nodes و11 لاعباً في team_b_nodes مع 4 إلى 6 تمريرات أساسية في passing_arrows!"
+            )
+
+            llm_raw, provider = self._call_external_llm_if_configured(
+                api_key="",
+                system_prompt=sys_json,
+                user_question=prompt or f"ارسم خطة {base_f_a} بأسلوب {base_style} ضد {base_f_b}",
+                json_mode=True,
+                preferred_model=preferred_model,
+                max_tokens=3600,
+            )
+
+            if llm_raw:
+                try:
+                    ai_spec = json.loads(llm_raw)
+                except Exception:
+                    m_j = re.search(r"\{[\s\S]*\}", llm_raw)
+                    if m_j:
+                        try:
+                            ai_spec = json.loads(m_j.group(0))
+                        except Exception:
+                            ai_spec = {}
 
         final_f_a = str(ai_spec.get("team_a_formation") or base_f_a)
         final_f_b = str(ai_spec.get("team_b_formation") or base_f_b)
@@ -2809,13 +3858,16 @@ class ScoutV8Service:
             opponent_tactical_mode=final_style_b,
         )
 
-        # Apply direct custom AI coordinates for ALL 11 players using POSITION-AWARE squad matching (zero LB-at-CB!)
-        from packages.tactics_engine.moment_analyzer import _assign_roster_by_position
-
         wants_sweeper_gk = any(
             kw in (prompt or "").lower()
             for kw in ("حارس متقدم", "تقدم الحارس", "حارس ليبرو", "طلع الحارس", "sweeper")
         )
+        wants_leverkusen_names = any(
+            kw in (prompt or "").lower()
+            for kw in ("ليفركوزن", "ليفيركوزن", "بايرنليفيركوزن", "leverkusen", "ألونسو", "الونسو", "المونسو", "alonso", "3421")
+        )
+        qa_ai = self.get_qa_sheet(tenant_id, match_id)
+        override_roster_a = _squad_from_clubs_json("bayer_leverkusen_alonso") if wants_leverkusen_names else None
 
         def _merge_ai_nodes(
             ai_list: Any, base_nodes: list[dict[str, Any]], team_key: str
@@ -2826,15 +3878,28 @@ class ScoutV8Service:
             ai_slots = [str(nd.get("slot") or f"P{i+1}")[:8] for i, nd in enumerate(valid_raw)]
             if ai_slots:
                 ai_slots[0] = "GK"
-            roster_pool = [
-                {
-                    "verified_name": bn.get("player_label"),
-                    "jersey_number": bn.get("jersey_number"),
-                    "track_id": bn.get("track_id"),
-                    "position": bn.get("slot"),
-                }
-                for bn in base_nodes
-            ]
+            if team_key == "team_a" and override_roster_a:
+                roster_pool = [
+                    {
+                        "verified_name": self._clean_player_name_only(r.get("name_ar") or r.get("name")),
+                        "jersey_number": r.get("jersey_number"),
+                        "track_id": base_nodes[i].get("track_id") if i < len(base_nodes) else None,
+                        "position": r.get("position"),
+                    }
+                    for i, r in enumerate(override_roster_a)
+                ]
+            else:
+                roster_pool = self._build_formation_team_roster(qa_ai, team_key)
+                if not roster_pool:
+                    roster_pool = [
+                        {
+                            "verified_name": bn.get("player_label"),
+                            "jersey_number": bn.get("jersey_number"),
+                            "track_id": bn.get("track_id"),
+                            "position": bn.get("slot"),
+                        }
+                        for bn in base_nodes
+                    ]
             pos_matched = _assign_roster_by_position(ai_slots, roster_pool)
 
             merged: list[dict[str, Any]] = []
@@ -2859,7 +3924,7 @@ class ScoutV8Service:
                     # Clamp movement vector length so AI never draws wild 40m arrows across the pitch
                     dx, dy = raw_mx - xm, raw_my - ym
                     dist = float(np.hypot(dx, dy))
-                    max_run = 3.0 if ("CB" in slot_code and not wants_sweeper_gk) else 9.5
+                    max_run = 4.5 if ("CB" in slot_code and not wants_sweeper_gk) else 14.5
                     if dist > max_run and dist > 0:
                         scale = max_run / dist
                         mx = xm + dx * scale
@@ -2891,8 +3956,31 @@ class ScoutV8Service:
                 merged.append(base_nodes[len(merged)])
             return merged if len(merged) >= 6 else base_nodes
 
-        def _rebuild_clean_lines(nodes_list: list[dict[str, Any]], team_key: str) -> list[dict[str, Any]]:
-            """Cluster outfield players by depth (x_m) into 3 clean lines sorted by y_m (zero twisted/floating lines)."""
+        def _rebuild_clean_lines(nodes_list: list[dict[str, Any]], team_key: str, spec_lines: Any = None) -> list[dict[str, Any]]:
+            """Build tactical shape lines from explicit slot bands when given, else depth-clustered bands."""
+            slot_map = {str(n.get("slot", "")).upper(): n for n in nodes_list}
+            if isinstance(spec_lines, list) and spec_lines:
+                explicit: list[dict[str, Any]] = []
+                for ln in spec_lines:
+                    if not isinstance(ln, dict):
+                        continue
+                    pts = [
+                        {"slot": slot_map[str(sl).upper()]["slot"], "x_m": slot_map[str(sl).upper()]["x_m"], "y_m": slot_map[str(sl).upper()]["y_m"]}
+                        for sl in (ln.get("slots") or [])
+                        if str(sl).upper() in slot_map
+                    ]
+                    if len(pts) >= 2:
+                        explicit.append(
+                            {
+                                "team": team_key,
+                                "line_type": str(ln.get("line_type") or "midfield"),
+                                "label_ar": str(ln.get("label_ar") or "خط تكتيكي"),
+                                "points": pts,
+                            }
+                        )
+                if len(explicit) >= 2:
+                    return explicit
+
             outfield = [n for n in nodes_list if str(n.get("slot", "")).upper() != "GK"]
             if len(outfield) < 4:
                 return []
@@ -2918,7 +4006,7 @@ class ScoutV8Service:
         bp["opponent_nodes"] = _merge_ai_nodes(
             ai_spec.get("team_b_nodes"), bp.get("opponent_nodes", []), "team_b"
         )
-        bp["lines"] = _rebuild_clean_lines(bp["nodes"], "team_a")
+        bp["lines"] = _rebuild_clean_lines(bp["nodes"], "team_a", ai_spec.get("team_a_lines"))
         bp["opponent_lines"] = _rebuild_clean_lines(bp["opponent_nodes"], "team_b")
 
         bp["formation_code"] = final_f_a
@@ -2930,36 +4018,58 @@ class ScoutV8Service:
         if isinstance(ai_spec.get("execution_steps_ar"), list) and ai_spec["execution_steps_ar"]:
             bp["execution_steps_ar"] = [str(s) for s in ai_spec["execution_steps_ar"]]
 
-        # Build at most 2 clean progressive passing links anchored to REAL outfield player coordinates (never GK!)
-        outfield_a = sorted(
-            [n for n in bp["nodes"] if str(n.get("slot", "")).upper() != "GK"],
-            key=lambda n: n["x_m"],
+        raw_passing = ai_spec.get("passing_arrows") if isinstance(ai_spec.get("passing_arrows"), list) else []
+        if not raw_passing:
+            outfield_a = sorted(
+                [n for n in bp["nodes"] if str(n.get("slot", "")).upper() != "GK"],
+                key=lambda n: n["x_m"],
+            )
+            if len(outfield_a) >= 9:
+                for i1, i2, lbl in (
+                    (1, 3, "بناء من الخط الخلفي"),
+                    (3, 5, "تدرج لمحور الارتكاز"),
+                    (4, 7, "كسر الخطوط للمنطقة 14"),
+                    (6, 8, "تحول سريع للطرف"),
+                    (7, 9 if len(outfield_a) > 9 else 8, "تمريرة حاسمة بالصندوق"),
+                ):
+                    n1, n2 = outfield_a[i1], outfield_a[i2]
+                    raw_passing.append(
+                        {
+                            "team": "team_a",
+                            "from_slot": n1["slot"],
+                            "to_slot": n2["slot"],
+                            "from_x_m": n1["x_m"],
+                            "from_y_m": n1["y_m"],
+                            "to_x_m": n2["x_m"],
+                            "to_y_m": n2["y_m"],
+                            "label_ar": lbl,
+                        }
+                    )
+
+        enriched_passes = enrich_arrows_with_probabilities(
+            raw_passing, bp["nodes"], bp["opponent_nodes"], attack_right=True
         )
-        synth_arrows = []
-        if len(outfield_a) >= 8:
-            for i1, i2, lbl, col in (
-                (2, 5, "تدرج لعمق الوسط", "#38BDF8"),
-                (5, 8, "تمريرة للثلث الهجومي", "#10B981"),
-            ):
-                n1, n2 = outfield_a[i1], outfield_a[i2]
-                synth_arrows.append({
-                    "from_x_m": n1["x_m"], "from_y_m": n1["y_m"],
-                    "to_x_m": n2["x_m"], "to_y_m": n2["y_m"],
-                    "kind": "pass", "color": col, "label_ar": lbl,
-                })
-        bp["custom_arrows"] = synth_arrows
-        bp["passing_arrows"] = [
-            {
-                "team": "team_a",
-                "from_slot": outfield_a[2]["slot"],
-                "to_slot": outfield_a[5]["slot"],
-                "from_x_m": outfield_a[2]["x_m"],
-                "from_y_m": outfield_a[2]["y_m"],
-                "to_x_m": outfield_a[5]["x_m"],
-                "to_y_m": outfield_a[5]["y_m"],
-                "label_ar": "بناء التدرج",
-            }
-        ] if len(outfield_a) >= 6 else []
+        bp["passing_arrows"] = enriched_passes
+
+        raw_custom = ai_spec.get("custom_arrows") if isinstance(ai_spec.get("custom_arrows"), list) else []
+        if not raw_custom:
+            raw_custom = [
+                {
+                    "from_slot": p.get("from_slot"),
+                    "to_slot": p.get("to_slot"),
+                    "from_x_m": p["from_x_m"],
+                    "from_y_m": p["from_y_m"],
+                    "to_x_m": p["to_x_m"],
+                    "to_y_m": p["to_y_m"],
+                    "kind": "pass",
+                    "color": "#38BDF8" if idx % 2 == 0 else "#10B981",
+                    "label_ar": p.get("label_ar", "تمريرة"),
+                }
+                for idx, p in enumerate(enriched_passes[:4])
+            ]
+        bp["custom_arrows"] = enrich_arrows_with_probabilities(
+            raw_custom, bp["nodes"], bp["opponent_nodes"], attack_right=True
+        )
         if isinstance(ai_spec.get("custom_zones"), list) and ai_spec["custom_zones"]:
             bp["custom_zones"] = ai_spec["custom_zones"]
         else:
@@ -3023,7 +4133,7 @@ class ScoutV8Service:
         team_b_players = [p for p in moment["player_states"] if p["team"] == "team_b"]
 
         q_lower = question.lower()
-        wants_drawing = any(
+        wants_drawing = match_masterclass_preset(q_lower) is not None or any(
             kw in q_lower
             for kw in (
                 "ارسم",
@@ -3052,9 +4162,20 @@ class ScoutV8Service:
                 "4-3-3",
                 "3-5-2",
                 "3-4-2-1",
+                "3421",
+                "3-2-4-1",
+                "3241",
                 "4-4-2",
                 "5-3-2",
                 "4-1-4-1",
+                "ليفركوزن",
+                "ليفيركوزن",
+                "بايرنليفيركوزن",
+                "المونسو",
+                "ألونسو",
+                "الونسو",
+                "alonso",
+                "leverkusen",
             )
         )
 
@@ -3231,19 +4352,28 @@ class ScoutV8Service:
                 )
             )
 
+        shape_a = str(form_a.get("detected_shape") or "4-3-3")
+        shape_b = str(form_b.get("detected_shape") or "4-4-2")
+        fa_label = ms["team_a_focal_player"]["player_label"] if ms.get("team_a_focal_player") else ta_name
+        fb_label = ms["team_b_focal_player"]["player_label"] if ms.get("team_b_focal_player") else tb_name
         follow_ups = [
-            f"ارسم خطة 3-5-2 لفريق {ta_name} بأسلوب تيكي تاكا ضد 5-3-2 لفريق {tb_name}",
-            f"قارن بين تمركز دفاع {ta_name} وتمركز دفاع {tb_name} في هذه اللقطة ومن أخطأ؟",
-            "ارسم خطة ضغط عالي 4-3-3 مع أسهم اختراق في أنصاف المساحات والمنطقة 14",
-            "ماذا لو تحرك المدافع الأقرب لإغلاق زاوية التمرير؟ كم ينخفض خطر التسديد xG؟",
+            f"قارن تمركز {ta_name} ({shape_a}) مع {tb_name} ({shape_b}) في الثانية {ms['time_s']}",
+            f"تشريح قرار {fa_label} ({ta_name}) و{fb_label} ({tb_name}) عند {ms['ball_zone_ar']}",
+            f"ارسم خطة {shape_a} لـ {ta_name} ضد {shape_b} لـ {tb_name} بناءً على هذه اللقطة",
+            "ماذا لو تحرك المدافع الأقرب لإغلاق زاوية التمرير؟ كم ينخفض xG؟",
         ]
+
+        has_ext_key = bool(
+            os.environ.get("GROQ_API_KEY", "").strip()
+            or os.environ.get("GEMINI_API_KEY", "").strip()
+        )
 
         return {
             "match_id": match_id,
             "frame_id": active_fid,
             "time_s": ms["time_s"],
             "engine": engine_label,
-            "has_external_api_key": True,
+            "has_external_api_key": has_ext_key,
             "question": question,
             "answer_ar": final_answer_ar,
             "moment_summary": ms,

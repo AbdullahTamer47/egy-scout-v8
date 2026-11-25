@@ -1,0 +1,190 @@
+{
+  "schema_version": "10.5",
+  "updated_at": "2026-11-25",
+  "clubs": {
+    "al_ahly": {
+      "club_id": "al_ahly",
+      "name_ar": "الأهلي",
+      "name_en": "Al Ahly",
+      "kit_hex": "#EF4444",
+      "season": "2025/2026",
+      "source": "Official Match Squad / Transfermarkt",
+      "verified_at": "2026-11-25",
+      "players": [
+        {"jersey_number": 1, "name_ar": "محمد الشناوي", "name_en": "Mohamed El Shenawy", "position": "GK", "is_starter": true},
+        {"jersey_number": 30, "name_ar": "محمد هاني", "name_en": "Mohamed Hany", "position": "RB", "is_starter": true},
+        {"jersey_number": 6, "name_ar": "ياسر إبراهيم", "name_en": "Yasser Ibrahim", "position": "CB", "is_starter": true},
+        {"jersey_number": 13, "name_ar": "أشرف داري", "name_en": "Achraf Dari", "position": "CB", "is_starter": true},
+        {"jersey_number": 5, "name_ar": "رامي ربيعة", "name_en": "Ramy Rabia", "position": "CB", "is_starter": true},
+        {"jersey_number": 21, "name_ar": "يحيى عطية الله", "name_en": "Yahia Attiyat Allah", "position": "LB", "is_starter": true},
+        {"jersey_number": 17, "name_ar": "مروان عطية", "name_en": "Marwan Attia", "position": "DM", "is_starter": true},
+        {"jersey_number": 36, "name_ar": "أحمد نبيل كوكا", "name_en": "Ahmed Nabil Koka", "position": "CM", "is_starter": true},
+        {"jersey_number": 22, "name_ar": "إمام عاشور", "name_en": "Emam Ashour", "position": "CM", "is_starter": true},
+        {"jersey_number": 19, "name_ar": "محمد مجدي أفشة", "name_en": "Mohamed Magdy Afsha", "position": "CAM", "is_starter": true},
+        {"jersey_number": 14, "name_ar": "حسين الشحات", "name_en": "Hussein El Shahat", "position": "LW", "is_starter": true},
+        {"jersey_number": 7, "name_ar": "محمود تريزيجيه", "name_en": "Trezeguet", "position": "LW", "is_starter": true},
+        {"jersey_number": 27, "name_ar": "طاهر محمد طاهر", "name_en": "Taher Mohamed", "position": "RW", "is_starter": true},
+        {"jersey_number": 9, "name_ar": "محمد شريف", "name_en": "Mohamed Sherif", "position": "ST", "is_starter": true}
+      ]
+    },
+    "enppi": {
+      "club_id": "enppi",
+      "name_ar": "إنبي",
+      "name_en": "ENPPI",
+      "kit_hex": "#38BDF8",
+      "season": "2025/2026",
+      "source": "Official Match Squad / Transfermarkt",
+      "verified_at": "2026-11-25",
+      "players": [
+        {"jersey_number": 1, "name_ar": "عبد الرحمن سمير", "name_en": "Abdelrahman Samir", "position": "GK", "is_starter": true},
+        {"jersey_number": 31, "name_ar": "أحمد محمود", "name_en": "Ahmed Mahmoud", "position": "RB", "is_starter": true},
+        {"jersey_number": 4, "name_ar": "أحمد كالوشا", "name_en": "Ahmed Kalosha", "position": "CB", "is_starter": true},
+        {"jersey_number": 5, "name_ar": "أحمد صبيحة", "name_en": "Ahmed Sobiha", "position": "CB", "is_starter": true},
+        {"jersey_number": 24, "name_ar": "مهند بكري", "name_en": "Mohannad Bakry", "position": "CB", "is_starter": true},
+        {"jersey_number": 3, "name_ar": "مروان داود", "name_en": "Marwan Dawoud", "position": "LB", "is_starter": true},
+        {"jersey_number": 6, "name_ar": "زياد كمال", "name_en": "Ziad Kamal", "position": "DM", "is_starter": true},
+        {"jersey_number": 17, "name_ar": "عمار حمدي", "name_en": "Ammar Hamdy", "position": "CM", "is_starter": true},
+        {"jersey_number": 22, "name_ar": "أحمد العجوز", "name_en": "Ahmed El Agouz", "position": "CM", "is_starter": true},
+        {"jersey_number": 47, "name_ar": "محمد حمدي", "name_en": "Mohamed Hamdy", "position": "LW", "is_starter": true},
+        {"jersey_number": 7, "name_ar": "أحمد نادر حواش", "name_en": "Ahmed Nader Hawash", "position": "RW", "is_starter": true},
+        {"jersey_number": 11, "name_ar": "محمد حتحوت", "name_en": "Mohamed Hathout", "position": "LW", "is_starter": true},
+        {"jersey_number": 9, "name_ar": "محمد النحاس", "name_en": "Mohamed El Nahas", "position": "ST", "is_starter": true},
+        {"jersey_number": 44, "name_ar": "يوسف لبيب", "name_en": "Youssef Labib", "position": "ST", "is_starter": true}
+      ]
+    },
+    "pyramids": {
+      "club_id": "pyramids",
+      "name_ar": "بيراميدز",
+      "name_en": "Pyramids FC",
+      "kit_hex": "#0EA5E9",
+      "season": "2025/2026",
+      "source": "Official Match Squad / Transfermarkt",
+      "verified_at": "2026-11-25",
+      "players": [
+        {"jersey_number": 1, "name_ar": "أحمد الشناوي", "name_en": "Ahmed El Shenawy", "position": "GK", "is_starter": true},
+        {"jersey_number": 15, "name_ar": "محمد الشيبي", "name_en": "Mohamed Chibi", "position": "RB", "is_starter": true},
+        {"jersey_number": 4, "name_ar": "أحمد سامي", "name_en": "Ahmed Samy", "position": "CB", "is_starter": true},
+        {"jersey_number": 5, "name_ar": "علي جبر", "name_en": "Ali Gabr", "position": "CB", "is_starter": true},
+        {"jersey_number": 24, "name_ar": "أسامة جلال", "name_en": "Osama Galal", "position": "CB", "is_starter": true},
+        {"jersey_number": 21, "name_ar": "محمد حمدي", "name_en": "Mohamed Hamdy", "position": "LB", "is_starter": true},
+        {"jersey_number": 14, "name_ar": "مهند لاشين", "name_en": "Mohannad Lasheen", "position": "DM", "is_starter": true},
+        {"jersey_number": 8, "name_ar": "بلاتي توريه", "name_en": "Blati Toure", "position": "CM", "is_starter": true},
+        {"jersey_number": 18, "name_ar": "وليد الكرتي", "name_en": "Walid El Karti", "position": "CAM", "is_starter": true},
+        {"jersey_number": 10, "name_ar": "رمضان صبحي", "name_en": "Ramadan Sobhi", "position": "LW", "is_starter": true},
+        {"jersey_number": 11, "name_ar": "مصطفى زيكو", "name_en": "Mostafa Ziko", "position": "RW", "is_starter": true},
+        {"jersey_number": 9, "name_ar": "فيستون ماييلي", "name_en": "Fiston Mayele", "position": "ST", "is_starter": true}
+      ]
+    },
+    "al_masry": {
+      "club_id": "al_masry",
+      "name_ar": "المصري",
+      "name_en": "Al Masry",
+      "kit_hex": "#10B981",
+      "season": "2025/2026",
+      "source": "Official Match Squad / Transfermarkt",
+      "verified_at": "2026-11-25",
+      "players": [
+        {"jersey_number": 1, "name_ar": "عصام ثروت", "name_en": "Essam Tharwat", "position": "GK", "is_starter": true},
+        {"jersey_number": 7, "name_ar": "كريم العراقي", "name_en": "Karim El Eraky", "position": "RB", "is_starter": true},
+        {"jersey_number": 2, "name_ar": "باهر المحمدي", "name_en": "Baher El Mohamady", "position": "CB", "is_starter": true},
+        {"jersey_number": 5, "name_ar": "خالد صبحي", "name_en": "Khaled Sobhy", "position": "CB", "is_starter": true},
+        {"jersey_number": 3, "name_ar": "محمد شكري", "name_en": "Mohamed Shokry", "position": "LB", "is_starter": true},
+        {"jersey_number": 6, "name_ar": "محمد مخلوف", "name_en": "Mohamed Makhlouf", "position": "DM", "is_starter": true},
+        {"jersey_number": 14, "name_ar": "محمود حمادة", "name_en": "Mahmoud Hamada", "position": "CM", "is_starter": true},
+        {"jersey_number": 30, "name_ar": "عبد الرحيم دغموم", "name_en": "Abderrahim Deghmoum", "position": "CAM", "is_starter": true},
+        {"jersey_number": 11, "name_ar": "محمد الشامي", "name_en": "Mohamed El Shamy", "position": "RW", "is_starter": true},
+        {"jersey_number": 10, "name_ar": "كريم بامبو", "name_en": "Karim Bambo", "position": "LW", "is_starter": true},
+        {"jersey_number": 9, "name_ar": "صلاح محسن", "name_en": "Salah Mohsen", "position": "ST", "is_starter": true}
+      ]
+    },
+    "mokawloon": {
+      "club_id": "mokawloon",
+      "name_ar": "المقاولون العرب",
+      "name_en": "Al Mokawloon",
+      "kit_hex": "#FACC15",
+      "season": "2025/2026",
+      "source": "Official Match Squad / Transfermarkt",
+      "verified_at": "2026-11-25",
+      "players": [
+        {"jersey_number": 18, "name_ar": "محمود أبو السعود", "name_en": "Mahmoud Abou El Saoud", "position": "GK", "is_starter": true},
+        {"jersey_number": 2, "name_ar": "أمير عابد", "name_en": "Amir Abed", "position": "RB", "is_starter": true},
+        {"jersey_number": 20, "name_ar": "أحمد علاء", "name_en": "Ahmed Alaa", "position": "CB", "is_starter": true},
+        {"jersey_number": 5, "name_ar": "لؤي وائل", "name_en": "Louay Wael", "position": "CB", "is_starter": true},
+        {"jersey_number": 15, "name_ar": "جوزيف أوشايا", "name_en": "Joseph Ochaya", "position": "LB", "is_starter": true},
+        {"jersey_number": 6, "name_ar": "عمر فتحي", "name_en": "Omar Fathi", "position": "DM", "is_starter": true},
+        {"jersey_number": 8, "name_ar": "محمد مجلي", "name_en": "Mohamed Magli", "position": "CM", "is_starter": true},
+        {"jersey_number": 14, "name_ar": "أحمد الشيمي", "name_en": "Ahmed El Shimi", "position": "CM", "is_starter": true},
+        {"jersey_number": 7, "name_ar": "عمر سافيولا", "name_en": "Omar Saviola", "position": "LW", "is_starter": true},
+        {"jersey_number": 11, "name_ar": "أمادو نياس", "name_en": "Amadou Niass", "position": "RW", "is_starter": true},
+        {"jersey_number": 10, "name_ar": "محمد سالم", "name_en": "Mohamed Salem", "position": "ST", "is_starter": true}
+      ]
+    },
+    "el_gaish": {
+      "club_id": "el_gaish",
+      "name_ar": "طلائع الجيش",
+      "name_en": "Tala'ea El Gaish",
+      "kit_hex": "#DC2626",
+      "season": "2025/2026",
+      "source": "Official Match Squad / Transfermarkt",
+      "verified_at": "2026-11-25",
+      "players": [
+        {"jersey_number": 1, "name_ar": "عمر رضوان", "name_en": "Omar Radwan", "position": "GK", "is_starter": true},
+        {"jersey_number": 24, "name_ar": "محمد شحاتة", "name_en": "Mohamed Shehata", "position": "RB", "is_starter": true},
+        {"jersey_number": 3, "name_ar": "عمرو طارق", "name_en": "Amr Tarek", "position": "CB", "is_starter": true},
+        {"jersey_number": 5, "name_ar": "خالد سطوحي", "name_en": "Khaled Stouhi", "position": "CB", "is_starter": true},
+        {"jersey_number": 2, "name_ar": "أحمد متعب", "name_en": "Ahmed Meteb", "position": "LB", "is_starter": true},
+        {"jersey_number": 6, "name_ar": "وليد بن بلة", "name_en": "Walid Ben Bella", "position": "DM", "is_starter": true},
+        {"jersey_number": 8, "name_ar": "حسام الدين السويسي", "name_en": "Hossam Souissi", "position": "CM", "is_starter": true},
+        {"jersey_number": 10, "name_ar": "محمود عبد العزيز", "name_en": "Mahmoud Abdelaziz", "position": "CAM", "is_starter": true},
+        {"jersey_number": 14, "name_ar": "إسلام محارب", "name_en": "Islam Mohareb", "position": "LW", "is_starter": true},
+        {"jersey_number": 11, "name_ar": "محمود أبو جودة", "name_en": "Mahmoud Abou Gouda", "position": "RW", "is_starter": true},
+        {"jersey_number": 9, "name_ar": "إسماعيل أورو أجورو", "name_en": "Ismail Ouro-Agoro", "position": "ST", "is_starter": true}
+      ]
+    },
+    "el_sekka": {
+      "club_id": "el_sekka",
+      "name_ar": "السكة الحديد",
+      "name_en": "El Sekka El Hadid",
+      "kit_hex": "#F59E0B",
+      "season": "2025/2026",
+      "source": "Match Reference Squad",
+      "verified_at": "2026-11-25",
+      "players": [
+        {"jersey_number": 1, "name_ar": "حارس السكة الحديد", "name_en": "El Sekka GK", "position": "GK", "is_starter": true},
+        {"jersey_number": 2, "name_ar": "ظهير أيمن السكة #2", "name_en": "El Sekka RB #2", "position": "RB", "is_starter": true},
+        {"jersey_number": 4, "name_ar": "مدافع السكة #4", "name_en": "El Sekka CB #4", "position": "CB", "is_starter": true},
+        {"jersey_number": 5, "name_ar": "مدافع السكة #5", "name_en": "El Sekka CB #5", "position": "CB", "is_starter": true},
+        {"jersey_number": 3, "name_ar": "ظهير أيسر السكة #3", "name_en": "El Sekka LB #3", "position": "LB", "is_starter": true},
+        {"jersey_number": 6, "name_ar": "ارتكاز السكة #6", "name_en": "El Sekka DM #6", "position": "DM", "is_starter": true},
+        {"jersey_number": 8, "name_ar": "وسط السكة #8", "name_en": "El Sekka CM #8", "position": "CM", "is_starter": true},
+        {"jersey_number": 10, "name_ar": "صانع ألعاب السكة #10", "name_en": "El Sekka CAM #10", "position": "CAM", "is_starter": true},
+        {"jersey_number": 7, "name_ar": "جناح أيمن السكة #7", "name_en": "El Sekka RW #7", "position": "RW", "is_starter": true},
+        {"jersey_number": 11, "name_ar": "جناح أيسر السكة #11", "name_en": "El Sekka LW #11", "position": "LW", "is_starter": true},
+        {"jersey_number": 9, "name_ar": "مهاجم السكة #9", "name_en": "El Sekka ST #9", "position": "ST", "is_starter": true}
+      ]
+    },
+    "bayer_leverkusen_alonso": {
+      "club_id": "bayer_leverkusen_alonso",
+      "name_ar": "باير ليفركوزن (تشابي ألونسو 3-4-2-1)",
+      "name_en": "Bayer Leverkusen (Xabi Alonso 3-4-2-1)",
+      "kit_hex": "#E11D48",
+      "season": "2023/2024",
+      "source": "Tactical Reference Template (Bundesliga Invincibles)",
+      "verified_at": "2026-11-25",
+      "is_tactical_template": true,
+      "players": [
+        {"jersey_number": 1, "name_ar": "لوكاس هراديكي", "name_en": "Lukas Hradecky", "position": "GK", "is_starter": true},
+        {"jersey_number": 12, "name_ar": "إدموند تابسوبا", "name_en": "Edmond Tapsoba", "position": "CB", "is_starter": true},
+        {"jersey_number": 4, "name_ar": "جوناثان تاه", "name_en": "Jonathan Tah", "position": "CB", "is_starter": true},
+        {"jersey_number": 6, "name_ar": "أوديلون كوسونو", "name_en": "Odilon Kossounou", "position": "CB", "is_starter": true},
+        {"jersey_number": 20, "name_ar": "أليخاندرو جريمالدو", "name_en": "Alejandro Grimaldo", "position": "LB", "is_starter": true},
+        {"jersey_number": 34, "name_ar": "جرانيت تشاكا", "name_en": "Granit Xhaka", "position": "DM", "is_starter": true},
+        {"jersey_number": 25, "name_ar": "إكسيكييل بالاسيوس", "name_en": "Exequiel Palacios", "position": "DM", "is_starter": true},
+        {"jersey_number": 30, "name_ar": "جيريمي فريمبونج", "name_en": "Jeremie Frimpong", "position": "RB", "is_starter": true},
+        {"jersey_number": 10, "name_ar": "فلوريان فيرتز", "name_en": "Florian Wirtz", "position": "CAM", "is_starter": true},
+        {"jersey_number": 7, "name_ar": "يوناس هوفمان", "name_en": "Jonas Hofmann", "position": "CAM", "is_starter": true},
+        {"jersey_number": 22, "name_ar": "فيكتور بونيفاس", "name_en": "Victor Boniface", "position": "ST", "is_starter": true}
+      ]
+    }
+  }
+}
