@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { Flame, Play, Plus, Printer, Save, Trash2 } from "lucide-react";
+import * as echarts from "echarts";
+import { Flame, Pause, Play, Plus, Printer, RotateCcw, Save, Trash2 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { CoachClubDetail, DrillSetup, TrainingSessionPlan } from "./coachTypes";
 
@@ -55,7 +56,11 @@ export default function TrainingSessionStudio({
   const [drillArrows, setDrillArrows] = useState<DrillSetup["arrows"]>([]);
   const [drillZones, setDrillZones] = useState<DrillSetup["zones"]>([]);
 
+  const [animating, setAnimating] = useState(false);
+  const [animBallPos, setAnimBallPos] = useState<{ x_m: number; y_m: number } | null>(null);
+
   const cvsRef = useRef<HTMLCanvasElement | null>(null);
+  const loadChartRef = useRef<HTMLDivElement | null>(null);
   const dragItemRef = useRef<{ type: "player" | "prop"; idx: number } | null>(null);
   const arrowStartRef = useRef<{ x_m: number; y_m: number } | null>(null);
 
@@ -73,13 +78,87 @@ export default function TrainingSessionStudio({
   }, []);
 
   useEffect(() => {
-    if (activeSession) {
-      loadSessionIntoCanvas(activeSession);
-    }
+    if (activeSession) loadSessionIntoCanvas(activeSession);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSession]);
 
+  // ECharts Weekly Microcycle Load Bar + RPE Line
+  useEffect(() => {
+    const el = loadChartRef.current;
+    if (!el) return;
+    const chart = echarts.init(el);
+    const merged = MD_DAYS.map((d) => {
+      const saved = sessions.find((s) => s.md_code === d.id);
+      const rpe = saved ? saved.target_rpe : d.rpe;
+      const au = saved ? saved.srpe_au : Math.round(d.dur * d.rpe);
+      return { id: d.id, rpe, au };
+    });
+    chart.setOption({
+      backgroundColor: "transparent",
+      tooltip: { trigger: "axis" },
+      grid: { left: 36, right: 32, top: 20, bottom: 24 },
+      xAxis: { type: "category", data: merged.map((m) => m.id), axisLabel: { color: "#94A3B8", fontSize: 10 } },
+      yAxis: [
+        { type: "value", name: "AU", nameTextStyle: { color: "#94A3B8", fontSize: 10 }, axisLabel: { color: "#94A3B8", fontSize: 10 }, splitLine: { lineStyle: { color: "rgba(255,255,255,0.06)" } } },
+        { type: "value", name: "RPE", min: 0, max: 10, nameTextStyle: { color: "#38BDF8", fontSize: 10 }, axisLabel: { color: "#38BDF8", fontSize: 10 }, splitLine: { show: false } },
+      ],
+      series: [
+        {
+          name: "sRPE (AU)",
+          type: "bar",
+          barWidth: "42%",
+          data: merged.map((m) => ({
+            value: m.au,
+            itemStyle: { borderRadius: [5, 5, 0, 0], color: m.rpe >= 8 ? "#EF4444" : m.rpe >= 6 ? "#F59E0B" : "#10B981" },
+          })),
+        },
+        {
+          name: "RPE",
+          type: "line",
+          yAxisIndex: 1,
+          smooth: true,
+          data: merged.map((m) => m.rpe),
+          lineStyle: { color: "#38BDF8", width: 2 },
+          itemStyle: { color: "#38BDF8" },
+        },
+      ],
+    });
+    const onR = () => chart.resize();
+    window.addEventListener("resize", onR);
+    return () => {
+      window.removeEventListener("resize", onR);
+      chart.dispose();
+    };
+  }, [sessions]);
+
+  // 60fps Ball / Drill Playback along Arrows
+  useEffect(() => {
+    if (!animating || drillArrows.length === 0) return;
+    let raf = 0;
+    const segMs = 950;
+    const startTs = performance.now();
+    const tick = (now: number) => {
+      const elapsed = (now - startTs) % (drillArrows.length * segMs);
+      const idx = Math.floor(elapsed / segMs);
+      const u = (elapsed - idx * segMs) / segMs;
+      const ar = drillArrows[idx];
+      if (ar) {
+        setAnimBallPos({
+          x_m: ar.from_x_m + (ar.to_x_m - ar.from_x_m) * u,
+          y_m: ar.from_y_m + (ar.to_y_m - ar.from_y_m) * u,
+        });
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      setAnimBallPos(null);
+    };
+  }, [animating, drillArrows]);
+
   const applyDrillTemplate = (d: DrillSetup) => {
+    setAnimating(false);
     setSelectedDrillId(d.drill_id);
     setPitchView(d.pitch_view || "half");
     setDrillPlayers(d.players.map((p) => ({ ...p })));
@@ -93,9 +172,7 @@ export default function TrainingSessionStudio({
     setSelectedMd(s.md_code || "MD-3");
     setDurationMin(s.duration_min || 60);
     setTargetRpe(s.target_rpe || 6);
-    if (s.drill_setup) {
-      applyDrillTemplate(s.drill_setup);
-    }
+    if (s.drill_setup) applyDrillTemplate(s.drill_setup);
   };
 
   const handleGenerate = async () => {
@@ -173,7 +250,6 @@ export default function TrainingSessionStudio({
     onSessionsDeleted(res.sessions, res.weekly_load_safety);
   };
 
-  // Pitch Coordinate Helpers
   const getDomain = () => {
     if (pitchView === "half") return { xMin: 50, xMax: 105, yMin: 0, yMax: 68 };
     if (pitchView === "corner") return { xMin: 74, xMax: 105, yMin: 12, yMax: 68 };
@@ -183,9 +259,10 @@ export default function TrainingSessionStudio({
   const toCanvas = (x_m: number, y_m: number, W: number, H: number) => {
     const d = getDomain();
     const pad = 20;
-    const x = pad + ((x_m - d.xMin) / (d.xMax - d.xMin)) * (W - pad * 2);
-    const y = pad + ((y_m - d.yMin) / (d.yMax - d.yMin)) * (H - pad * 2);
-    return { x, y };
+    return {
+      x: pad + ((x_m - d.xMin) / (d.xMax - d.xMin)) * (W - pad * 2),
+      y: pad + ((y_m - d.yMin) / (d.yMax - d.yMin)) * (H - pad * 2),
+    };
   };
 
   const toMeters = (cx: number, cy: number, W: number, H: number) => {
@@ -216,7 +293,6 @@ export default function TrainingSessionStudio({
       }
     }
 
-    // Field lines
     ctx.strokeStyle = "rgba(255,255,255,0.4)";
     ctx.lineWidth = 1.6;
     const tl = toCanvas(0, 0, W, H);
@@ -236,7 +312,6 @@ export default function TrainingSessionStudio({
     const boxL_BR = toCanvas(16.5, 54.16, W, H);
     ctx.strokeRect(boxL_TL.x, boxL_TL.y, boxL_BR.x - boxL_TL.x, boxL_BR.y - boxL_TL.y);
 
-    // Zones
     for (const z of drillZones) {
       const p1 = toCanvas(z.x1_m, z.y1_m, W, H);
       const p2 = toCanvas(z.x2_m, z.y2_m, W, H);
@@ -249,7 +324,6 @@ export default function TrainingSessionStudio({
       ctx.restore();
     }
 
-    // Arrows
     for (const ar of drillArrows) {
       const a = toCanvas(ar.from_x_m, ar.from_y_m, W, H);
       const b = toCanvas(ar.to_x_m, ar.to_y_m, W, H);
@@ -273,7 +347,6 @@ export default function TrainingSessionStudio({
       ctx.restore();
     }
 
-    // Props
     for (const pr of drillProps) {
       const pt = toCanvas(pr.x_m, pr.y_m, W, H);
       ctx.save();
@@ -304,7 +377,19 @@ export default function TrainingSessionStudio({
       ctx.restore();
     }
 
-    // Players
+    if (animBallPos) {
+      const bp = toCanvas(animBallPos.x_m, animBallPos.y_m, W, H);
+      ctx.save();
+      ctx.fillStyle = "#FFFFFF";
+      ctx.beginPath();
+      ctx.arc(bp.x, bp.y, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#10B981";
+      ctx.lineWidth = 2.2;
+      ctx.stroke();
+      ctx.restore();
+    }
+
     for (const pl of drillPlayers) {
       const pt = toCanvas(pl.x_m, pl.y_m, W, H);
       ctx.save();
@@ -328,20 +413,22 @@ export default function TrainingSessionStudio({
       ctx.restore();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pitchView, drillPlayers, drillProps, drillArrows, drillZones, club.kit_hex]);
+  }, [pitchView, drillPlayers, drillProps, drillArrows, drillZones, animBallPos, club.kit_hex]);
 
   const getCvsCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const cvs = cvsRef.current!;
     const rect = cvs.getBoundingClientRect();
-    const cx = ((e.clientX - rect.left) / rect.width) * cvs.width;
-    const cy = ((e.clientY - rect.top) / rect.height) * cvs.height;
-    return { cx, cy, W: cvs.width, H: cvs.height };
+    return {
+      cx: ((e.clientX - rect.left) / rect.width) * cvs.width,
+      cy: ((e.clientY - rect.top) / rect.height) * cvs.height,
+      W: cvs.width,
+      H: cvs.height,
+    };
   };
 
   const handleCanvasDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const { cx, cy, W, H } = getCvsCoords(e);
     const m = toMeters(cx, cy, W, H);
-
     if (tool === "move") {
       for (let i = 0; i < drillPlayers.length; i++) {
         const pt = toCanvas(drillPlayers[i].x_m, drillPlayers[i].y_m, W, H);
@@ -360,13 +447,7 @@ export default function TrainingSessionStudio({
     } else if (tool === "player_a" || tool === "player_b") {
       setDrillPlayers((prev) => [
         ...prev,
-        {
-          id: `N${prev.length + 1}`,
-          team: tool === "player_a" ? "a" : "b",
-          label: `${prev.length + 1}`,
-          x_m: m.x_m,
-          y_m: m.y_m,
-        },
+        { id: `N${prev.length + 1}`, team: tool === "player_a" ? "a" : "b", label: `${prev.length + 1}`, x_m: m.x_m, y_m: m.y_m },
       ]);
     } else if (tool === "cone" || tool === "mini_goal" || tool === "mannequin" || tool === "ball") {
       setDrillProps((prev) => [...prev, { id: `P${Date.now()}`, kind: tool, x_m: m.x_m, y_m: m.y_m }]);
@@ -396,13 +477,7 @@ export default function TrainingSessionStudio({
       if (Math.hypot(endM.x_m - arrowStartRef.current.x_m, endM.y_m - arrowStartRef.current.y_m) >= 2.0) {
         setDrillArrows((prev) => [
           ...prev,
-          {
-            from_x_m: arrowStartRef.current!.x_m,
-            from_y_m: arrowStartRef.current!.y_m,
-            to_x_m: endM.x_m,
-            to_y_m: endM.y_m,
-            kind: tool === "pass_arrow" ? "pass" : "press",
-          },
+          { from_x_m: arrowStartRef.current!.x_m, from_y_m: arrowStartRef.current!.y_m, to_x_m: endM.x_m, to_y_m: endM.y_m, kind: tool === "pass_arrow" ? "pass" : "press" },
         ]);
       }
       arrowStartRef.current = null;
@@ -413,57 +488,53 @@ export default function TrainingSessionStudio({
 
   return (
     <div dir={isAr ? "rtl" : "ltr"} className="space-y-4">
-      {/* Weekly Microcycle Load Strip */}
+      {/* Weekly Microcycle Load Strip + ECharts ACWR Chart */}
       <div className="studio-panel p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Flame className="w-4 h-4 text-emerald-400" />
             <h2 className="text-sm font-extrabold text-white">
-              {isAr ? `الجدول الأسبوعي والأحمال (sRPE) — ${club.name_ar}` : `Weekly Periodization & sRPE — ${club.name_en}`}
+              {isAr ? `الجدول الأسبوعي ومؤشر الأحمال (sRPE & RPE) — ${club.name_ar}` : `Weekly Periodization & sRPE — ${club.name_en}`}
             </h2>
           </div>
-          <div className="flex items-center gap-2 text-xs">
-            <span
-              className={`px-2.5 py-1 rounded-full font-extrabold ${
-                weeklySafety.status === "warning"
-                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                  : "bg-emerald-500/15 text-emerald-300 border border-emerald-500/35"
-              }`}
-            >
-              {isAr ? `حمل الأسبوع: ${weeklySafety.total_weekly_au} AU` : `Weekly Load: ${weeklySafety.total_weekly_au} AU`}
-            </span>
-          </div>
+          <span
+            className={`px-2.5 py-1 rounded-full text-xs font-extrabold ${
+              weeklySafety.status === "warning"
+                ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                : "bg-emerald-500/15 text-emerald-300 border border-emerald-500/35"
+            }`}
+          >
+            {isAr ? `حمل الأسبوع: ${weeklySafety.total_weekly_au} AU` : `Weekly Load: ${weeklySafety.total_weekly_au} AU`}
+          </span>
         </div>
 
-        <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
-          {MD_DAYS.map((d) => {
-            const active = selectedMd === d.id;
-            return (
-              <button
-                key={d.id}
-                type="button"
-                onClick={() => {
-                  setSelectedMd(d.id);
-                  setDurationMin(d.dur);
-                  setTargetRpe(d.rpe);
-                }}
-                className={`p-2 rounded-xl border text-center transition ${
-                  active
-                    ? "bg-emerald-500/20 border-emerald-400 text-white"
-                    : "bg-[#090D16] border-white/[0.08] text-slate-300 hover:border-white/20"
-                }`}
-              >
-                <div className="text-xs font-extrabold">{d.label}</div>
-                <div className="text-[10px] text-slate-400">RPE {d.rpe} • {d.dur}m</div>
-                <div className="mt-1 h-1.5 w-full rounded bg-slate-800 overflow-hidden">
-                  <div
-                    className={`h-full ${d.rpe >= 8 ? "bg-rose-400" : d.rpe >= 6 ? "bg-amber-400" : "bg-emerald-400"}`}
-                    style={{ width: `${Math.min(100, d.rpe * 10)}%` }}
-                  />
-                </div>
-              </button>
-            );
-          })}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-center">
+          <div className="lg:col-span-7 grid grid-cols-4 sm:grid-cols-7 gap-2">
+            {MD_DAYS.map((d) => {
+              const active = selectedMd === d.id;
+              return (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedMd(d.id);
+                    setDurationMin(d.dur);
+                    setTargetRpe(d.rpe);
+                  }}
+                  className={`p-2 rounded-xl border text-center transition ${
+                    active ? "bg-emerald-500/20 border-emerald-400 text-white" : "bg-[#090D16] border-white/[0.08] text-slate-300"
+                  }`}
+                >
+                  <div className="text-xs font-extrabold">{d.label}</div>
+                  <div className="text-[10px] text-slate-400">RPE {d.rpe}</div>
+                  <div className="text-[10px] text-emerald-300 font-bold">{d.dur}m</div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="lg:col-span-5">
+            <div ref={loadChartRef} className="w-full h-36" />
+          </div>
         </div>
 
         {weeklySafety.warnings_ar.map((w, i) => (
@@ -473,9 +544,8 @@ export default function TrainingSessionStudio({
         ))}
       </div>
 
-      {/* Main Split: Interactive 2D Drill Canvas + Session Generator */}
+      {/* Main Split: Interactive Animated 2D Drill Canvas + Session Generator */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-        {/* Interactive Drill Pitch */}
         <div className="xl:col-span-7 studio-panel p-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <select
@@ -495,22 +565,39 @@ export default function TrainingSessionStudio({
             </select>
 
             <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setAnimating((v) => !v)}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-extrabold ${
+                  animating ? "bg-amber-400 text-slate-950" : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                }`}
+              >
+                {animating ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                <span>{animating ? (isAr ? "إيقاف" : "Stop") : isAr ? "تشغيل التمرين" : "Animate"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDrillArrows([])}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[#090D16] border border-white/10 text-[11px] text-slate-300"
+                title={isAr ? "مسح الأسهم" : "Clear Arrows"}
+              >
+                <RotateCcw className="w-3 h-3" />
+              </button>
               {(["half", "full", "corner"] as const).map((pv) => (
                 <button
                   key={pv}
                   type="button"
                   onClick={() => setPitchView(pv)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${
+                  className={`px-2 py-1 rounded-lg text-[11px] font-bold ${
                     pitchView === pv ? "bg-emerald-500 text-slate-950" : "bg-[#090D16] text-slate-300 border border-white/10"
                   }`}
                 >
-                  {pv === "half" ? (isAr ? "نصف ملعب" : "Half") : pv === "full" ? (isAr ? "ملعب كامل" : "Full") : isAr ? "ركنية" : "Corner"}
+                  {pv === "half" ? (isAr ? "نصف" : "Half") : pv === "full" ? (isAr ? "كامل" : "Full") : isAr ? "ركنية" : "Corner"}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Drawing Tools */}
           <div className="flex flex-wrap gap-1.5 text-[11px]">
             {(
               [
@@ -550,7 +637,7 @@ export default function TrainingSessionStudio({
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="text-slate-400">
-              {isAr ? "اسحب أي لاعب أو قمع مباشرة أو ارسم أسهم التمرير والضغط" : "Drag players/props or draw pass/press arrows"}
+              {isAr ? "اسحب أي لاعب أو قمع مباشرة أو شغّل حركة الكرة بالزر بالأعلى" : "Drag players/props or click Animate"}
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -576,7 +663,7 @@ export default function TrainingSessionStudio({
           </div>
         </div>
 
-        {/* Right: Session Parameters + 4 Phases + Saved Sessions */}
+        {/* Right: Session Generator + 4 Phases + Saved Sessions */}
         <div className="xl:col-span-5 space-y-4">
           <div className="studio-panel p-4 space-y-3 text-xs">
             <h3 className="text-xs font-extrabold text-emerald-300">
@@ -649,7 +736,6 @@ export default function TrainingSessionStudio({
             )}
           </div>
 
-          {/* Saved Sessions List */}
           <div className="studio-panel p-4 space-y-2 text-xs">
             <div className="font-extrabold text-white">
               {isAr ? `الحصص المحفوظة (${sessions.length})` : `Saved Sessions (${sessions.length})`}
@@ -657,7 +743,7 @@ export default function TrainingSessionStudio({
             {sessions.length === 0 ? (
               <div className="text-slate-400">{isAr ? "اضغط توليد لإنشاء أول حصة تدريبية." : "Click generate to create your first session."}</div>
             ) : (
-              <div className="space-y-1.5 max-h-48 overflow-y-auto">
+              <div className="space-y-1.5 max-h-44 overflow-y-auto">
                 {sessions.map((s) => (
                   <div
                     key={s.session_id}
@@ -673,24 +759,14 @@ export default function TrainingSessionStudio({
                         {s.session_date} • {s.duration_min} د • {s.srpe_au} AU
                       </div>
                     </button>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => loadSessionIntoCanvas(s)}
-                        className="p-1.5 rounded-lg bg-emerald-500/15 text-emerald-300"
-                        title={isAr ? "تحميل" : "Load"}
-                      >
-                        <Play className="w-3 h-3" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteSession(s.session_id)}
-                        className="p-1.5 rounded-lg bg-rose-500/15 text-rose-300"
-                        title={isAr ? "حذف" : "Delete"}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSession(s.session_id)}
+                      className="p-1.5 rounded-lg bg-rose-500/15 text-rose-300"
+                      title={isAr ? "حذف" : "Delete"}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
                   </div>
                 ))}
               </div>

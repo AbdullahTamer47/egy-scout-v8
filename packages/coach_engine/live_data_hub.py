@@ -504,13 +504,41 @@ def fetch_live_league_hub(league_id: str = "egy.1", force_refresh: bool = False)
     return payload
 
 
+WIKIDATA_POS_MAP: dict[str, str] = {
+    "Q201330": "GK",
+    "Q336286": "CB",
+    "Q55006111": "LB",
+    "Q55006114": "RB",
+    "Q55006115": "LWB",
+    "Q55006116": "RWB",
+    "Q9731197": "DM",
+    "Q6008848": "CM",
+    "Q18691898": "CAM",
+    "Q55006118": "LW",
+    "Q55006119": "RW",
+    "Q280658": "ST",
+    "Q6008847": "ST",
+}
+
+
+def _compute_age_from_dob(dob_raw: str) -> Optional[int]:
+    m = re.search(r"(\d{4})-(\d{2})-(\d{2})", dob_raw or "")
+    if not m:
+        return None
+    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    if not (1970 <= y <= 2012):
+        return None
+    now = datetime.now(timezone.utc)
+    age = now.year - y - ((now.month, now.day) < (mo, d))
+    return age if 15 <= age <= 50 else None
+
+
 def parse_fs_player_wikitext(
     wikitext: str,
     existing_players: Optional[list[dict[str, Any]]] = None,
     wiki_lang: str = "en",
 ) -> list[dict[str, Any]]:
     """Parse English ({{Fs player|...}}) or Arabic ({{تشكيلة لاعب|...}}) MediaWiki squad templates cleanly."""
-    existing_by_num = {int(p["jersey_number"]): p for p in (existing_players or []) if p.get("jersey_number")}
     existing_by_name = {str(p.get("name_en", "")).strip().lower(): p for p in (existing_players or [])}
 
     raw_rows: list[dict[str, Any]] = []
@@ -522,7 +550,8 @@ def parse_fs_player_wikitext(
 
     for block in FS_PLAYER_RE.findall(wikitext or ""):
         kv: dict[str, str] = {}
-        for part in block.split("|"):
+        # Split strictly outside [[wiki|link]] brackets so disambiguated player names never break
+        for part in re.split(r"\|(?![^\[]*\]\])", block):
             if "=" in part:
                 k, v = part.split("=", 1)
                 kv[k.strip().lower()] = v.strip()
@@ -538,7 +567,10 @@ def parse_fs_player_wikitext(
         if link_m:
             wiki_title = link_m.group(1).strip()
             display_name = (link_m.group(2) or link_m.group(1)).strip()
-        display_name = re.sub(r"\{\{[^}]+\}\}", "", display_name).strip()
+        display_name = re.sub(r"\{\{[^}]+\}\}", "", display_name)
+        display_name = display_name.replace("[[", "").replace("]]", "").strip()
+        if "|" in display_name:
+            display_name = display_name.split("|")[-1].strip()
         if not display_name:
             continue
 
@@ -547,7 +579,7 @@ def parse_fs_player_wikitext(
         other = str(kv.get("other") or kv.get("ملاحظات") or "").lower()
         broad_pos = str(kv.get("pos") or kv.get("مركز") or "MF").upper().strip()
 
-        matched = existing_by_name.get(display_name.lower()) or existing_by_num.get(num)
+        matched = existing_by_name.get(display_name.lower())
         if matched and matched.get("position"):
             pos = str(matched["position"]).upper()
         elif broad_pos in ("GK", "حارس", "حارس مرمى"):
@@ -570,12 +602,16 @@ def parse_fs_player_wikitext(
                 "jersey_number": num,
                 "name_en": name_en,
                 "name_ar": name_ar,
-                "wiki_title": wiki_title,
+                "wiki_title": wiki_title.replace("[[", "").replace("]]", "").strip(),
                 "wiki_lang": wiki_lang,
                 "nationality": nat_iso,
                 "nationality_flag": nat_flag,
                 "nationality_ar": nat_ar,
                 "position": pos,
+                "birth_date": None,
+                "age": None,
+                "height_cm": None,
+                "preferred_foot": None,
                 "is_captain": ("captain" in other and "vice-captain" not in other) or ("قائد" in other),
                 "is_vice_captain": "vice-captain" in other,
                 "is_on_loan": ("loan" in other) or ("إعارة" in other),
@@ -585,6 +621,85 @@ def parse_fs_player_wikitext(
             }
         )
     return raw_rows
+
+
+def _enrich_players_with_wikidata(
+    client: httpx.Client,
+    players: list[dict[str, Any]],
+    qid_by_wiki_title: dict[str, str],
+    source_lang: str,
+) -> None:
+    """Batch-enrich players with real birth_date, age, height_cm, exact position & Arabic labels from Wikidata."""
+    qids = list(dict.fromkeys(q for q in qid_by_wiki_title.values() if q))
+    if not qids:
+        return
+    entities: dict[str, Any] = {}
+    for i in range(0, len(qids), 45):
+        batch_ids = qids[i : i + 45]
+        try:
+            r = client.get(
+                "https://www.wikidata.org/w/api.php",
+                params={
+                    "action": "wbgetentities",
+                    "ids": "|".join(batch_ids),
+                    "props": "claims|labels",
+                    "languages": "ar|en",
+                    "format": "json",
+                },
+            )
+            if r.status_code == 200:
+                entities.update(r.json().get("entities") or {})
+        except Exception:
+            continue
+
+    for p in players:
+        qid = qid_by_wiki_title.get(p.get("wiki_title") or "")
+        ent = entities.get(qid or "")
+        if not ent:
+            continue
+        claims = ent.get("claims") or {}
+        labels = ent.get("labels") or {}
+
+        if source_lang == "en" and p["name_ar"] == p["name_en"]:
+            ar_lbl = str((labels.get("ar") or {}).get("value") or "").strip()
+            if ar_lbl:
+                p["name_ar"] = ar_lbl
+        elif source_lang == "ar" and p["name_en"] == p["name_ar"]:
+            en_lbl = str((labels.get("en") or {}).get("value") or "").strip()
+            if en_lbl:
+                p["name_en"] = en_lbl
+
+        dob_raw = str((((claims.get("P569") or [{}])[0].get("mainsnak") or {}).get("datavalue") or {}).get("value", {}).get("time") or "")
+        m_dob = re.search(r"(\d{4}-\d{2}-\d{2})", dob_raw)
+        if m_dob:
+            p["birth_date"] = m_dob.group(1)
+            p["age"] = _compute_age_from_dob(m_dob.group(1))
+
+        ht_raw = str((((claims.get("P2048") or [{}])[0].get("mainsnak") or {}).get("datavalue") or {}).get("value", {}).get("amount") or "")
+        if ht_raw:
+            try:
+                ht_val = float(ht_raw.lstrip("+"))
+                if 1.4 <= ht_val <= 2.2:
+                    ht_val *= 100.0
+                if 155 <= ht_val <= 215:
+                    p["height_cm"] = int(round(ht_val))
+            except ValueError:
+                pass
+
+        for c in (claims.get("P413") or []):
+            pq = str((((c.get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}).get("id") or "")
+            if pq in WIKIDATA_POS_MAP and p.get("position") != "GK":
+                p["position"] = WIKIDATA_POS_MAP[pq]
+                break
+
+        foot_q = str((((claims.get("P552") or [{}])[0].get("mainsnak") or {}).get("datavalue") or {}).get("value", {}).get("id") or "")
+        if foot_q == "Q3039938":
+            p["preferred_foot"] = "القدم اليمنى"
+        elif foot_q == "Q789447":
+            p["preferred_foot"] = "القدم اليسرى"
+
+        p["wikidata_id"] = qid
+        p["source"] = f"Wikipedia + Wikidata Live ({source_lang})"
 
 
 def sync_wikipedia_club_squad(
@@ -627,7 +742,7 @@ def sync_wikipedia_club_squad(
                 continue
 
         if players:
-            titles = [p["wiki_title"] for p in players[:45] if p.get("wiki_title")]
+            titles = [p["wiki_title"] for p in players[:48] if p.get("wiki_title")]
             other_lang = "ar" if source_lang == "en" else "en"
             info_by_title: dict[str, dict[str, Any]] = {}
             for i in range(0, len(titles), 40):
@@ -637,7 +752,8 @@ def sync_wikipedia_club_squad(
                     params={
                         "action": "query",
                         "titles": "|".join(batch),
-                        "prop": "pageimages|langlinks",
+                        "prop": "pageimages|langlinks|pageprops",
+                        "ppprop": "wikibase_item",
                         "lllang": other_lang,
                         "pithumbsize": 420,
                         "redirects": 1,
@@ -658,8 +774,10 @@ def sync_wikipedia_club_squad(
                         if t in pages_by_title:
                             info_by_title[orig] = pages_by_title[t]
 
+            qid_by_title: dict[str, str] = {}
             for p in players:
-                pg = info_by_title.get(p.get("wiki_title") or "")
+                wt_title = p.get("wiki_title") or ""
+                pg = info_by_title.get(wt_title)
                 if pg:
                     langlinks = pg.get("langlinks") or []
                     if langlinks and langlinks[0].get("*"):
@@ -671,6 +789,11 @@ def sync_wikipedia_club_squad(
                     thumb = (pg.get("thumbnail") or {}).get("source")
                     if thumb:
                         p["photo_url"] = str(thumb)
+                    qid = str((pg.get("pageprops") or {}).get("wikibase_item") or "").strip()
+                    if qid:
+                        qid_by_title[wt_title] = qid
+
+            _enrich_players_with_wikidata(client, players, qid_by_title, source_lang)
 
     return {
         "club_id": club_id,

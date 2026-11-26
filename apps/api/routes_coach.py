@@ -8,14 +8,19 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 
 from apps.api.rbac import TenantContext, get_tenant_context
-from packages.coach_engine.ai_copilot import run_coach_copilot_chat
+from packages.coach_engine.ai_copilot import (
+    build_three_phase_tactical_package,
+    run_coach_copilot_chat,
+)
 from packages.coach_engine.director_admin import (
     CoachProStore,
     build_official_matchday_sheet,
     build_squad_depth_report,
+    compute_foreign_quota,
     evaluate_squad_availability,
     render_matchday_sheet_html,
     render_training_session_html,
+    search_egyptian_league_players,
 )
 from packages.coach_engine.live_data_hub import (
     EGYPTIAN_CLUB_PRESETS,
@@ -199,17 +204,100 @@ def api_coach_overview(
     except Exception:
         live_hub = {"league_id": league, "standings": [], "upcoming_fixtures": [], "recent_results": [], "is_live": False}
 
+    foreign_quota = compute_foreign_quota(club_enriched["players"])
+    st_list = list(live_hub.get("standings") or [])
+    c_st = next((s for s in st_list if s.get("team_id") == active_cid), None)
+    o_st = next((s for s in st_list if s.get("team_id") == active_oid), None)
+    brief_ar = [
+        f"القائمة المتاحة: {depth['fit_count']} لاعباً جاهزاً مقابل {depth['unavailable_count']} مستبعداً لإصابة أو إيقاف ({foreign_quota['foreign_count']}/{foreign_quota['limit']} أجانب).",
+        (
+            f"الترتيب الحي: {club_enriched['name_ar']} في المركز #{c_st['rank']} ({c_st['points']} نقطة) مقابل {opp_enriched['name_ar']} في المركز #{o_st['rank']} ({o_st['points']} نقطة)."
+            if c_st and o_st
+            else f"مواجهة {club_enriched['name_ar']} ({len(club_enriched['players'])} لاعباً) ضد {opp_enriched['name_ar']} ({len(opp_enriched['players'])} لاعباً) بتشكيل {active_form}."
+        ),
+        depth["shortage_alerts_ar"][0] if depth["shortage_alerts_ar"] else "توازن مثالي في جميع خطوط التشكيل الأساسي دون نقص عددي.",
+    ]
+
     return {
         "profile": profile,
         "club": club_enriched,
         "opponent": opp_enriched,
         "formation": active_form,
         "squad_depth": depth,
+        "foreign_quota": foreign_quota,
+        "matchday_brief_ar": brief_ar,
         "matchday_sheet": matchday_sheet,
         "training_sessions": sessions,
         "weekly_load_safety": weekly_safety,
         "live_hub": live_hub,
     }
+
+
+@router.get("/league-players")
+def api_coach_league_players(
+    q: str = "",
+    position: str = "ALL",
+    club_id: str = "ALL",
+    nationality_type: str = "all",
+    max_age: Optional[int] = None,
+    min_height: Optional[int] = None,
+    limit: int = 120,
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    ctx.require("read:tactics")
+    store = get_coach_store()
+    clubs_map = load_all_coach_clubs(store.list_club_rosters(ctx.tenant_id))
+    players = search_egyptian_league_players(
+        clubs_map=clubs_map,
+        query=q,
+        position=position,
+        club_id=club_id,
+        nationality_type=nationality_type,
+        max_age=max_age,
+        min_height=min_height,
+        limit=max(10, min(300, limit)),
+    )
+    return {"count": len(players), "players": players}
+
+
+@router.post("/tactics/blueprint")
+def api_coach_tactics_blueprint(
+    payload: dict[str, Any],
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    """Deterministic instant 3-phase tactical blueprint builder (zero LLM latency)."""
+    ctx.require("read:tactics")
+    store = get_coach_store()
+    profile = store.get_coach_profile(ctx.tenant_id) or {}
+    club_id = str(payload.get("club_id") or profile.get("club_id") or "al_ahly")
+    opponent_id = str(payload.get("opponent_id") or profile.get("opponent_id") or "zamalek")
+    formation = str(payload.get("formation_code") or payload.get("formation") or profile.get("formation") or "4-2-3-1")
+    opp_formation = str(payload.get("opponent_formation_code") or "4-4-2")
+    tactical_mode = str(payload.get("tactical_mode") or "tiki_taka")
+    opp_mode = str(payload.get("opponent_tactical_mode") or "balanced")
+    preset_kw = str(payload.get("masterclass_prompt") or "")
+
+    clubs_map = load_all_coach_clubs(store.list_club_rosters(ctx.tenant_id))
+    club_raw = clubs_map.get(club_id) or next(iter(clubs_map.values()))
+    opp_raw = clubs_map.get(opponent_id) or next((v for k, v in clubs_map.items() if k != club_raw["club_id"]), club_raw)
+    club_enriched = _enrich_club_with_admin(store, ctx.tenant_id, club_raw)
+    opp_enriched = _enrich_club_with_admin(store, ctx.tenant_id, opp_raw)
+    fit_players = [p for p in club_enriched["players"] if p.get("is_eligible_starter", True)]
+
+    from packages.tactics_engine.moment_analyzer import match_masterclass_preset
+
+    preset = match_masterclass_preset(preset_kw) if preset_kw else None
+    return build_three_phase_tactical_package(
+        club=club_enriched,
+        opponent=opp_enriched,
+        fit_players=fit_players,
+        opp_players=opp_enriched["players"],
+        formation_code=formation,
+        opponent_formation_code=opp_formation,
+        tactical_mode=tactical_mode,
+        opponent_tactical_mode=opp_mode,
+        masterclass_preset=preset,
+    )
 
 
 @router.get("/live/leagues")

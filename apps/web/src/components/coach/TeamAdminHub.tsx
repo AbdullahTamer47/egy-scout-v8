@@ -1,34 +1,72 @@
 "use client";
 
-import React, { useState } from "react";
-import { ClipboardList, Printer, ShieldAlert, Upload } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { CheckSquare, ClipboardList, Globe, Printer, ShieldAlert, Square, Upload } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import { CoachClubDetail, CoachPlayer, MatchdaySheetPayload, SquadDepthReport } from "./coachTypes";
+import { CoachClubDetail, CoachPlayer, ForeignQuotaSummary, MatchdaySheetPayload, SquadDepthReport } from "./coachTypes";
 
 interface Props {
   lang: "ar" | "en";
   club: CoachClubDetail;
   opponent: CoachClubDetail;
   formation: string;
+  foreignQuota: ForeignQuotaSummary;
   matchdaySheet: MatchdaySheetPayload;
   onAdminUpdated: (club: CoachClubDetail, depth: SquadDepthReport, sheet: MatchdaySheetPayload) => void;
   onClubSynced: (club: CoachClubDetail) => void;
 }
+
+const DEFAULT_LOGISTICS = [
+  { id: "hotel", ar: "تأكيد معسكر الفندق وتسكين اللاعبين" },
+  { id: "kits", ar: "اعتماد ألوان الأطقم الرسمية في الاجتماع الفني" },
+  { id: "medical", ar: "حقيبة الإسعافات وأجهزة التبريد والتغذية" },
+  { id: "cards", ar: "مراجعة البطاقات والـ ID الإلكتروني قبل الـ 90 دقيقة" },
+  { id: "bus", ar: "موعد تحرك الحافلة والتأمين المروري للاستاد" },
+];
 
 export default function TeamAdminHub({
   lang,
   club,
   opponent,
   formation,
+  foreignQuota,
   matchdaySheet,
   onAdminUpdated,
   onClubSynced,
 }: Props) {
   const isAr = lang === "ar";
   const [updatingJersey, setUpdatingJersey] = useState<number | null>(null);
+  const [statusFilter, setStatusFilter] = useState<"all" | "fit" | "blocked" | "risk">("all");
   const [scoresheetText, setScoresheetText] = useState("");
   const [importing, setImporting] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [checkedOps, setCheckedOps] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`egy_scout_ops_${club.club_id}`);
+      if (raw) setCheckedOps(JSON.parse(raw));
+    } catch {}
+  }, [club.club_id]);
+
+  const toggleOps = (id: string) => {
+    setCheckedOps((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      try {
+        localStorage.setItem(`egy_scout_ops_${club.club_id}`, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const filteredRoster = useMemo(() => {
+    return club.players.filter((p) => {
+      if (statusFilter === "fit") return p.is_eligible_starter;
+      if (statusFilter === "blocked") return !p.is_eligible_starter;
+      if (statusFilter === "risk") return p.yellow_cards === 2;
+      return true;
+    });
+  }, [club.players, statusFilter]);
 
   const updatePlayerStatus = async (p: CoachPlayer, patch: Partial<CoachPlayer>) => {
     setUpdatingJersey(p.jersey_number);
@@ -96,22 +134,65 @@ export default function TeamAdminHub({
 
   return (
     <div dir={isAr ? "rtl" : "ltr"} className="space-y-4">
+      {/* Top Foreign Quota Meter Bar */}
+      <div className="studio-panel p-4 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2.5">
+          <Globe className="w-4 h-4 text-emerald-400" />
+          <div>
+            <div className="font-extrabold text-white">
+              {isAr ? `لائحة الأجانب (الدوري المصري): ${foreignQuota.foreign_count} / ${foreignQuota.limit}` : `Foreign Quota: ${foreignQuota.foreign_count} / ${foreignQuota.limit}`}
+            </div>
+            <div className="text-[11px] text-slate-400">
+              {foreignQuota.foreign_players.map((f) => `${f.nationality_flag} ${f.name_ar}`).join(" • ") || (isAr ? "لا يوجد لاعبون أجانب مسجلون" : "None")}
+            </div>
+          </div>
+        </div>
+        <span
+          className={`px-3 py-1 rounded-full font-extrabold ${
+            foreignQuota.status === "over_limit"
+              ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+              : foreignQuota.status === "warning"
+                ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                : "bg-emerald-500/15 text-emerald-300 border border-emerald-500/35"
+          }`}
+        >
+          {foreignQuota.status === "over_limit"
+            ? isAr ? "تجاوز الحد الأقصى" : "Over Limit"
+            : isAr ? `متبقي ${foreignQuota.remaining_slots} مكان` : `${foreignQuota.remaining_slots} left`}
+        </span>
+      </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
         {/* Left: Availability, Injuries & Yellow-Card Suspension Ledger */}
         <div className="xl:col-span-7 studio-panel p-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <ShieldAlert className="w-4 h-4 text-emerald-400" />
-              <div>
-                <h2 className="text-sm font-extrabold text-white">
-                  {isAr ? `السجل الطبي والانضباطي — ${club.name_ar}` : `Medical & Discipline Ledger — ${club.name_en}`}
-                </h2>
-                <p className="text-[11px] text-slate-400">
-                  {isAr
-                    ? "أي إصابة أو تراكم 3 بطاقات صفراء يوقف اللاعب تلقائياً من التشكيل الأساسي وكشف المباراة"
-                    : "Injured players or 3+ yellow cards are automatically excluded from Starting XI"}
-                </p>
-              </div>
+              <h2 className="text-sm font-extrabold text-white">
+                {isAr ? `السجل الطبي والانضباطي — ${club.name_ar}` : `Medical & Discipline Ledger — ${club.name_en}`}
+              </h2>
+            </div>
+
+            <div className="flex flex-wrap gap-1 text-[11px]">
+              {(
+                [
+                  ["all", isAr ? "الكل" : "All"],
+                  ["fit", isAr ? "جاهز" : "Fit"],
+                  ["blocked", isAr ? "مستبعد" : "Out"],
+                  ["risk", isAr ? "مهدد (2🟨)" : "Risk"],
+                ] as const
+              ).map(([id, lbl]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setStatusFilter(id)}
+                  className={`px-2.5 py-1 rounded-lg font-bold ${
+                    statusFilter === id ? "bg-emerald-500 text-slate-950" : "bg-[#090D16] text-slate-300 border border-white/10"
+                  }`}
+                >
+                  {lbl}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -127,7 +208,7 @@ export default function TeamAdminHub({
                 </tr>
               </thead>
               <tbody>
-                {club.players.map((p) => (
+                {filteredRoster.map((p) => (
                   <tr
                     key={p.jersey_number}
                     className={`border-b border-white/[0.05] ${!p.is_eligible_starter ? "bg-rose-950/20" : ""}`}
@@ -136,7 +217,7 @@ export default function TeamAdminHub({
                     <td className="py-2">
                       <div className="font-bold text-white">{isAr ? p.name_ar : p.name_en}</div>
                       <div className="text-[10px] text-slate-400">
-                        {p.position}
+                        {p.position} {p.age ? `• ${p.age}س` : ""}
                         {p.block_reason_ar ? ` • ${p.block_reason_ar}` : p.warning_ar ? ` • ${p.warning_ar}` : ""}
                       </div>
                     </td>
@@ -195,7 +276,7 @@ export default function TeamAdminHub({
           </div>
         </div>
 
-        {/* Right: Official 20-Man Matchday Sheet + Scoresheet Import */}
+        {/* Right: Official 20-Man Matchday Sheet + Camp Checklist + Scoresheet Import */}
         <div className="xl:col-span-5 space-y-4">
           <div className="studio-panel p-4 space-y-3 text-xs">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -273,6 +354,29 @@ export default function TeamAdminHub({
             </div>
           </div>
 
+          {/* Interactive Matchday Camp & Logistics Checklist */}
+          <div className="studio-panel p-4 space-y-2 text-xs">
+            <div className="font-extrabold text-white">{isAr ? "قائمة مهام المعسكر واللوجستيات" : "Matchday Camp & Logistics Checklist"}</div>
+            <div className="space-y-1.5">
+              {DEFAULT_LOGISTICS.map((item) => {
+                const done = !!checkedOps[item.id];
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => toggleOps(item.id)}
+                    className={`w-full flex items-center gap-2 p-2 rounded-xl border text-start transition ${
+                      done ? "bg-emerald-500/10 border-emerald-500/35 text-emerald-200" : "bg-[#090D16] border-white/[0.07] text-slate-300"
+                    }`}
+                  >
+                    {done ? <CheckSquare className="w-4 h-4 text-emerald-400 shrink-0" /> : <Square className="w-4 h-4 text-slate-500 shrink-0" />}
+                    <span className={done ? "line-through opacity-80" : ""}>{item.ar}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Scoresheet Quick Importer */}
           <div className="studio-panel p-4 space-y-2.5 text-xs">
             <div className="flex items-center gap-2 font-extrabold text-white">
@@ -280,10 +384,10 @@ export default function TeamAdminHub({
               <span>{isAr ? "استيراد سريع لاسكور شيت رسمي (30 ثانية)" : "Official Scoresheet Quick Import"}</span>
             </div>
             <textarea
-              rows={3}
+              rows={2}
               value={scoresheetText}
               onChange={(e) => setScoresheetText(e.target.value)}
-              placeholder={isAr ? "1 - محمد الشناوي (GK)\n10 - إمام عاشور (CM)\n--- احتياط ---\n14 - حسين الشحات" : "1 - Player Name (GK)..."}
+              placeholder={isAr ? "1 - محمد الشناوي (GK)\n10 - إمام عاشور (CM)..." : "1 - Player Name (GK)..."}
               className="w-full rounded-xl bg-[#090D16] border border-white/[0.12] p-2.5 text-xs text-white outline-none focus:border-emerald-400"
             />
             {msg && <div className="text-[11px] font-bold text-emerald-300">{msg}</div>}

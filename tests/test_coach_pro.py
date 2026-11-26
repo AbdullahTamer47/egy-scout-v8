@@ -12,6 +12,7 @@ from packages.coach_engine.director_admin import (
     CoachProStore,
     build_official_matchday_sheet,
     build_squad_depth_report,
+    compute_foreign_quota,
     evaluate_squad_availability,
 )
 from packages.coach_engine.live_data_hub import (
@@ -160,6 +161,50 @@ class TestCoachPro(unittest.TestCase):
         self.assertEqual(r_trn.status_code, 200)
         self.assertEqual(r_trn.json()["action_executed"], "apply_training")
         self.assertIsNotNone(r_trn.json()["ai_training_session"])
+
+        # V2: 3-phase tactical blueprint & All-Egypt League Search
+        r_bp = client.post(
+            "/api/coach/tactics/blueprint",
+            headers=hdrs,
+            json={"club_id": "al_ahly", "opponent_id": "zamalek", "formation_code": "4-2-3-1"},
+        )
+        self.assertEqual(r_bp.status_code, 200)
+        phases = r_bp.json().get("phase_states") or {}
+        self.assertEqual(set(phases.keys()), {"possession", "attack", "defense"})
+        pos_x = sum(n["x_m"] for n in phases["possession"]["nodes"])
+        att_x = sum(n["x_m"] for n in phases["attack"]["nodes"])
+        def_x = sum(n["x_m"] for n in phases["defense"]["nodes"])
+        self.assertGreater(att_x, pos_x)
+        self.assertLess(def_x, pos_x)
+        for ph in phases.values():
+            for n in ph["nodes"] + ph["opponent_nodes"]:
+                self.assertGreaterEqual(n["x_m"], 0.0)
+                self.assertLessEqual(n["x_m"], 105.0)
+                self.assertGreaterEqual(n["y_m"], 0.0)
+                self.assertLessEqual(n["y_m"], 68.0)
+
+        r_lp = client.get("/api/coach/league-players?nationality_type=foreign&limit=50", headers=hdrs)
+        self.assertEqual(r_lp.status_code, 200)
+        self.assertGreater(r_lp.json()["count"], 0)
+        for lp in r_lp.json()["players"]:
+            self.assertNotEqual(lp["nationality"], "EGY")
+
+    def test_zero_wikilink_leaks_and_wikidata_bio_coverage(self) -> None:
+        clubs = load_all_coach_clubs()
+        all_p = [p for c in clubs.values() for p in (c.get("players") or [])]
+        self.assertGreaterEqual(len(all_p), 600)
+        for p in all_p:
+            self.assertNotIn("[[", str(p.get("name_en") or ""))
+            self.assertNotIn("[[", str(p.get("name_ar") or ""))
+            self.assertNotIn("]]", str(p.get("name_en") or ""))
+        with_age = sum(1 for p in all_p if isinstance(p.get("age"), int) and p["age"] >= 15)
+        with_ht = sum(1 for p in all_p if isinstance(p.get("height_cm"), int) and p["height_cm"] >= 155)
+        self.assertGreater(with_age, 100)
+        self.assertGreater(with_ht, 50)
+
+        fq = compute_foreign_quota(clubs["al_ahly"]["players"])
+        self.assertEqual(fq["limit"], 5)
+        self.assertIn(fq["status"], ("ok", "warning", "over_limit"))
 
 
 if __name__ == "__main__":

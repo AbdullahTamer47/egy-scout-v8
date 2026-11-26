@@ -8,14 +8,16 @@ import {
   Compass,
   Flame,
   Globe,
+  LayoutDashboard,
   RefreshCw,
   Send,
   Shield,
   Sparkles,
   UserCheck,
 } from "lucide-react";
-import { apiFetch, FormationBlueprintPayload } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import CoachAICopilot, { CoachChatResponse } from "@/components/coach/CoachAICopilot";
+import CoachDashboardHome from "@/components/coach/CoachDashboardHome";
 import CoachOnboardingGate from "@/components/coach/CoachOnboardingGate";
 import CoachTacticsStudio from "@/components/coach/CoachTacticsStudio";
 import LiveFootballHubPanel from "@/components/coach/LiveFootballHubPanel";
@@ -29,16 +31,17 @@ import {
   CoachOverviewPayload,
   CoachPlayer,
   CoachProfile,
+  ThreePhaseBlueprint,
   TrainingSessionPlan,
 } from "@/components/coach/coachTypes";
 
-type CoachTab = "tactics" | "training" | "director" | "admin" | "live";
+type CoachTab = "dashboard" | "tactics" | "training" | "director" | "admin" | "live";
 
 export default function CoachProPage() {
   const [lang, setLang] = useState<"ar" | "en">("ar");
   const isAr = lang === "ar";
 
-  const [tab, setTab] = useState<CoachTab>("tactics");
+  const [tab, setTab] = useState<CoachTab>("dashboard");
   const [clubs, setClubs] = useState<CoachClubListItem[]>([]);
   const [profile, setProfile] = useState<CoachProfile | null>(null);
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
@@ -46,7 +49,7 @@ export default function CoachProPage() {
   const [savingProfile, setSavingProfile] = useState<boolean>(false);
 
   const [overview, setOverview] = useState<CoachOverviewPayload | null>(null);
-  const [aiBlueprint, setAiBlueprint] = useState<FormationBlueprintPayload | null>(null);
+  const [aiBlueprint, setAiBlueprint] = useState<ThreePhaseBlueprint | null>(null);
   const [aiSession, setAiSession] = useState<TrainingSessionPlan | null>(null);
   const [chatOpen, setChatOpen] = useState<boolean>(false);
   const [quickPrompt, setQuickPrompt] = useState<string>("");
@@ -64,28 +67,21 @@ export default function CoachProPage() {
       "coach"
     );
     setOverview(ov);
-    // Automatically prepare custom club-vs-opponent blueprint for Tactics Board!
     try {
-      const bpRes = await apiFetch<CoachChatResponse>(
-        "/api/coach/chat",
+      const bp = await apiFetch<ThreePhaseBlueprint>(
+        "/api/coach/tactics/blueprint",
         {
           method: "POST",
           body: JSON.stringify({
-            question: `ارسم تشكيل ${prof.formation || "4-2-3-1"}`,
-            coach_name: prof.coach_name,
-            coach_role: prof.coach_role,
             club_id: prof.club_id,
             opponent_id: prof.opponent_id,
-            formation: prof.formation || "4-2-3-1",
-            model: "auto",
+            formation_code: prof.formation || "4-2-3-1",
           }),
         },
         "club_demo_egypt",
         "coach"
       );
-      if (bpRes.ai_drawing_blueprint) {
-        setAiBlueprint(bpRes.ai_drawing_blueprint);
-      }
+      setAiBlueprint(bp);
     } catch {}
   }, []);
 
@@ -139,13 +135,11 @@ export default function CoachProPage() {
     if (res.ai_drawing_blueprint) {
       setAiBlueprint(res.ai_drawing_blueprint);
       setTab("tactics");
-      setAiBanner(isAr ? "تم رسم الخطة وتطبيقها مباشرةً على السبورة التكتيكية ✓" : "Tactical blueprint applied to board ✓");
+      setAiBanner(isAr ? "تم رسم الحالات التكتيكية الثلاث وتطبيقها مباشرة على السبورة ✓" : "3-phase tactical plan applied ✓");
     } else if (res.ai_training_session) {
       setAiSession(res.ai_training_session);
       setOverview((prev) =>
-        prev
-          ? { ...prev, training_sessions: [res.ai_training_session!, ...prev.training_sessions] }
-          : prev
+        prev ? { ...prev, training_sessions: [res.ai_training_session!, ...prev.training_sessions] } : prev
       );
       setTab("training");
       setAiBanner(isAr ? "تم توليد الحصة التدريبية وتجهيزها على لوحة الملعب ✓" : "Training session generated ✓");
@@ -153,12 +147,13 @@ export default function CoachProPage() {
       setOverview((prev) => (prev ? { ...prev, matchday_sheet: res.ai_matchday_sheet! } : prev));
       setTab("admin");
       setAiBanner(isAr ? "تم تحديث كشف المباراة الرسمي مع استبعاد المصابين والموقوفين ✓" : "Matchday sheet updated ✓");
+    } else if (res.answer_ar) {
+      setAiBanner(res.answer_ar.slice(0, 180));
     }
   };
 
-  const runQuickBarPrompt = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!quickPrompt.trim() || !profile || runningQuick) return;
+  const runDirectAiPrompt = async (q: string) => {
+    if (!q.trim() || !profile || runningQuick) return;
     setRunningQuick(true);
     try {
       const res = await apiFetch<CoachChatResponse>(
@@ -166,7 +161,7 @@ export default function CoachProPage() {
         {
           method: "POST",
           body: JSON.stringify({
-            question: quickPrompt,
+            question: q,
             coach_name: profile.coach_name,
             coach_role: profile.coach_role,
             club_id: profile.club_id,
@@ -207,9 +202,10 @@ export default function CoachProPage() {
   }
 
   const navTabs: Array<{ id: CoachTab; ar: string; en: string; icon: React.ReactNode }> = [
+    { id: "dashboard", ar: "لوحة القيادة", en: "Command", icon: <LayoutDashboard className="w-4 h-4" /> },
     { id: "tactics", ar: "الخطط والتكتيك", en: "Tactics", icon: <Compass className="w-4 h-4" /> },
     { id: "training", ar: "التدريب والأحمال", en: "Training", icon: <Flame className="w-4 h-4" /> },
-    { id: "director", ar: "المدير الفني", en: "Director", icon: <Shield className="w-4 h-4" /> },
+    { id: "director", ar: "المدير الفني والكشاف", en: "Director", icon: <Shield className="w-4 h-4" /> },
     { id: "admin", ar: "الإداري وكشف المباراة", en: "Admin & XI", icon: <ClipboardList className="w-4 h-4" /> },
     { id: "live", ar: "الدوريات الحية", en: "Live Hub", icon: <Globe className="w-4 h-4" /> },
   ];
@@ -252,7 +248,6 @@ export default function CoachProPage() {
           </nav>
         </div>
 
-        {/* Bottom Edition Switcher & Coach Profile Switch */}
         <div className="space-y-2 pt-3 border-t border-white/[0.08]">
           <button
             type="button"
@@ -278,8 +273,8 @@ export default function CoachProPage() {
 
       {/* Main Content */}
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* Top Bar with Coach Greeting, Matchup & Core AI Command */}
-        <header className="bg-[#0C1220]/95 backdrop-blur border-b border-white/[0.08] px-4 py-3 space-y-2.5">
+        {/* Compact Single Header + Direct AI Bar */}
+        <header className="bg-[#0C1220]/95 backdrop-blur border-b border-white/[0.08] px-4 py-2.5 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2.5">
               <button
@@ -313,7 +308,7 @@ export default function CoachProPage() {
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 text-slate-950 text-xs font-extrabold"
               >
                 <Bot className="w-4 h-4" />
-                <span>{isAr ? "المساعد الذكي" : "AI Copilot"}</span>
+                <span>{isAr ? "المساعد الذكي (AI)" : "AI Copilot"}</span>
               </button>
               <button
                 type="button"
@@ -325,23 +320,28 @@ export default function CoachProPage() {
             </div>
           </div>
 
-          {/* Persistent AI Command Bar */}
-          <form onSubmit={runQuickBarPrompt} className="flex items-center gap-2">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              runDirectAiPrompt(quickPrompt);
+            }}
+            className="flex items-center gap-2"
+          >
             <input
               type="text"
               value={quickPrompt}
               onChange={(e) => setQuickPrompt(e.target.value)}
               placeholder={
                 isAr
-                  ? `أمر سريع للذكاء الاصطناعي (مثال: ارسم خطة 3-4-2-1 ألونسو لـ ${overview.club.name_ar} أو صمم حصة MD-2)...`
-                  : "Quick AI Command (e.g. Draw 3-4-2-1 Alonso or create MD-2 training session)..."
+                  ? `أمر سريع للذكاء الاصطناعي: "ارسم خطة 3-4-2-1 ألونسو"، "صمم حصة MD-2"، أو "جهز كشف المباراة"...`
+                  : "Quick AI Command..."
               }
-              className="flex-1 rounded-xl bg-[#090D16] border border-emerald-500/30 focus:border-emerald-400 px-3.5 py-2 text-xs text-white outline-none"
+              className="flex-1 rounded-xl bg-[#090D16] border border-emerald-500/30 focus:border-emerald-400 px-3.5 py-1.5 text-xs text-white outline-none"
             />
             <button
               type="submit"
               disabled={runningQuick || !quickPrompt.trim()}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-xs font-extrabold text-emerald-300 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-xs font-extrabold text-emerald-300 disabled:opacity-50"
             >
               <Send className="w-3.5 h-3.5" />
               <span>{runningQuick ? "..." : isAr ? "تنفيذ بالـ AI" : "Run AI"}</span>
@@ -349,17 +349,31 @@ export default function CoachProPage() {
           </form>
 
           {aiBanner && (
-            <div className="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-xs font-bold text-emerald-200 flex items-center justify-between">
-              <span>{aiBanner}</span>
-              <button type="button" onClick={() => setAiBanner(null)} className="text-[10px] underline">
+            <div className="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-xs font-bold text-emerald-200 flex items-center justify-between gap-2">
+              <span className="truncate">{aiBanner}</span>
+              <button type="button" onClick={() => setAiBanner(null)} className="text-[10px] underline shrink-0">
                 {isAr ? "إخفاء" : "Hide"}
               </button>
             </div>
           )}
         </header>
 
-        {/* Active Workspace */}
-        <main className="flex-1 p-4 pb-24 md:pb-8">
+        {/* Workspace */}
+        <main className="flex-1 p-4 pb-24 md:pb-6">
+          {tab === "dashboard" && (
+            <CoachDashboardHome
+              lang={lang}
+              profile={profile}
+              overview={overview}
+              onNavigate={(t) => setTab(t)}
+              onSelectPlayer={(player, ownerClub) => setModalTarget({ player, club: ownerClub })}
+              onRunAiPrompt={(q) => {
+                setChatOpen(true);
+                setQuickPrompt(q);
+              }}
+            />
+          )}
+
           {tab === "tactics" && (
             <CoachTacticsStudio
               lang={lang}
@@ -397,6 +411,7 @@ export default function CoachProPage() {
               lang={lang}
               club={overview.club}
               opponent={overview.opponent}
+              clubs={clubs}
               squadDepth={overview.squad_depth}
               standings={overview.live_hub.standings || []}
               onSelectPlayer={(player, ownerClub) => setModalTarget({ player, club: ownerClub })}
@@ -409,6 +424,7 @@ export default function CoachProPage() {
               club={overview.club}
               opponent={overview.opponent}
               formation={profile.formation || "4-2-3-1"}
+              foreignQuota={overview.foreign_quota}
               matchdaySheet={overview.matchday_sheet}
               onAdminUpdated={(updatedClub, depth, sheet) => {
                 setOverview((prev) =>
@@ -441,23 +457,23 @@ export default function CoachProPage() {
       </div>
 
       {/* Mobile Bottom Nav */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-[#0C1220]/95 backdrop-blur border-t border-white/[0.1] grid grid-cols-5 py-1.5 px-1">
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-[#0C1220]/95 backdrop-blur border-t border-white/[0.1] grid grid-cols-6 py-1.5 px-1">
         {navTabs.map((item) => (
           <button
             key={item.id}
             type="button"
             onClick={() => setTab(item.id)}
-            className={`flex flex-col items-center justify-center gap-0.5 py-1 rounded-lg text-[10px] font-bold ${
+            className={`flex flex-col items-center justify-center gap-0.5 py-1 rounded-lg text-[9.5px] font-bold ${
               tab === item.id ? "text-emerald-400" : "text-slate-400"
             }`}
           >
             {item.icon}
-            <span className="truncate max-w-[64px]">{isAr ? item.ar.split(" ")[0] : item.en}</span>
+            <span className="truncate max-w-[54px]">{isAr ? item.ar.split(" ")[0] : item.en}</span>
           </button>
         ))}
       </nav>
 
-      {/* Core AI Copilot Drawer */}
+      {/* Slide-Over AI Copilot Drawer */}
       <CoachAICopilot
         lang={lang}
         profile={profile}
@@ -468,7 +484,7 @@ export default function CoachProPage() {
         onActionExecuted={handleAiAction}
       />
 
-      {/* Full Player Profile Modal */}
+      {/* Player Bio Modal */}
       {modalTarget && (
         <PlayerDetailModal
           lang={lang}

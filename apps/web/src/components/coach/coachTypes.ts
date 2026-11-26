@@ -1,4 +1,7 @@
+import { BlueprintCustomZone, BlueprintNode, BlueprintPassingArrow, MathValidationResult } from "@/lib/api";
+
 export type CoachRoleType = "head_coach" | "assistant_coach" | "technical_director" | "team_admin";
+export type TacticalPhaseId = "possession" | "attack" | "defense";
 
 export interface CoachProfile {
   tenant_id?: string;
@@ -36,7 +39,11 @@ export interface CoachPlayer {
   nationality?: string;
   nationality_flag?: string;
   nationality_ar?: string;
+  birth_date?: string | null;
   age?: number | null;
+  height_cm?: number | null;
+  preferred_foot?: string | null;
+  wikidata_id?: string | null;
   photo_url?: string | null;
   is_captain?: boolean;
   is_vice_captain?: boolean;
@@ -63,6 +70,30 @@ export interface CoachPlayer {
   };
   assigned_slot?: string;
   assigned_role_ar?: string;
+}
+
+export interface LeaguePlayerSearchItem extends CoachPlayer {
+  club_id: string;
+  club_name_ar: string;
+  club_name_en: string;
+  club_kit_hex: string;
+  club_stadium_ar?: string;
+}
+
+export interface ForeignQuotaSummary {
+  foreign_count: number;
+  limit: number;
+  remaining_slots: number;
+  status: "ok" | "warning" | "over_limit";
+  foreign_players: Array<{
+    jersey_number: number;
+    name_ar: string;
+    name_en: string;
+    nationality: string;
+    nationality_flag: string;
+    nationality_ar: string;
+    position: string;
+  }>;
 }
 
 export interface CoachClubDetail {
@@ -98,6 +129,57 @@ export interface SquadDepthReport {
   slots: SquadDepthSlot[];
   unavailable_players: CoachPlayer[];
   shortage_alerts_ar: string[];
+}
+
+export interface PlayerTacticalLink {
+  id: string;
+  fromTeam: "team_a" | "team_b";
+  fromSlot: string;
+  toTeam: "team_a" | "team_b";
+  toSlot: string;
+  kind: "pass" | "support" | "mark";
+  color: string;
+  label: string;
+}
+
+export interface EditableArrow extends BlueprintPassingArrow {
+  id?: string;
+  kind?: "pass" | "run" | "press";
+}
+
+export interface EditableZone extends BlueprintCustomZone {
+  id?: string;
+}
+
+export interface TacticalPhaseSnapshot {
+  phase_id: TacticalPhaseId;
+  label_ar: string;
+  label_en: string;
+  description_ar: string;
+  nodes: BlueprintNode[];
+  opponent_nodes: BlueprintNode[];
+  passing_arrows: EditableArrow[];
+  opponent_passing_arrows: EditableArrow[];
+  custom_arrows: EditableArrow[];
+  custom_links: PlayerTacticalLink[];
+  custom_zones: EditableZone[];
+  validation?: MathValidationResult | null;
+}
+
+export interface ThreePhaseBlueprint {
+  formation_code: string;
+  opponent_formation_code?: string;
+  title_ar: string;
+  philosophy_ar: string;
+  team_name: string;
+  opponent_name?: string;
+  tactical_mode?: string;
+  kit_colors?: { team_a_hex: string; team_b_hex: string };
+  nodes: BlueprintNode[];
+  opponent_nodes?: BlueprintNode[];
+  passing_arrows: EditableArrow[];
+  opponent_passing_arrows?: EditableArrow[];
+  phase_states?: Record<TacticalPhaseId, TacticalPhaseSnapshot>;
 }
 
 export interface DrillSetup {
@@ -205,6 +287,8 @@ export interface CoachOverviewPayload {
   opponent: CoachClubDetail;
   formation: string;
   squad_depth: SquadDepthReport;
+  foreign_quota: ForeignQuotaSummary;
+  matchday_brief_ar: string[];
   matchday_sheet: MatchdaySheetPayload;
   training_sessions: TrainingSessionPlan[];
   weekly_load_safety: { total_weekly_au: number; status: "optimal" | "warning"; warnings_ar: string[] };

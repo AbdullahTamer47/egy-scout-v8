@@ -23,35 +23,40 @@ const STATUS_LABEL_AR: Record<CoachPlayer["status"], string> = {
 export default function PlayerDetailModal({ lang, player, club, onClose, onAskAi }: Props) {
   const isAr = lang === "ar";
   const displayName = isAr ? player.name_ar || player.name_en : player.name_en || player.name_ar;
+  const isEligible = player.is_eligible_starter !== false;
+  const safeStatus = player.status || "fit";
+  const safeReadiness = player.readiness_pct ?? 100;
+  const safeYc = player.yellow_cards ?? 0;
+  const safeRc = player.red_cards ?? 0;
 
   return (
     <div
       dir={isAr ? "rtl" : "ltr"}
-      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg rounded-3xl bg-[#0C1220] border border-emerald-500/35 shadow-2xl overflow-hidden"
+        className="w-full max-w-lg rounded-3xl bg-[#0C1220] border border-emerald-500/40 shadow-2xl overflow-hidden"
       >
-        {/* Header Card Banner */}
+        {/* Foil-Inspired Header Banner */}
         <div
-          className="px-5 py-4 flex items-center justify-between gap-3 border-b border-white/[0.08]"
+          className="px-5 py-4 flex items-center justify-between gap-3 border-b border-white/[0.1]"
           style={{
-            background: `linear-gradient(135deg, ${club.kit_hex || "#10B981"}33 0%, #0C1220 75%)`,
+            background: `linear-gradient(135deg, ${club.kit_hex || "#10B981"}44 0%, #0F172A 68%, #090D16 100%)`,
           }}
         >
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-3.5 min-w-0">
             {player.photo_url ? (
               <img
                 src={player.photo_url}
                 alt={displayName}
-                className="w-16 h-16 rounded-2xl object-cover object-top border border-white/25 bg-slate-900 shrink-0"
+                className="w-18 h-18 rounded-2xl object-cover object-top border-2 border-amber-300/60 bg-slate-900 shrink-0 shadow-lg"
               />
             ) : (
               <div
-                className="w-16 h-16 rounded-2xl border border-white/25 flex flex-col items-center justify-center font-extrabold text-white shrink-0"
-                style={{ backgroundColor: `${club.kit_hex || "#10B981"}55` }}
+                className="w-16 h-16 rounded-2xl border-2 border-white/25 flex flex-col items-center justify-center font-extrabold text-white shrink-0"
+                style={{ backgroundColor: `${club.kit_hex || "#10B981"}66` }}
               >
                 <span className="text-lg leading-none">#{player.jersey_number}</span>
                 <span className="text-[10px] text-emerald-200 mt-0.5">{player.position}</span>
@@ -59,19 +64,19 @@ export default function PlayerDetailModal({ lang, player, club, onClose, onAskAi
             )}
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="px-2 py-0.5 rounded-full bg-white/[0.1] text-[11px] font-extrabold text-white">
+                <span className="px-2 py-0.5 rounded-full bg-white/[0.14] text-[11px] font-extrabold text-white">
                   #{player.jersey_number}
                 </span>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-[11px] font-extrabold text-emerald-300">
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/25 text-[11px] font-extrabold text-emerald-200">
                   {player.position}
                 </span>
                 {player.is_captain && (
-                  <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-[10px] font-extrabold text-amber-300">
-                    {isAr ? "قائد الفريق" : "Captain"}
+                  <span className="px-2 py-0.5 rounded-full bg-amber-500/25 text-[10px] font-extrabold text-amber-200">
+                    {isAr ? "⭐ قائد" : "⭐ Captain"}
                   </span>
                 )}
                 {player.is_on_loan && (
-                  <span className="px-2 py-0.5 rounded-full bg-sky-500/20 text-[10px] font-extrabold text-sky-300">
+                  <span className="px-2 py-0.5 rounded-full bg-sky-500/25 text-[10px] font-extrabold text-sky-200">
                     {isAr ? "إعارة" : "On Loan"}
                   </span>
                 )}
@@ -87,7 +92,7 @@ export default function PlayerDetailModal({ lang, player, club, onClose, onAskAi
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="p-2 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-300"
+            className="p-2 rounded-xl bg-white/[0.08] hover:bg-white/[0.15] text-slate-200"
           >
             <X className="w-4 h-4" />
           </button>
@@ -98,21 +103,21 @@ export default function PlayerDetailModal({ lang, player, club, onClose, onAskAi
           {/* Status Banner */}
           <div
             className={`p-3 rounded-2xl border flex items-center justify-between gap-2 ${
-              player.is_eligible_starter
-                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-200"
-                : "bg-rose-500/15 border-rose-500/35 text-rose-200"
+              isEligible
+                ? "bg-emerald-500/10 border-emerald-500/35 text-emerald-200"
+                : "bg-rose-500/15 border-rose-500/40 text-rose-200"
             }`}
           >
             <div className="flex items-center gap-2 font-bold">
-              {player.is_eligible_starter ? (
+              {isEligible ? (
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
               ) : (
                 <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
               )}
-              <span>{player.block_reason_ar || STATUS_LABEL_AR[player.status] || player.status}</span>
+              <span>{player.block_reason_ar || STATUS_LABEL_AR[safeStatus] || safeStatus}</span>
             </div>
             <span className="font-extrabold">
-              {isAr ? `الجاهزية ${player.readiness_pct}%` : `Readiness ${player.readiness_pct}%`}
+              {isAr ? `الجاهزية ${safeReadiness}%` : `Readiness ${safeReadiness}%`}
             </span>
           </div>
 
@@ -123,59 +128,77 @@ export default function PlayerDetailModal({ lang, player, club, onClose, onAskAi
             </div>
           )}
 
-          {/* Profile Grid */}
+          {/* Biographical & Physical Grid (Real Wikidata + Official Squad) */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-            <div className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.07]">
+            <div className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.08]">
+              <div className="text-[10px] text-slate-400">{isAr ? "العمر وتاريخ الميلاد" : "Age / DOB"}</div>
+              <div className="font-extrabold text-white mt-0.5">
+                {player.age ? `${player.age} ${isAr ? "سنة" : "yrs"}` : isAr ? "غير مسجل" : "N/A"}
+              </div>
+              {player.birth_date && <div className="text-[10px] text-slate-400">{player.birth_date}</div>}
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.08]">
+              <div className="text-[10px] text-slate-400">{isAr ? "الطول / القدم" : "Height / Foot"}</div>
+              <div className="font-extrabold text-white mt-0.5">
+                {player.height_cm ? `${player.height_cm} سم` : isAr ? "غير مسجل" : "N/A"}
+              </div>
+              {player.preferred_foot && <div className="text-[10px] text-emerald-300">{player.preferred_foot}</div>}
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.08]">
               <div className="text-[10px] text-slate-400">{isAr ? "الجنسية" : "Nationality"}</div>
               <div className="font-extrabold text-white mt-0.5">
                 {player.nationality_flag || "🇪🇬"} {player.nationality_ar || player.nationality || "EGY"}
               </div>
+              <div className="text-[10px] text-slate-400">{player.nationality === "EGY" ? (isAr ? "محلي" : "Domestic") : isAr ? "أجنبي" : "Foreign"}</div>
             </div>
-            <div className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.07]">
-              <div className="text-[10px] text-slate-400">{isAr ? "البطاقات المتراكمة" : "Discipline"}</div>
+
+            <div className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.08]">
+              <div className="text-[10px] text-slate-400">{isAr ? "الانضباط" : "Discipline"}</div>
               <div className="font-extrabold text-white mt-0.5">
-                🟨 {player.yellow_cards} &nbsp;|&nbsp; 🟥 {player.red_cards}
+                🟨 {safeYc} &nbsp;|&nbsp; 🟥 {safeRc}
               </div>
             </div>
-            <div className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.07]">
-              <div className="text-[10px] text-slate-400">{isAr ? "ملعب النادي" : "Stadium"}</div>
-              <div className="font-extrabold text-white mt-0.5 truncate">{club.stadium_ar || "-"}</div>
+
+            <div className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.08] col-span-2">
+              <div className="text-[10px] text-slate-400">{isAr ? "الملعب والمصدر الموثّق" : "Stadium & Provenance"}</div>
+              <div className="font-bold text-white mt-0.5 truncate">{club.stadium_ar || "-"}</div>
+              <div className="text-[10px] text-slate-400 truncate">{player.source || club.source}</div>
             </div>
-            {player.live_stats && (player.live_stats.appearances !== null || player.live_stats.goals !== null) && (
-              <>
-                <div className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.07]">
-                  <div className="text-[10px] text-slate-400">{isAr ? "المشاركات الحية" : "Apps"}</div>
-                  <div className="font-extrabold text-emerald-300 mt-0.5">{player.live_stats.appearances ?? "-"}</div>
-                </div>
-                <div className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.07]">
-                  <div className="text-[10px] text-slate-400">{isAr ? "الأهداف" : "Goals"}</div>
-                  <div className="font-extrabold text-emerald-300 mt-0.5">{player.live_stats.goals ?? "-"}</div>
-                </div>
-                <div className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.07]">
-                  <div className="text-[10px] text-slate-400">{isAr ? "الصناعة" : "Assists"}</div>
-                  <div className="font-extrabold text-emerald-300 mt-0.5">{player.live_stats.assists ?? "-"}</div>
-                </div>
-              </>
-            )}
           </div>
 
+          {player.live_stats && (player.live_stats.appearances !== null || player.live_stats.goals !== null) && (
+            <div className="grid grid-cols-3 gap-2">
+              <div className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.08] text-center">
+                <div className="text-[10px] text-slate-400">{isAr ? "المشاركات" : "Apps"}</div>
+                <div className="font-extrabold text-emerald-300 text-sm">{player.live_stats.appearances ?? "-"}</div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.08] text-center">
+                <div className="text-[10px] text-slate-400">{isAr ? "الأهداف" : "Goals"}</div>
+                <div className="font-extrabold text-emerald-300 text-sm">{player.live_stats.goals ?? "-"}</div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.08] text-center">
+                <div className="text-[10px] text-slate-400">{isAr ? "الصناعة" : "Assists"}</div>
+                <div className="font-extrabold text-emerald-300 text-sm">{player.live_stats.assists ?? "-"}</div>
+              </div>
+            </div>
+          )}
+
           {player.admin_note && (
-            <div className="p-3 rounded-xl bg-[#090D16] border border-white/[0.07] text-slate-300">
+            <div className="p-3 rounded-xl bg-[#090D16] border border-white/[0.08] text-slate-300">
               <span className="font-bold text-slate-400">{isAr ? "ملاحظة الجهاز الإداري: " : "Admin Note: "}</span>
               {player.admin_note}
             </div>
           )}
 
-          <div className="text-[10px] text-slate-400 flex items-center justify-between">
-            <span>{player.source || club.source}</span>
-            {player.return_date && <span>{isAr ? `عودة متوقعة: ${player.return_date}` : `ETA: ${player.return_date}`}</span>}
-          </div>
-
           {onAskAi && (
             <button
               type="button"
               onClick={() => {
-                onAskAi(`حلل الدور التكتيكي والتدريبي الأمثل للاعب #${player.jersey_number} ${displayName} (${player.position}) في ${club.name_ar}`);
+                onAskAi(
+                  `حلل الدور التكتيكي والتدريبي الأمثل للاعب #${player.jersey_number} ${displayName} (${player.position}${player.age ? `، ${player.age} سنة` : ""}${player.height_cm ? `، ${player.height_cm} سم` : ""}) في ${club.name_ar} أمام ${isAr ? "الخصم" : "opponent"}`
+                );
                 onClose();
               }}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold transition"

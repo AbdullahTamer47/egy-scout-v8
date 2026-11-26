@@ -538,6 +538,90 @@ th,td{{border:1px solid #cbd5e1;padding:7px 10px;text-align:right;}} th{{backgro
 <script>window.onload=function(){{if(location.search.indexOf('autoprint=1')>=0)window.print();}}</script></body></html>"""
 
 
+def compute_foreign_quota(players: list[dict[str, Any]], limit: int = 5) -> dict[str, Any]:
+    """Compute non-Egyptian senior quota against EFA 5-foreign-player regulation."""
+    foreign = [
+        {
+            "jersey_number": p.get("jersey_number"),
+            "name_ar": p.get("name_ar") or p.get("name_en"),
+            "name_en": p.get("name_en"),
+            "nationality": p.get("nationality") or "INTL",
+            "nationality_flag": p.get("nationality_flag") or "🌍",
+            "nationality_ar": p.get("nationality_ar") or p.get("nationality"),
+            "position": p.get("position"),
+        }
+        for p in players
+        if str(p.get("nationality") or "EGY").upper() != "EGY"
+    ]
+    cnt = len(foreign)
+    status = "over_limit" if cnt > limit else "warning" if cnt == limit else "ok"
+    return {
+        "foreign_count": cnt,
+        "limit": limit,
+        "remaining_slots": max(0, limit - cnt),
+        "status": status,
+        "foreign_players": foreign,
+    }
+
+
+def search_egyptian_league_players(
+    clubs_map: dict[str, dict[str, Any]],
+    query: str = "",
+    position: str = "ALL",
+    club_id: str = "ALL",
+    nationality_type: str = "all",
+    max_age: Optional[int] = None,
+    min_height: Optional[int] = None,
+    limit: int = 120,
+) -> list[dict[str, Any]]:
+    """Search and filter across all clubs & players in Coach Pro cleanly."""
+    q = (query or "").strip().lower()
+    pos_f = (position or "ALL").upper().strip()
+    nat_f = (nationality_type or "all").lower().strip()
+
+    results: list[dict[str, Any]] = []
+    for cid, club in clubs_map.items():
+        if club_id != "ALL" and cid != club_id:
+            continue
+        for p in club.get("players") or []:
+            p_pos = str(p.get("position") or "").upper()
+            if pos_f != "ALL" and pos_f not in p_pos:
+                continue
+            nat = str(p.get("nationality") or "EGY").upper()
+            if nat_f == "egyptian" and nat != "EGY":
+                continue
+            if nat_f == "foreign" and nat == "EGY":
+                continue
+            age = p.get("age")
+            if max_age is not None and age is not None and int(age) > int(max_age):
+                continue
+            ht = p.get("height_cm")
+            if min_height is not None and (ht is None or int(ht) < int(min_height)):
+                continue
+            n_ar = str(p.get("name_ar") or "")
+            n_en = str(p.get("name_en") or "")
+            if q and not (
+                q in n_ar.lower()
+                or q in n_en.lower()
+                or q in str(club.get("name_ar") or "").lower()
+                or q == str(p.get("jersey_number") or "")
+            ):
+                continue
+            results.append(
+                {
+                    **p,
+                    "club_id": cid,
+                    "club_name_ar": club.get("name_ar") or cid,
+                    "club_name_en": club.get("name_en") or cid,
+                    "club_kit_hex": club.get("kit_hex") or "#10B981",
+                    "club_stadium_ar": club.get("stadium_ar") or "",
+                }
+            )
+            if len(results) >= limit:
+                return results
+    return results
+
+
 def render_training_session_html(sess: dict[str, Any]) -> str:
     """Render printable RTL HTML coaching session card."""
     esc = html_lib.escape
