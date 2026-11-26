@@ -8,6 +8,7 @@ import {
   Move,
   MoveUpRight,
   Pause,
+  Pencil,
   Play,
   RotateCcw,
   Save,
@@ -24,6 +25,8 @@ import {
   CoachClubDetail,
   EditableArrow,
   EditableZone,
+  FreehandStroke,
+  isLightHex,
   PlayerTacticalLink,
   TacticalPhaseId,
   TacticalPhaseSnapshot,
@@ -38,14 +41,14 @@ interface Props {
   externalBlueprint?: ThreePhaseBlueprint | null;
 }
 
-type ToolMode = "drag" | "link_players" | "pass_arrow" | "run_arrow" | "press_arrow" | "zone";
+type ToolMode = "drag" | "link_players" | "pass_arrow" | "run_arrow" | "press_arrow" | "zone" | "freehand";
 type DisplayMode = "both" | "team_a" | "team_b";
 
 const FORMATIONS = ["4-2-3-1", "4-3-3", "3-4-2-1", "3-2-4-1", "3-5-2", "4-4-2", "5-3-2"];
 const PHASE_META: Array<{ id: TacticalPhaseId; ar: string; en: string; color: string }> = [
-  { id: "possession", ar: "1. في حالة الاستحواذ", en: "1. Possession", color: "#10B981" },
-  { id: "attack", ar: "2. في حالة الهجوم", en: "2. Attacking", color: "#F59E0B" },
-  { id: "defense", ar: "3. قطع الكرة والدفاع", en: "3. Defense & Recovery", color: "#EF4444" },
+  { id: "possession", ar: "1. في حالة الاستحواذ", en: "1. Possession", color: "#059669" },
+  { id: "attack", ar: "2. في حالة الهجوم", en: "2. Attacking", color: "#D97706" },
+  { id: "defense", ar: "3. قطع الكرة والدفاع", en: "3. Defense & Recovery", color: "#DC2626" },
 ];
 const PRESET_BUTTONS = [
   { label: "ألونسو 3-4-2-1", prompt: "تشابي ألونسو 3-4-2-1" },
@@ -59,6 +62,7 @@ type SelectedElement =
   | { kind: "arrow"; idx: number; isOpp: boolean }
   | { kind: "link"; id: string }
   | { kind: "zone"; idx: number }
+  | { kind: "stroke"; id: string }
   | null;
 
 interface SetPieceResult {
@@ -92,6 +96,7 @@ export default function CoachTacticsStudio({
   const [linkPending, setLinkPending] = useState<{ team: "team_a" | "team_b"; slot: string } | null>(null);
   const [linkKind, setLinkKind] = useState<"pass" | "support" | "mark">("pass");
   const [drawColor, setDrawColor] = useState("#FACC15");
+  const [liveFreehand, setLiveFreehand] = useState<Array<{ x: number; y: number }>>([]);
 
   const [isMorphing, setIsMorphing] = useState(false);
   const [morphDisplay, setMorphDisplay] = useState<{ nodesA: BlueprintNode[]; nodesB: BlueprintNode[] } | null>(null);
@@ -106,6 +111,7 @@ export default function CoachTacticsStudio({
   const cvsRef = useRef<HTMLCanvasElement | null>(null);
   const dragNodeRef = useRef<{ team: "team_a" | "team_b"; index: number } | null>(null);
   const draftBoxRef = useRef<{ sx: number; sy: number; cx: number; cy: number } | null>(null);
+  const freehandDraftRef = useRef<Array<{ x: number; y: number }> | null>(null);
 
   const loadBlueprintFromApi = async (fA: string, fB: string, presetPrompt = "") => {
     try {
@@ -247,18 +253,18 @@ export default function CoachTacticsStudio({
     const ph = H - pad * 2;
     const toPx = (xm: number, ym: number) => ({ x: pad + (xm / 105) * pw, y: pad + (ym / 68) * ph });
 
-    // Turf stripes
-    ctx.fillStyle = "#062016";
+    // Sunlit stadium turf stripes
+    ctx.fillStyle = "#15803D";
     ctx.fillRect(0, 0, W, H);
     for (let i = 0; i < 12; i++) {
       if (i % 2 === 0) {
-        ctx.fillStyle = "#08291D";
+        ctx.fillStyle = "#166534";
         ctx.fillRect(pad + (i * pw) / 12, pad, pw / 12, ph);
       }
     }
 
     // FIFA markings
-    ctx.strokeStyle = "rgba(255,255,255,0.42)";
+    ctx.strokeStyle = "rgba(255,255,255,0.84)";
     ctx.lineWidth = 1.6;
     ctx.strokeRect(pad, pad, pw, ph);
     ctx.beginPath();
@@ -359,49 +365,75 @@ export default function CoachTacticsStudio({
       if (!n1 || !n2) return;
       const dist = Math.hypot(n2.x_m - n1.x_m, n2.y_m - n1.y_m).toFixed(1);
       const isSel = selectedEl?.kind === "link" && selectedEl.id === lk.id;
-      drawArrowLine(n1.x_m, n1.y_m, n2.x_m, n2.y_m, lk.color, lk.kind !== "pass", `${dist}m`, isSel);
+      const badgeTxt = lk.label ? `${lk.label} (${dist}m)` : `${dist}m`;
+      drawArrowLine(n1.x_m, n1.y_m, n2.x_m, n2.y_m, lk.color, lk.kind !== "pass", badgeTxt, isSel);
+    });
+
+    // Freehand Chalk Strokes (Persisted + Live Draft)
+    const strokes: FreehandStroke[] = [
+      ...(currentPhase.freehand_strokes || []),
+      ...(liveFreehand.length >= 2 ? [{ id: "__draft__", points: liveFreehand, color: drawColor, width: 3 }] : []),
+    ];
+    strokes.forEach((st) => {
+      if (!st.points || st.points.length < 2) return;
+      const isSel = selectedEl?.kind === "stroke" && selectedEl.id === st.id;
+      ctx.save();
+      ctx.strokeStyle = isSel ? "#FFFFFF" : st.color || "#FACC15";
+      ctx.lineWidth = isSel ? 5 : st.width || 3.2;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      st.points.forEach((pt, idx) => {
+        const px = toPx(pt.x, pt.y);
+        if (idx === 0) ctx.moveTo(px.x, px.y);
+        else ctx.lineTo(px.x, px.y);
+      });
+      ctx.stroke();
+      ctx.restore();
     });
 
     const drawPlayers = (list: BlueprintNode[], team: "team_a" | "team_b", hex: string) => {
+      const lightKit = isLightHex(hex);
       list.forEach((n, idx) => {
         const pt = toPx(n.x_m, n.y_m);
         const isSel = selectedEl?.kind === "node" && selectedEl.team === team && selectedEl.index === idx;
         const isPendingLink = linkPending && linkPending.team === team && linkPending.slot === n.slot;
+        const darkInk = n.slot === "GK" || lightKit;
         ctx.save();
         if (isSel || isPendingLink) {
-          ctx.strokeStyle = isPendingLink ? "#38BDF8" : "#10B981";
-          ctx.lineWidth = 3;
+          ctx.strokeStyle = isPendingLink ? "#38BDF8" : "#FACC15";
+          ctx.lineWidth = 3.2;
           ctx.beginPath();
           ctx.arc(pt.x, pt.y, 19, 0, Math.PI * 2);
           ctx.stroke();
         }
-        ctx.fillStyle = n.slot === "GK" ? "#F59E0B" : hex;
+        ctx.fillStyle = n.slot === "GK" ? "#FACC15" : hex;
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, 14, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = "#FFFFFF";
+        ctx.strokeStyle = darkInk ? "#0F172A" : "#FFFFFF";
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        ctx.fillStyle = hex.toUpperCase() === "#F8FAFC" || n.slot === "GK" ? "#090D16" : "#FFFFFF";
+        ctx.fillStyle = darkInk ? "#0F172A" : "#FFFFFF";
         ctx.font = "bold 10.5px sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(String(n.jersey_number || n.slot), pt.x, pt.y);
 
         const nm = (n.player_label || n.slot).split(" ").slice(-1)[0];
-        ctx.fillStyle = "rgba(9,13,22,0.85)";
+        ctx.fillStyle = "rgba(15,23,42,0.88)";
         ctx.fillRect(pt.x - 28, pt.y + 15, 56, 13);
-        ctx.fillStyle = "#F8FAFC";
+        ctx.fillStyle = "#FFFFFF";
         ctx.font = "bold 9px sans-serif";
         ctx.fillText(`${n.slot} ${nm}`.slice(0, 12), pt.x, pt.y + 21.5);
         ctx.restore();
       });
     };
 
-    if (displayMode !== "team_b") drawPlayers(nodesA, "team_a", club.kit_hex || "#EF4444");
-    if (displayMode !== "team_a") drawPlayers(nodesB, "team_b", opponent.kit_hex || "#38BDF8");
-  }, [currentPhase, morphDisplay, displayMode, selectedEl, linkPending, club.kit_hex, opponent.kit_hex]);
+    if (displayMode !== "team_b") drawPlayers(nodesA, "team_a", club.kit_hex || "#DC2626");
+    if (displayMode !== "team_a") drawPlayers(nodesB, "team_b", opponent.kit_hex || "#0284C7");
+  }, [currentPhase, morphDisplay, displayMode, selectedEl, linkPending, club.kit_hex, opponent.kit_hex, liveFreehand, drawColor]);
 
   const toMetersFromEvent = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const cvs = cvsRef.current!;
@@ -511,7 +543,21 @@ export default function CoachTacticsStudio({
           return;
         }
       }
+      for (const st of currentPhase.freehand_strokes || []) {
+        for (let k = 1; k < st.points.length; k++) {
+          if (distToSegment(x_m, y_m, st.points[k - 1].x, st.points[k - 1].y, st.points[k].x, st.points[k].y) < 2.2) {
+            setSelectedEl({ kind: "stroke", id: st.id });
+            return;
+          }
+        }
+      }
       setSelectedEl(null);
+      return;
+    }
+
+    if (tool === "freehand") {
+      freehandDraftRef.current = [{ x: x_m, y: y_m }];
+      setLiveFreehand([{ x: x_m, y: y_m }]);
       return;
     }
 
@@ -520,6 +566,16 @@ export default function CoachTacticsStudio({
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const { x_m, y_m } = toMetersFromEvent(e);
+    if (freehandDraftRef.current) {
+      const pts = freehandDraftRef.current;
+      const last = pts[pts.length - 1];
+      if (!last || Math.hypot(x_m - last.x, y_m - last.y) >= 0.7) {
+        const nextPts = [...pts, { x: x_m, y: y_m }];
+        freehandDraftRef.current = nextPts;
+        setLiveFreehand(nextPts);
+      }
+      return;
+    }
     if (dragNodeRef.current && phases) {
       const { team, index } = dragNodeRef.current;
       setPhases((prev) => {
@@ -554,6 +610,17 @@ export default function CoachTacticsStudio({
 
   const handleMouseUp = () => {
     dragNodeRef.current = null;
+    if (freehandDraftRef.current) {
+      const pts = freehandDraftRef.current;
+      freehandDraftRef.current = null;
+      setLiveFreehand([]);
+      if (pts.length >= 2) {
+        const st: FreehandStroke = { id: `fh-${Date.now()}`, points: pts, color: drawColor, width: 3.2 };
+        commitPhaseEdit((p) => ({ ...p, freehand_strokes: [...(p.freehand_strokes || []), st] }));
+        setSelectedEl({ kind: "stroke", id: st.id });
+      }
+      return;
+    }
     if (draftBoxRef.current) {
       const { sx, sy, cx, cy } = draftBoxRef.current;
       draftBoxRef.current = null;
@@ -601,8 +668,88 @@ export default function CoachTacticsStudio({
       });
     } else if (selectedEl.kind === "zone") {
       commitPhaseEdit((p) => ({ ...p, custom_zones: p.custom_zones.filter((_, i) => i !== selectedEl.idx) }));
+    } else if (selectedEl.kind === "stroke") {
+      commitPhaseEdit((p) => ({
+        ...p,
+        freehand_strokes: (p.freehand_strokes || []).filter((s) => s.id !== selectedEl.id),
+      }));
     }
     setSelectedEl(null);
+  };
+
+  const getSelectedLabelAndColor = (): { label: string; color: string } | null => {
+    if (!currentPhase || !selectedEl || selectedEl.kind === "node") return null;
+    if (selectedEl.kind === "arrow") {
+      const ar =
+        selectedEl.idx >= 1000
+          ? currentPhase.custom_arrows[selectedEl.idx - 1000]
+          : currentPhase.passing_arrows[selectedEl.idx];
+      if (!ar) return null;
+      return { label: ar.label_ar || "", color: ar.color || "#FACC15" };
+    }
+    if (selectedEl.kind === "link") {
+      const lk = currentPhase.custom_links.find((l) => l.id === selectedEl.id);
+      if (!lk) return null;
+      return { label: lk.label || "", color: lk.color || "#10B981" };
+    }
+    if (selectedEl.kind === "zone") {
+      const z = currentPhase.custom_zones[selectedEl.idx];
+      if (!z) return null;
+      return { label: z.label_ar || "", color: z.color || "#F59E0B" };
+    }
+    if (selectedEl.kind === "stroke") {
+      const st = (currentPhase.freehand_strokes || []).find((s) => s.id === selectedEl.id);
+      if (!st) return null;
+      return { label: isAr ? "رسم حر بالقلم" : "Freehand chalk", color: st.color || "#FACC15" };
+    }
+    return null;
+  };
+
+  const updateSelectedProps = (patch: { label?: string; color?: string }) => {
+    if (!selectedEl || selectedEl.kind === "node") return;
+    commitPhaseEdit((p) => {
+      if (selectedEl.kind === "arrow") {
+        if (selectedEl.idx >= 1000) {
+          const ci = selectedEl.idx - 1000;
+          if (p.custom_arrows[ci]) {
+            p.custom_arrows[ci] = {
+              ...p.custom_arrows[ci],
+              ...(patch.label !== undefined ? { label_ar: patch.label } : {}),
+              ...(patch.color !== undefined ? { color: patch.color } : {}),
+            };
+          }
+        } else if (p.passing_arrows[selectedEl.idx]) {
+          p.passing_arrows[selectedEl.idx] = {
+            ...p.passing_arrows[selectedEl.idx],
+            ...(patch.label !== undefined ? { label_ar: patch.label } : {}),
+            ...(patch.color !== undefined ? { color: patch.color } : {}),
+          };
+        }
+      } else if (selectedEl.kind === "link") {
+        p.custom_links = p.custom_links.map((lk) =>
+          lk.id === selectedEl.id
+            ? {
+                ...lk,
+                ...(patch.label !== undefined ? { label: patch.label } : {}),
+                ...(patch.color !== undefined ? { color: patch.color } : {}),
+              }
+            : lk
+        );
+      } else if (selectedEl.kind === "zone") {
+        if (p.custom_zones[selectedEl.idx]) {
+          p.custom_zones[selectedEl.idx] = {
+            ...p.custom_zones[selectedEl.idx],
+            ...(patch.label !== undefined ? { label_ar: patch.label } : {}),
+            ...(patch.color !== undefined ? { color: patch.color } : {}),
+          };
+        }
+      } else if (selectedEl.kind === "stroke" && patch.color !== undefined) {
+        p.freehand_strokes = (p.freehand_strokes || []).map((st) =>
+          st.id === selectedEl.id ? { ...st, color: patch.color! } : st
+        );
+      }
+      return p;
+    });
   };
 
   const swapSelectedPlayer = (jerseyNum: number) => {
@@ -673,6 +820,8 @@ export default function CoachTacticsStudio({
       ? (selectedEl.team === "team_a" ? currentPhase.nodes : currentPhase.opponent_nodes)[selectedEl.index]
       : null;
 
+  const selectedMeta = getSelectedLabelAndColor();
+
   return (
     <div dir={isAr ? "rtl" : "ltr"} className="space-y-3">
       {/* Compact Row 1: 3 Tactical Phase Tabs + Morph Animation + Formations + Presets */}
@@ -693,11 +842,11 @@ export default function CoachTacticsStudio({
                   }}
                   className={`px-3 py-1.5 rounded-xl font-extrabold border transition flex items-center gap-1.5 ${
                     isAct
-                      ? "bg-emerald-500 text-slate-950 border-emerald-300 shadow"
-                      : "bg-[#090D16] text-slate-200 border-white/10 hover:border-white/25"
+                      ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
+                      : "bg-slate-50 text-slate-700 border-slate-200 hover:border-slate-300"
                   }`}
                 >
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: isAct ? "#090D16" : pm.color }} />
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: isAct ? "#FFFFFF" : pm.color }} />
                   <span>{isAr ? pm.ar : pm.en}</span>
                 </button>
               );
@@ -708,8 +857,8 @@ export default function CoachTacticsStudio({
               onClick={() => setIsMorphing((v) => !v)}
               className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-xl font-extrabold border transition ${
                 isMorphing
-                  ? "bg-amber-400 text-slate-950 border-amber-300"
-                  : "bg-amber-500/15 text-amber-300 border-amber-500/35 hover:bg-amber-500/25"
+                  ? "bg-amber-500 text-white border-amber-500 shadow-xs"
+                  : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
               }`}
             >
               {isMorphing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
@@ -726,7 +875,7 @@ export default function CoachTacticsStudio({
                 setFormA(e.target.value);
                 loadBlueprintFromApi(e.target.value, formB);
               }}
-              className="rounded-xl bg-[#090D16] border border-emerald-500/35 px-2.5 py-1.5 font-extrabold text-emerald-300"
+              className="rounded-xl bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 font-extrabold text-emerald-800"
             >
               {FORMATIONS.map((f) => (
                 <option key={f} value={f}>{club.name_ar}: {f}</option>
@@ -739,7 +888,7 @@ export default function CoachTacticsStudio({
                 setFormB(e.target.value);
                 loadBlueprintFromApi(formA, e.target.value);
               }}
-              className="rounded-xl bg-[#090D16] border border-sky-500/35 px-2.5 py-1.5 font-extrabold text-sky-300"
+              className="rounded-xl bg-sky-50 border border-sky-200 px-2.5 py-1.5 font-extrabold text-sky-800"
             >
               {FORMATIONS.map((f) => (
                 <option key={f} value={f}>{opponent.name_ar}: {f}</option>
@@ -750,7 +899,7 @@ export default function CoachTacticsStudio({
                 key={pr.label}
                 type="button"
                 onClick={() => loadBlueprintFromApi(formA, formB, pr.prompt)}
-                className="px-2.5 py-1.5 rounded-xl bg-[#090D16] border border-white/10 hover:border-emerald-400 text-[11px] font-bold text-slate-200"
+                className="px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-emerald-400 text-[11px] font-bold text-slate-700"
               >
                 {pr.label}
               </button>
@@ -759,7 +908,7 @@ export default function CoachTacticsStudio({
         </div>
 
         {/* Drawing & Linking Tools Strip */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/[0.07]">
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200">
           <div className="flex flex-wrap items-center gap-1.5">
             {(
               [
@@ -769,6 +918,7 @@ export default function CoachTacticsStudio({
                 ["run_arrow", isAr ? "سهم تحرك" : "Run Arrow", <Zap key="r" className="w-3.5 h-3.5" />],
                 ["press_arrow", isAr ? "سهم ضغط" : "Press Arrow", <Swords key="pr" className="w-3.5 h-3.5" />],
                 ["zone", isAr ? "رسم منطقة" : "Zone", <Square key="z" className="w-3.5 h-3.5" />],
+                ["freehand", isAr ? "قلم حر" : "Freehand", <Pencil key="fh" className="w-3.5 h-3.5" />],
               ] as Array<[ToolMode, string, React.ReactNode]>
             ).map(([id, lbl, icon]) => (
               <button
@@ -779,7 +929,7 @@ export default function CoachTacticsStudio({
                   setLinkPending(null);
                 }}
                 className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl font-bold transition ${
-                  tool === id ? "bg-emerald-500 text-slate-950" : "bg-[#090D16] border border-white/10 text-slate-300"
+                  tool === id ? "bg-emerald-600 text-white shadow-2xs" : "bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100"
                 }`}
               >
                 {icon}
@@ -792,7 +942,7 @@ export default function CoachTacticsStudio({
                 value={linkKind}
                 aria-label="Link Type"
                 onChange={(e) => setLinkKind(e.target.value as "pass" | "support" | "mark")}
-                className="rounded-xl bg-[#090D16] border border-sky-400/50 px-2 py-1 text-[11px] font-bold text-sky-300"
+                className="rounded-xl bg-sky-50 border border-sky-200 px-2 py-1 text-[11px] font-bold text-sky-800"
               >
                 <option value="pass">{isAr ? "قناة تمرير" : "Pass Link"}</option>
                 <option value="support">{isAr ? "تغطية ومساندة" : "Support Cover"}</option>
@@ -805,7 +955,7 @@ export default function CoachTacticsStudio({
               value={drawColor}
               aria-label="Draw Color"
               onChange={(e) => setDrawColor(e.target.value)}
-              className="w-7 h-7 rounded-lg bg-transparent border border-white/15 cursor-pointer"
+              className="w-7 h-7 rounded-lg bg-white border border-slate-300 cursor-pointer p-0.5"
             />
           </div>
 
@@ -822,30 +972,30 @@ export default function CoachTacticsStudio({
                 type="button"
                 onClick={() => setDisplayMode(dm)}
                 className={`px-2 py-1 rounded-lg text-[11px] font-bold ${
-                  displayMode === dm ? "bg-sky-500 text-slate-950" : "bg-[#090D16] text-slate-300 border border-white/10"
+                  displayMode === dm ? "bg-sky-600 text-white" : "bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100"
                 }`}
               >
                 {lbl}
               </button>
             ))}
-            <button type="button" onClick={handleUndo} disabled={undoStack.length === 0} className="p-1.5 rounded-lg bg-[#090D16] border border-white/10 text-slate-300 disabled:opacity-35" title={isAr ? "تراجع" : "Undo"}>
+            <button type="button" onClick={handleUndo} disabled={undoStack.length === 0} className="p-1.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 disabled:opacity-35" title={isAr ? "تراجع" : "Undo"}>
               <Undo2 className="w-3.5 h-3.5" />
             </button>
-            <button type="button" onClick={() => loadBlueprintFromApi(formA, formB)} className="p-1.5 rounded-lg bg-[#090D16] border border-white/10 text-slate-300" title={isAr ? "إعادة ضبط" : "Reset"}>
+            <button type="button" onClick={() => loadBlueprintFromApi(formA, formB)} className="p-1.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-700" title={isAr ? "إعادة ضبط" : "Reset"}>
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
-            <button type="button" onClick={exportPng} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#090D16] border border-white/15 text-slate-200 font-bold">
-              <Download className="w-3.5 h-3.5 text-emerald-400" />
+            <button type="button" onClick={exportPng} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 font-bold hover:border-emerald-400">
+              <Download className="w-3.5 h-3.5 text-emerald-600" />
               <span>PNG</span>
             </button>
-            <button type="button" onClick={saveAllPhases} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-extrabold">
+            <button type="button" onClick={saveAllPhases} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold shadow-2xs">
               <Save className="w-3.5 h-3.5" />
               <span>{isAr ? "حفظ الـ 3 حالات" : "Save All"}</span>
             </button>
           </div>
         </div>
 
-        {savingMsg && <div className="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-200 font-bold">{savingMsg}</div>}
+        {savingMsg && <div className="p-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold">{savingMsg}</div>}
       </div>
 
       {/* Main Pitch-First 12-Col Layout: 8-Col Hero Pitch + 4-Col Inspector */}
@@ -853,8 +1003,8 @@ export default function CoachTacticsStudio({
         <div className="xl:col-span-8 studio-panel p-3 space-y-2">
           {currentPhase && (
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs px-1">
-              <span className="font-extrabold text-emerald-300">{isAr ? currentPhase.label_ar : currentPhase.label_en}</span>
-              <span className="text-[11px] text-slate-400">{currentPhase.description_ar}</span>
+              <span className="font-extrabold text-emerald-700">{isAr ? currentPhase.label_ar : currentPhase.label_en}</span>
+              <span className="text-[11px] text-slate-600">{currentPhase.description_ar}</span>
             </div>
           )}
 
@@ -865,10 +1015,10 @@ export default function CoachTacticsStudio({
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
-            className="w-full rounded-2xl border border-emerald-500/30 bg-[#062016] cursor-crosshair"
+            className="w-full rounded-2xl border border-emerald-700/30 bg-[#15803D] cursor-crosshair shadow-sm"
           />
 
-          <div className="text-[11px] text-slate-400 px-1 flex flex-wrap items-center justify-between">
+          <div className="text-[11px] text-slate-600 px-1 flex flex-wrap items-center justify-between">
             <span>
               {tool === "link_players"
                 ? linkPending
@@ -878,11 +1028,15 @@ export default function CoachTacticsStudio({
                   : isAr
                     ? "انقر على اللاعب الأول ثم اللاعب الثاني لربطهما بمسار تمرير أو مساندة أو رقابة"
                     : "Click first player then second player to create tactical link"
-                : isAr
-                  ? "اسحب أي لاعب من الفريقين مباشرةً، أو انقر على أي سهم/منطقة/ربط لتعديله أو حذفه."
-                  : "Drag any of the 22 players or click any arrow/link/zone to edit or delete."}
+                : tool === "freehand"
+                  ? isAr
+                    ? "ارسم بالماوس أو الإصبع بحرية على الملعب لتوضيح الفكرة التكتيكية."
+                    : "Draw freehand chalk lines anywhere on the pitch."
+                  : isAr
+                    ? "اسحب أي لاعب من الفريقين مباشرةً، أو انقر على أي سهم/منطقة/ربط لتعديله أو حذفه."
+                    : "Drag any of the 22 players or click any arrow/link/zone to edit or delete."}
             </span>
-            <span>{fitPlayers.length} {isAr ? "متاحين" : "eligible"}</span>
+            <span className="font-bold text-emerald-700">{fitPlayers.length} {isAr ? "متاحين" : "eligible"}</span>
           </div>
         </div>
 
@@ -890,16 +1044,16 @@ export default function CoachTacticsStudio({
         <div className="xl:col-span-4 space-y-3 text-xs">
           {/* Selected Element Editor */}
           <div className="studio-panel p-3.5 space-y-2.5">
-            <div className="flex items-center justify-between font-extrabold text-white">
+            <div className="flex items-center justify-between font-extrabold text-slate-900">
               <span className="flex items-center gap-1.5">
-                <ArrowRightLeft className="w-4 h-4 text-emerald-400" />
+                <ArrowRightLeft className="w-4 h-4 text-emerald-600" />
                 <span>{isAr ? "تحرير العنصر المحدد" : "Selected Element Editor"}</span>
               </span>
               {selectedEl && selectedEl.kind !== "node" && (
                 <button
                   type="button"
                   onClick={deleteSelected}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-300 font-bold"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 font-bold"
                 >
                   <Trash2 className="w-3 h-3" />
                   <span>{isAr ? "حذف" : "Delete"}</span>
@@ -908,21 +1062,21 @@ export default function CoachTacticsStudio({
             </div>
 
             {selectedNodeObj && selectedEl?.kind === "node" ? (
-              <div className="space-y-2 p-2.5 rounded-xl bg-[#090D16] border border-white/[0.08]">
-                <div className="font-extrabold text-emerald-300">
+              <div className="space-y-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="font-extrabold text-emerald-700">
                   #{selectedNodeObj.jersey_number} {selectedNodeObj.player_label} ({selectedNodeObj.slot})
                 </div>
-                <div className="text-[11px] text-slate-400">
+                <div className="text-[11px] text-slate-600">
                   {selectedNodeObj.role_ar} • X={selectedNodeObj.x_m}m, Y={selectedNodeObj.y_m}m
                 </div>
-                <label className="block text-[11px] font-bold text-slate-300 pt-1">
+                <label className="block text-[11px] font-bold text-slate-700 pt-1">
                   {isAr ? "تبديل بلاعب آخر من القائمة:" : "Swap with Squad Player:"}
                 </label>
                 <select
                   value={selectedNodeObj.jersey_number || ""}
                   onChange={(e) => swapSelectedPlayer(Number(e.target.value))}
                   aria-label="Swap Player"
-                  className="w-full rounded-lg bg-[#0C1220] border border-white/15 px-2.5 py-1.5 text-xs text-white"
+                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900"
                 >
                   {(selectedEl.team === "team_a" ? fitPlayers : opponent.players).map((p) => (
                     <option key={p.jersey_number} value={p.jersey_number}>
@@ -931,37 +1085,67 @@ export default function CoachTacticsStudio({
                   ))}
                 </select>
               </div>
-            ) : selectedEl ? (
-              <div className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.08] text-slate-200">
-                {isAr ? "تم تحديد العنصر التكتيكي — يمكنك حذفه من الزر بالأعلى أو الرسم بحرية." : "Element selected — delete or continue drawing."}
+            ) : selectedEl && selectedMeta ? (
+              <div className="space-y-2.5 p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-800">
+                {selectedEl.kind !== "stroke" && (
+                  <div className="space-y-1">
+                    <label className="block text-[11px] font-bold text-slate-600">
+                      {isAr ? "اسم / وصف العنصر على الملعب:" : "Element Label on Pitch:"}
+                    </label>
+                    <input
+                      type="text"
+                      value={selectedMeta.label}
+                      onChange={(e) => updateSelectedProps({ label: e.target.value })}
+                      placeholder={isAr ? "اكتب مسمى السهم أو المنطقة..." : "Type label..."}
+                      className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-slate-600">{isAr ? "لون العنصر:" : "Color:"}</span>
+                  <div className="flex items-center gap-1.5">
+                    {["#FACC15", "#10B981", "#0284C7", "#EF4444", "#FFFFFF"].map((cHex) => (
+                      <button
+                        key={cHex}
+                        type="button"
+                        onClick={() => updateSelectedProps({ color: cHex })}
+                        className={`w-5 h-5 rounded-full border ${
+                          selectedMeta.color.toUpperCase() === cHex ? "ring-2 ring-slate-900 border-white" : "border-slate-300"
+                        }`}
+                        style={{ backgroundColor: cHex }}
+                        aria-label={`Color ${cHex}`}
+                      />
+                    ))}
+                  </div>
+                </div>
               </div>
             ) : (
-              <div className="text-slate-400">
-                {isAr ? "انقر على أي لاعب أو سهم أو ربط في الملعب لتعديله أو تبديله أو حذفه." : "Click any player, arrow, or link on the pitch."}
+              <div className="text-slate-500">
+                {isAr ? "انقر على أي لاعب أو سهم أو ربط أو رسم في الملعب لتعديله أو تبديله أو حذفه." : "Click any player, arrow, link, or stroke on the pitch."}
               </div>
             )}
           </div>
 
           {/* Live Math Validator */}
           <div className="studio-panel p-3.5 space-y-2">
-            <div className="flex items-center justify-between font-extrabold text-white">
+            <div className="flex items-center justify-between font-extrabold text-slate-900">
               <span className="flex items-center gap-1.5">
-                <Shield className="w-4 h-4 text-emerald-400" />
+                <Shield className="w-4 h-4 text-emerald-600" />
                 <span>{isAr ? "المدقق الرياضي للحالة" : "Phase Math Validator"}</span>
               </span>
-              <span className="text-emerald-300 font-extrabold">
+              <span className="text-emerald-700 font-extrabold">
                 {mathScore ? `${mathScore.overall_balance_score}/100` : "Live"}
               </span>
             </div>
             {mathScore && (
               <div className="grid grid-cols-2 gap-1.5 text-[11px]">
-                <div className="p-2 rounded-lg bg-[#090D16] border border-white/[0.06]">
-                  <span className="text-slate-400">{isAr ? "عمق الخطوط:" : "Depth:"}</span>{" "}
-                  <b className="text-white">{mathScore.vertical_length_m}m</b>
+                <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
+                  <span className="text-slate-500">{isAr ? "عمق الخطوط:" : "Depth:"}</span>{" "}
+                  <b className="text-slate-900">{mathScore.vertical_length_m}m</b>
                 </div>
-                <div className="p-2 rounded-lg bg-[#090D16] border border-white/[0.06]">
-                  <span className="text-slate-400">{isAr ? "تأمين الدفاع:" : "Rest Def:"}</span>{" "}
-                  <b className="text-emerald-300">{mathScore.rest_defenders_count}</b>
+                <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
+                  <span className="text-slate-500">{isAr ? "تأمين الدفاع:" : "Rest Def:"}</span>{" "}
+                  <b className="text-emerald-700">{mathScore.rest_defenders_count}</b>
                 </div>
               </div>
             )}
@@ -969,15 +1153,15 @@ export default function CoachTacticsStudio({
 
           {/* Match Instructions */}
           <div className="studio-panel p-3.5 space-y-2">
-            <div className="font-extrabold text-white">{isAr ? "تعليمات الأسلوب داخل المباراة" : "Game Plan Controls"}</div>
+            <div className="font-extrabold text-slate-900">{isAr ? "تعليمات الأسلوب داخل المباراة" : "Game Plan Controls"}</div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <div className="text-[10px] text-slate-400 mb-1">{isAr ? "ارتفاع الخط" : "Line Height"}</div>
+                <div className="text-[10px] text-slate-500 mb-1">{isAr ? "ارتفاع الخط" : "Line Height"}</div>
                 <select
                   value={lineHeight}
                   aria-label="Line Height"
                   onChange={(e) => setLineHeight(e.target.value as "low" | "mid" | "high")}
-                  className="w-full rounded-lg bg-[#090D16] border border-white/15 px-2 py-1 text-[11px] text-white"
+                  className="w-full rounded-lg bg-slate-50 border border-slate-200 px-2 py-1 text-[11px] font-bold text-slate-800"
                 >
                   <option value="low">{isAr ? "منخفض (Low)" : "Low"}</option>
                   <option value="mid">{isAr ? "متوازن (Mid)" : "Mid"}</option>
@@ -985,12 +1169,12 @@ export default function CoachTacticsStudio({
                 </select>
               </div>
               <div>
-                <div className="text-[10px] text-slate-400 mb-1">{isAr ? "نمط الضغط" : "Pressing"}</div>
+                <div className="text-[10px] text-slate-500 mb-1">{isAr ? "نمط الضغط" : "Pressing"}</div>
                 <select
                   value={pressingStyle}
                   aria-label="Pressing Style"
                   onChange={(e) => setPressingStyle(e.target.value as "contain" | "trigger" | "gegenpress")}
-                  className="w-full rounded-lg bg-[#090D16] border border-white/15 px-2 py-1 text-[11px] text-white"
+                  className="w-full rounded-lg bg-slate-50 border border-slate-200 px-2 py-1 text-[11px] font-bold text-slate-800"
                 >
                   <option value="contain">{isAr ? "تغطية ومراقبة" : "Contain"}</option>
                   <option value="trigger">{isAr ? "مصيدة ضغط" : "Trigger"}</option>
@@ -1002,12 +1186,12 @@ export default function CoachTacticsStudio({
 
           {/* Docked Set-Piece Optimizer (Zero Overlap!) */}
           <div className="studio-panel p-3.5 space-y-2">
-            <div className="flex items-center gap-1.5 font-extrabold text-white">
-              <Sparkles className="w-4 h-4 text-emerald-400" />
+            <div className="flex items-center gap-1.5 font-extrabold text-slate-900">
+              <Sparkles className="w-4 h-4 text-emerald-600" />
               <span>{isAr ? "معمل الكرات الثابتة (9,600 محاكاة)" : "Set-Piece Lab (9,600 Rollouts)"}</span>
             </div>
             {spRes && (
-              <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-[11px] text-emerald-200">
+              <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800">
                 {isAr
                   ? `احتمال التهديف: ${spRes.baseline_goal_prob_pct}% ← ${spRes.optimized_goal_prob_pct}% (+${spRes.uplift_pct_points}%) • هدف (${spRes.target_zone_xy.join(", ")})`
                   : `Baseline ${spRes.baseline_goal_prob_pct}% -> ${spRes.optimized_goal_prob_pct}% (+${spRes.uplift_pct_points}%)`}
@@ -1017,7 +1201,7 @@ export default function CoachTacticsStudio({
               type="button"
               onClick={runSetPieceLab}
               disabled={runningSp}
-              className="w-full py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold transition"
+              className="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold transition shadow-2xs"
             >
               {runningSp ? (isAr ? "جاري المحاكاة..." : "Running...") : isAr ? "تشغيل 9,600 محاكاة ركنية" : "Run 9,600 Rollouts"}
             </button>

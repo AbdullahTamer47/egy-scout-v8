@@ -151,6 +151,25 @@ export interface EditableZone extends BlueprintCustomZone {
   id?: string;
 }
 
+export interface FreehandStroke {
+  id: string;
+  points: Array<{ x: number; y: number }>;
+  color: string;
+  width?: number;
+}
+
+export function isLightHex(hex?: string | null): boolean {
+  if (!hex) return false;
+  const clean = hex.trim().replace("#", "");
+  if (clean.length !== 6) return false;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  if ([r, g, b].some(Number.isNaN)) return false;
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.72;
+}
+
 export interface TacticalPhaseSnapshot {
   phase_id: TacticalPhaseId;
   label_ar: string;
@@ -163,6 +182,7 @@ export interface TacticalPhaseSnapshot {
   custom_arrows: EditableArrow[];
   custom_links: PlayerTacticalLink[];
   custom_zones: EditableZone[];
+  freehand_strokes?: FreehandStroke[];
   validation?: MathValidationResult | null;
 }
 

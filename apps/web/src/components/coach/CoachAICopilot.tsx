@@ -105,21 +105,21 @@ export default function CoachAICopilot({
   if (!isOpen) return null;
 
   return (
-    <div dir={isAr ? "rtl" : "ltr"} className="fixed inset-0 z-50 flex justify-end bg-black/45 backdrop-blur-[2px]" onClick={onToggleOpen}>
+    <div dir={isAr ? "rtl" : "ltr"} className="fixed inset-0 z-50 flex justify-end bg-slate-900/35 backdrop-blur-[2px]" onClick={onToggleOpen}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full sm:w-[460px] h-full bg-[#0B101C] border-s border-emerald-500/40 shadow-2xl shadow-black/95 flex flex-col overflow-hidden"
+        className="w-full sm:w-[460px] h-full bg-white border-s border-slate-200 shadow-2xl shadow-slate-900/20 flex flex-col overflow-hidden text-slate-900"
       >
-        <div className="px-4 py-3.5 bg-[#111827] border-b border-white/[0.08] flex items-center justify-between gap-2">
+        <div className="px-4 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
+            <div className="w-8 h-8 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-700 shrink-0">
               <Sparkles className="w-4 h-4" />
             </div>
             <div className="min-w-0">
-              <div className="text-xs font-extrabold text-white truncate">
+              <div className="text-xs font-extrabold text-slate-900 truncate">
                 {isAr ? `مساعد كابتن ${profile.coach_name} الذكي` : `Coach ${profile.coach_name} AI Copilot`}
               </div>
-              <div className="text-[10px] text-emerald-400 truncate">
+              <div className="text-[10px] font-bold text-emerald-700 truncate">
                 {club.name_ar} × {opponent.name_ar}
               </div>
             </div>
@@ -129,7 +129,7 @@ export default function CoachAICopilot({
               value={model}
               onChange={(e) => setModel(e.target.value)}
               aria-label="Groq AI Model"
-              className="rounded-lg bg-[#090D16] border border-white/10 px-2 py-1 text-[10px] text-slate-200 max-w-[130px]"
+              className="rounded-lg bg-white border border-slate-200 px-2 py-1 text-[10px] font-bold text-slate-700 max-w-[130px]"
             >
               {models.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -141,7 +141,7 @@ export default function CoachAICopilot({
               type="button"
               onClick={onToggleOpen}
               aria-label="Close AI Copilot"
-              className="p-1.5 rounded-lg hover:bg-white/10 text-slate-300"
+              className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-600"
             >
               <X className="w-4 h-4" />
             </button>
@@ -149,13 +149,13 @@ export default function CoachAICopilot({
         </div>
 
         {/* Quick Prompt Chips */}
-        <div className="px-3 py-2.5 bg-[#090D16] border-b border-white/[0.06] flex gap-1.5 overflow-x-auto">
+        <div className="px-3 py-2.5 bg-slate-50 border-b border-slate-200 flex gap-1.5 overflow-x-auto">
           {quickChips.map((ch, idx) => (
             <button
               key={idx}
               type="button"
               onClick={() => sendPrompt(ch)}
-              className="px-2.5 py-1 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-[10px] font-bold text-emerald-200 whitespace-nowrap shrink-0"
+              className="px-2.5 py-1 rounded-full bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 text-[10px] font-bold text-slate-700 hover:text-emerald-800 whitespace-nowrap shrink-0"
             >
               {ch}
             </button>
@@ -163,19 +163,19 @@ export default function CoachAICopilot({
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5 text-xs">
+        <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5 text-xs bg-[#F8FAFC]">
           {messages.map((m) => (
             <div key={m.id} className={`flex ${m.sender === "user" ? "justify-end" : "justify-start"}`}>
               <div
                 className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 whitespace-pre-line leading-relaxed ${
                   m.sender === "user"
-                    ? "bg-emerald-500 text-slate-950 font-bold"
-                    : "bg-[#111827] border border-white/[0.08] text-slate-100"
+                    ? "bg-emerald-600 text-white font-bold shadow-xs"
+                    : "bg-white border border-slate-200 text-slate-800 shadow-2xs"
                 }`}
               >
                 {m.text}
                 {m.sender === "ai" && m.action && m.action !== "advisory" && (
-                  <div className="mt-1.5 pt-1.5 border-t border-white/10 text-[10px] font-extrabold text-emerald-400">
+                  <div className="mt-1.5 pt-1.5 border-t border-slate-200 text-[10px] font-extrabold text-emerald-700">
                     {m.action === "apply_tactics"
                       ? isAr ? "✓ تم تطبيق الحالات التكتيكية الثلاث مباشرة على الملعب (ويمكنك التعديل بحرية)" : "✓ Applied all 3 tactical phases to Pitch"
                       : m.action === "apply_training"
@@ -186,7 +186,7 @@ export default function CoachAICopilot({
               </div>
             </div>
           ))}
-          {loading && <div className="text-[11px] text-emerald-400 animate-pulse flex items-center gap-1.5"><Bot className="w-3.5 h-3.5" /><span>{isAr ? "جاري التحليل والتنفيذ الحي..." : "Thinking..."}</span></div>}
+          {loading && <div className="text-[11px] font-bold text-emerald-700 animate-pulse flex items-center gap-1.5"><Bot className="w-3.5 h-3.5" /><span>{isAr ? "جاري التحليل والتنفيذ الحي..." : "Thinking..."}</span></div>}
         </div>
 
         {/* Input */}
@@ -195,20 +195,20 @@ export default function CoachAICopilot({
             e.preventDefault();
             sendPrompt();
           }}
-          className="p-3 bg-[#111827] border-t border-white/[0.08] flex items-center gap-2"
+          className="p-3 bg-white border-t border-slate-200 flex items-center gap-2"
         >
           <input
             type="text"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             placeholder={isAr ? "اطلب خطة، تمرين، خطاب تحفيز، أو كشف مباراة..." : "Ask for tactics, training, or matchday sheet..."}
-            className="flex-1 rounded-xl bg-[#090D16] border border-white/[0.12] px-3 py-2 text-xs text-white outline-none focus:border-emerald-400"
+            className="flex-1 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-emerald-500 focus:bg-white"
           />
           <button
             type="submit"
             disabled={loading || !question.trim()}
             aria-label="Send"
-            className="p-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold disabled:opacity-40"
+            className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold disabled:opacity-40"
           >
             <Send className="w-4 h-4" />
           </button>

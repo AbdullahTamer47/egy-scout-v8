@@ -84,14 +84,14 @@ export default function LiveFootballHubPanel({ lang, initialHub, onClubSynced }:
       <div className="studio-panel p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <Globe className="w-5 h-5 text-emerald-400" />
+            <Globe className="w-5 h-5 text-emerald-600" />
             <div>
-              <h2 className="text-sm font-extrabold text-white">
+              <h2 className="text-sm font-extrabold text-slate-900">
                 {isAr ? "مركز البيانات الكروية الحية والموثّقة" : "Live Verified Football Data Hub"}
               </h2>
-              <div className="text-[11px] text-slate-400">
+              <div className="text-[11px] text-slate-500">
                 {hub.source} •{" "}
-                <span className={hub.is_live ? "text-emerald-400 font-bold" : "text-amber-300 font-bold"}>
+                <span className={hub.is_live ? "text-emerald-700 font-bold" : "text-amber-700 font-bold"}>
                   {hub.is_live ? (isAr ? "مباشر الآن" : "LIVE") : isAr ? "نسخة مخزنة" : "Cached"}
                 </span>
               </div>
@@ -102,7 +102,7 @@ export default function LiveFootballHubPanel({ lang, initialHub, onClubSynced }:
             type="button"
             onClick={() => loadLeague(activeLeague, true)}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-xs font-extrabold text-emerald-300"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-xs font-extrabold text-emerald-700"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
             <span>{isAr ? "تحديث حي الآن" : "Refresh Live"}</span>
@@ -117,8 +117,8 @@ export default function LiveFootballHubPanel({ lang, initialHub, onClubSynced }:
               onClick={() => loadLeague(lg.id, false)}
               className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition ${
                 activeLeague === lg.id
-                  ? "bg-emerald-500 text-slate-950"
-                  : "bg-[#090D16] border border-white/[0.08] text-slate-300 hover:border-white/25"
+                  ? "bg-emerald-600 text-white shadow-2xs"
+                  : "bg-slate-50 border border-slate-200 text-slate-700 hover:border-slate-300"
               }`}
             >
               {isAr ? lg.ar : lg.en}
@@ -127,7 +127,7 @@ export default function LiveFootballHubPanel({ lang, initialHub, onClubSynced }:
         </div>
 
         {toast && (
-          <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-xs font-bold text-emerald-200">
+          <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800">
             {toast}
           </div>
         )}
@@ -138,14 +138,14 @@ export default function LiveFootballHubPanel({ lang, initialHub, onClubSynced }:
         {/* Standings */}
         <div className="xl:col-span-8 studio-panel p-4 overflow-x-auto">
           <div className="flex items-center gap-2 mb-3">
-            <Trophy className="w-4 h-4 text-amber-400" />
-            <h3 className="text-xs font-extrabold text-white">
+            <Trophy className="w-4 h-4 text-amber-500" />
+            <h3 className="text-xs font-extrabold text-slate-900">
               {isAr ? `جدول الترتيب الحي — ${hub.league_name_ar}` : `Live Standings — ${hub.league_name_en}`}
             </h3>
           </div>
 
           {hub.standings.length === 0 ? (
-            <div className="text-xs text-slate-400 py-8 text-center">
+            <div className="text-xs text-slate-500 py-8 text-center">
               {loading
                 ? isAr ? "جاري جلب البيانات الحية..." : "Loading live table..."
                 : isAr ? "لا تتوفر جداول مجموعات حالياً لهذه البطولة — تابع المباريات بالجانب الآخر." : "No table available; inspect fixtures."}
@@ -153,8 +153,8 @@ export default function LiveFootballHubPanel({ lang, initialHub, onClubSynced }:
           ) : (
             <table className="w-full text-xs">
               <thead>
-                <tr className="text-[11px] text-slate-400 border-b border-white/[0.08]">
-                  <th className="py-2 text-start">#</th>
+                <tr className="text-[11px] bg-slate-50 text-slate-600 border-b border-slate-200">
+                  <th className="py-2 px-1.5 text-start">#</th>
                   <th className="py-2 text-start">{isAr ? "النادي" : "Club"}</th>
                   <th className="py-2 text-center">{isAr ? "لعب" : "P"}</th>
                   <th className="py-2 text-center">{isAr ? "ف" : "W"}</th>
@@ -162,42 +162,45 @@ export default function LiveFootballHubPanel({ lang, initialHub, onClubSynced }:
                   <th className="py-2 text-center">{isAr ? "خ" : "L"}</th>
                   <th className="py-2 text-center">{isAr ? "له/عليه" : "GF:GA"}</th>
                   <th className="py-2 text-center">{isAr ? "الفارق" : "GD"}</th>
-                  <th className="py-2 text-center text-emerald-300">{isAr ? "نقاط" : "Pts"}</th>
+                  <th className="py-2 text-center text-emerald-700">{isAr ? "نقاط" : "Pts"}</th>
                   <th className="py-2 text-end">{isAr ? "مزامنة القائمة" : "Sync Squad"}</th>
                 </tr>
               </thead>
               <tbody>
-                {hub.standings.map((row) => (
-                  <tr key={`${row.rank}-${row.team_name}`} className="border-b border-white/[0.05] hover:bg-white/[0.03]">
-                    <td className="py-2 font-extrabold text-amber-300">{row.rank}</td>
+                {hub.standings.map((row, idx) => (
+                  <tr
+                    key={`${row.rank}-${row.team_name}`}
+                    className={`border-b border-slate-100 hover:bg-emerald-50/40 ${idx % 2 === 1 ? "bg-slate-50/40" : ""}`}
+                  >
+                    <td className="py-2 px-1.5 font-extrabold text-amber-700">{row.rank}</td>
                     <td className="py-2">
                       <div className="flex items-center gap-2">
                         {row.logo_url ? (
                           <img src={row.logo_url} alt={row.team_name} className="w-5 h-5 object-contain shrink-0" />
                         ) : (
                           <span
-                            className="w-3 h-3 rounded-full border border-white/40 shrink-0"
+                            className="w-3 h-3 rounded-full border border-slate-400 shrink-0"
                             style={{ backgroundColor: row.kit_hex || "#10B981" }}
                           />
                         )}
-                        <span className="font-bold text-white">{isAr ? row.team_name_ar : row.team_name}</span>
+                        <span className="font-bold text-slate-900">{isAr ? row.team_name_ar : row.team_name}</span>
                       </div>
                     </td>
-                    <td className="py-2 text-center text-slate-300">{row.played}</td>
-                    <td className="py-2 text-center text-emerald-300">{row.wins}</td>
-                    <td className="py-2 text-center text-slate-400">{row.draws}</td>
-                    <td className="py-2 text-center text-rose-300">{row.losses}</td>
-                    <td className="py-2 text-center text-slate-300">
+                    <td className="py-2 text-center text-slate-600">{row.played}</td>
+                    <td className="py-2 text-center font-bold text-emerald-700">{row.wins}</td>
+                    <td className="py-2 text-center text-slate-500">{row.draws}</td>
+                    <td className="py-2 text-center font-bold text-rose-600">{row.losses}</td>
+                    <td className="py-2 text-center text-slate-600">
                       {row.gf}:{row.ga}
                     </td>
-                    <td className="py-2 text-center text-slate-300">{row.gd > 0 ? `+${row.gd}` : row.gd}</td>
-                    <td className="py-2 text-center font-extrabold text-emerald-400">{row.points}</td>
+                    <td className="py-2 text-center text-slate-700 font-semibold">{row.gd > 0 ? `+${row.gd}` : row.gd}</td>
+                    <td className="py-2 text-center font-extrabold text-emerald-700">{row.points}</td>
                     <td className="py-2 text-end">
                       <button
                         type="button"
                         disabled={syncingTeam === row.team_id || !row.team_id}
                         onClick={() => syncTeamLive(row.team_id, row.team_name_ar || row.team_name)}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-500/30 text-[10px] font-bold text-emerald-300 disabled:opacity-40"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-[10px] font-bold text-emerald-700 disabled:opacity-40"
                       >
                         <Download className="w-3 h-3" />
                         <span>{syncingTeam === row.team_id ? "..." : isAr ? "مزامنة" : "Sync"}</span>
@@ -213,21 +216,21 @@ export default function LiveFootballHubPanel({ lang, initialHub, onClubSynced }:
         {/* Upcoming & Recent Fixtures */}
         <div className="xl:col-span-4 space-y-4">
           <div className="studio-panel p-4 space-y-2.5">
-            <h3 className="text-xs font-extrabold text-sky-300">
+            <h3 className="text-xs font-extrabold text-sky-700">
               {isAr ? "المواجهات القادمة" : "Upcoming Fixtures"}
             </h3>
             {hub.upcoming_fixtures.length === 0 ? (
-              <div className="text-xs text-slate-400">{isAr ? "لا توجد مباريات قادمة مجدولة حالياً." : "No upcoming fixtures."}</div>
+              <div className="text-xs text-slate-500">{isAr ? "لا توجد مباريات قادمة مجدولة حالياً." : "No upcoming fixtures."}</div>
             ) : (
               <div className="space-y-2">
                 {hub.upcoming_fixtures.slice(0, 6).map((fx) => (
-                  <div key={fx.event_id} className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.07] text-xs space-y-1">
-                    <div className="flex items-center justify-between font-bold text-white">
+                  <div key={fx.event_id} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1">
+                    <div className="flex items-center justify-between font-bold text-slate-900">
                       <span className="truncate">{fx.home_team}</span>
-                      <span className="text-[10px] text-emerald-400 px-1.5">VS</span>
+                      <span className="text-[10px] font-extrabold text-emerald-700 px-1.5">VS</span>
                       <span className="truncate">{fx.away_team}</span>
                     </div>
-                    <div className="text-[10px] text-slate-400 flex items-center justify-between">
+                    <div className="text-[10px] text-slate-500 flex items-center justify-between">
                       <span>{fx.status}</span>
                       <span>{(fx.date_utc || "").slice(0, 16).replace("T", " ")}</span>
                     </div>
@@ -238,20 +241,20 @@ export default function LiveFootballHubPanel({ lang, initialHub, onClubSynced }:
           </div>
 
           <div className="studio-panel p-4 space-y-2.5">
-            <h3 className="text-xs font-extrabold text-emerald-300">
+            <h3 className="text-xs font-extrabold text-emerald-700">
               {isAr ? "أحدث النتائج الرسمية" : "Recent Official Results"}
             </h3>
             {hub.recent_results.length === 0 ? (
-              <div className="text-xs text-slate-400">{isAr ? "لا توجد نتائج مسجلة حالياً." : "No recent results."}</div>
+              <div className="text-xs text-slate-500">{isAr ? "لا توجد نتائج مسجلة حالياً." : "No recent results."}</div>
             ) : (
               <div className="space-y-2">
                 {hub.recent_results.slice(0, 6).map((fx) => (
-                  <div key={fx.event_id} className="p-2.5 rounded-xl bg-[#090D16] border border-white/[0.07] text-xs flex items-center justify-between gap-2">
-                    <span className="font-bold text-white truncate flex-1">{fx.home_team}</span>
-                    <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-extrabold shrink-0">
+                  <div key={fx.event_id} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs flex items-center justify-between gap-2">
+                    <span className="font-bold text-slate-900 truncate flex-1">{fx.home_team}</span>
+                    <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-extrabold shrink-0">
                       {fx.home_score} - {fx.away_score}
                     </span>
-                    <span className="font-bold text-white truncate flex-1 text-end">{fx.away_team}</span>
+                    <span className="font-bold text-slate-900 truncate flex-1 text-end">{fx.away_team}</span>
                   </div>
                 ))}
               </div>

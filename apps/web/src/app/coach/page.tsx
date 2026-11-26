@@ -182,7 +182,7 @@ export default function CoachProPage() {
 
   if (loadingInit) {
     return (
-      <div className="min-h-screen bg-[#070B12] flex items-center justify-center text-sm font-bold text-emerald-300">
+      <div className="coach-light min-h-screen bg-[#F4F7FA] flex items-center justify-center text-sm font-bold text-emerald-700">
         {isAr ? "جاري تحميل غرفة قيادة EGY-SCOUT Coach Pro..." : "Loading EGY-SCOUT Coach Pro..."}
       </div>
     );
@@ -211,18 +211,18 @@ export default function CoachProPage() {
   ];
 
   return (
-    <div dir={isAr ? "rtl" : "ltr"} className="min-h-screen bg-[#070B12] text-slate-100 flex overflow-x-hidden">
+    <div dir={isAr ? "rtl" : "ltr"} className="coach-light min-h-screen bg-[#F4F7FA] text-slate-900 flex overflow-x-hidden">
       {/* Desktop Sidebar */}
-      <aside className="relative z-30 hidden md:flex w-56 shrink-0 bg-[#0C1220] border-e border-white/[0.08] flex-col justify-between py-4 px-3">
+      <aside className="relative z-30 hidden md:flex w-56 shrink-0 bg-white border-e border-slate-200 flex-col justify-between py-4 px-3 shadow-xs">
         <div className="space-y-5">
           <div className="px-2 space-y-1">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-400/50 flex items-center justify-center text-emerald-300">
+              <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-700">
                 <Sparkles className="w-4 h-4" />
               </div>
               <div>
-                <div className="text-sm font-extrabold text-white">Coach Pro</div>
-                <div className="text-[10px] font-bold text-emerald-400">
+                <div className="text-sm font-extrabold text-slate-900">Coach Pro</div>
+                <div className="text-[10px] font-bold text-emerald-700">
                   {isAr ? "نسخة المدرب المعتمدة ✓" : "Production Certified ✓"}
                 </div>
               </div>
@@ -237,8 +237,8 @@ export default function CoachProPage() {
                 onClick={() => setTab(item.id)}
                 className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-extrabold transition ${
                   tab === item.id
-                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                    : "text-slate-300 hover:bg-white/[0.05] border border-transparent"
+                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs"
+                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-transparent"
                 }`}
               >
                 {item.icon}
@@ -248,25 +248,25 @@ export default function CoachProPage() {
           </nav>
         </div>
 
-        <div className="space-y-2 pt-3 border-t border-white/[0.08]">
+        <div className="space-y-2 pt-3 border-t border-slate-200">
           <button
             type="button"
             onClick={() => setShowOnboarding(true)}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] text-xs font-bold text-slate-200"
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-bold text-slate-700"
           >
-            <UserCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <UserCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
             <span className="truncate">{isAr ? "تغيير المدرب / الفريق" : "Switch Coach / Match"}</span>
           </button>
 
           <a
             href="/"
-            className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-[11px] font-bold text-amber-200"
+            className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-[11px] font-bold text-amber-800"
           >
             <span className="flex items-center gap-1.5 truncate">
               <Activity className="w-3.5 h-3.5 shrink-0" />
               <span className="truncate">{isAr ? "استوديو الفيديو الكامل" : "Full Video Studio"}</span>
             </span>
-            <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-[9px] font-extrabold shrink-0">Beta</span>
+            <span className="px-1.5 py-0.5 rounded bg-amber-200/70 text-[9px] font-extrabold text-amber-900 shrink-0">Beta</span>
           </a>
         </div>
       </aside>
@@ -274,21 +274,21 @@ export default function CoachProPage() {
       {/* Main Content */}
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Compact Single Header + Direct AI Bar */}
-        <header className="bg-[#0C1220]/95 backdrop-blur border-b border-white/[0.08] px-4 py-2.5 space-y-2">
+        <header className="bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-2.5 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2.5">
               <button
                 type="button"
                 onClick={() => setShowOnboarding(true)}
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#090D16] border border-emerald-500/35 text-xs font-extrabold text-white hover:border-emerald-400"
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-emerald-200 text-xs font-extrabold text-slate-900 hover:border-emerald-400 shadow-2xs"
               >
-                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: overview.club.kit_hex || "#10B981" }} />
+                <span className="w-2.5 h-2.5 rounded-full border border-slate-300" style={{ backgroundColor: overview.club.kit_hex || "#10B981" }} />
                 <span>{overview.club.name_ar}</span>
                 <span className="text-slate-400">×</span>
-                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: overview.opponent.kit_hex || "#38BDF8" }} />
+                <span className="w-2.5 h-2.5 rounded-full border border-slate-300" style={{ backgroundColor: overview.opponent.kit_hex || "#38BDF8" }} />
                 <span>{overview.opponent.name_ar}</span>
               </button>
-              <span className="text-xs font-bold text-emerald-300">
+              <span className="text-xs font-bold text-emerald-700">
                 {isAr ? `أهلاً كابتن ${profile.coach_name}` : `Coach ${profile.coach_name}`}
               </span>
             </div>
@@ -297,7 +297,7 @@ export default function CoachProPage() {
               <button
                 type="button"
                 onClick={() => fetchOverview(profile)}
-                className="p-2 rounded-xl bg-[#090D16] border border-white/10 text-slate-300 hover:text-white"
+                className="p-2 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100"
                 title={isAr ? "تحديث البيانات" : "Refresh"}
               >
                 <RefreshCw className="w-3.5 h-3.5" />
@@ -305,7 +305,7 @@ export default function CoachProPage() {
               <button
                 type="button"
                 onClick={() => setChatOpen((v) => !v)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 text-slate-950 text-xs font-extrabold"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-xs"
               >
                 <Bot className="w-4 h-4" />
                 <span>{isAr ? "المساعد الذكي (AI)" : "AI Copilot"}</span>
@@ -313,7 +313,7 @@ export default function CoachProPage() {
               <button
                 type="button"
                 onClick={() => setLang(isAr ? "en" : "ar")}
-                className="px-2.5 py-1.5 rounded-xl bg-[#090D16] border border-white/10 text-xs font-bold text-slate-200"
+                className="px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100"
               >
                 {isAr ? "EN" : "عربي"}
               </button>
@@ -336,12 +336,12 @@ export default function CoachProPage() {
                   ? `أمر سريع للذكاء الاصطناعي: "ارسم خطة 3-4-2-1 ألونسو"، "صمم حصة MD-2"، أو "جهز كشف المباراة"...`
                   : "Quick AI Command..."
               }
-              className="flex-1 rounded-xl bg-[#090D16] border border-emerald-500/30 focus:border-emerald-400 px-3.5 py-1.5 text-xs text-white outline-none"
+              className="flex-1 rounded-xl bg-slate-50 border border-slate-200 focus:border-emerald-500 focus:bg-white px-3.5 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 outline-none"
             />
             <button
               type="submit"
               disabled={runningQuick || !quickPrompt.trim()}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-xs font-extrabold text-emerald-300 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-xs font-extrabold text-white disabled:opacity-50 shadow-2xs"
             >
               <Send className="w-3.5 h-3.5" />
               <span>{runningQuick ? "..." : isAr ? "تنفيذ بالـ AI" : "Run AI"}</span>
@@ -349,7 +349,7 @@ export default function CoachProPage() {
           </form>
 
           {aiBanner && (
-            <div className="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-xs font-bold text-emerald-200 flex items-center justify-between gap-2">
+            <div className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800 flex items-center justify-between gap-2">
               <span className="truncate">{aiBanner}</span>
               <button type="button" onClick={() => setAiBanner(null)} className="text-[10px] underline shrink-0">
                 {isAr ? "إخفاء" : "Hide"}
@@ -457,14 +457,14 @@ export default function CoachProPage() {
       </div>
 
       {/* Mobile Bottom Nav */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-[#0C1220]/95 backdrop-blur border-t border-white/[0.1] grid grid-cols-6 py-1.5 px-1">
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-slate-200 shadow-lg grid grid-cols-6 py-1.5 px-1">
         {navTabs.map((item) => (
           <button
             key={item.id}
             type="button"
             onClick={() => setTab(item.id)}
             className={`flex flex-col items-center justify-center gap-0.5 py-1 rounded-lg text-[9.5px] font-bold ${
-              tab === item.id ? "text-emerald-400" : "text-slate-400"
+              tab === item.id ? "text-emerald-700" : "text-slate-500"
             }`}
           >
             {item.icon}

@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import * as echarts from "echarts";
 import { Flame, Pause, Play, Plus, Printer, RotateCcw, Save, Trash2 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import { CoachClubDetail, DrillSetup, TrainingSessionPlan } from "./coachTypes";
+import { CoachClubDetail, DrillSetup, isLightHex, TrainingSessionPlan } from "./coachTypes";
 
 interface Props {
   lang: "ar" | "en";
@@ -95,12 +95,17 @@ export default function TrainingSessionStudio({
     });
     chart.setOption({
       backgroundColor: "transparent",
-      tooltip: { trigger: "axis" },
+      tooltip: {
+        trigger: "axis",
+        backgroundColor: "#FFFFFF",
+        borderColor: "#CBD5E1",
+        textStyle: { color: "#0F172A", fontSize: 11 },
+      },
       grid: { left: 36, right: 32, top: 20, bottom: 24 },
-      xAxis: { type: "category", data: merged.map((m) => m.id), axisLabel: { color: "#94A3B8", fontSize: 10 } },
+      xAxis: { type: "category", data: merged.map((m) => m.id), axisLabel: { color: "#475569", fontSize: 10 }, axisLine: { lineStyle: { color: "#CBD5E1" } } },
       yAxis: [
-        { type: "value", name: "AU", nameTextStyle: { color: "#94A3B8", fontSize: 10 }, axisLabel: { color: "#94A3B8", fontSize: 10 }, splitLine: { lineStyle: { color: "rgba(255,255,255,0.06)" } } },
-        { type: "value", name: "RPE", min: 0, max: 10, nameTextStyle: { color: "#38BDF8", fontSize: 10 }, axisLabel: { color: "#38BDF8", fontSize: 10 }, splitLine: { show: false } },
+        { type: "value", name: "AU", nameTextStyle: { color: "#475569", fontSize: 10 }, axisLabel: { color: "#475569", fontSize: 10 }, splitLine: { lineStyle: { color: "#E2E8F0" } } },
+        { type: "value", name: "RPE", min: 0, max: 10, nameTextStyle: { color: "#0284C7", fontSize: 10 }, axisLabel: { color: "#0284C7", fontSize: 10 }, splitLine: { show: false } },
       ],
       series: [
         {
@@ -118,8 +123,8 @@ export default function TrainingSessionStudio({
           yAxisIndex: 1,
           smooth: true,
           data: merged.map((m) => m.rpe),
-          lineStyle: { color: "#38BDF8", width: 2 },
-          itemStyle: { color: "#38BDF8" },
+          lineStyle: { color: "#0284C7", width: 2 },
+          itemStyle: { color: "#0284C7" },
         },
       ],
     });
@@ -284,16 +289,16 @@ export default function TrainingSessionStudio({
 
     const W = cvs.width;
     const H = cvs.height;
-    ctx.fillStyle = "#062016";
+    ctx.fillStyle = "#15803D";
     ctx.fillRect(0, 0, W, H);
     for (let i = 0; i < 12; i++) {
       if (i % 2 === 0) {
-        ctx.fillStyle = "#08291D";
+        ctx.fillStyle = "#166534";
         ctx.fillRect((i * W) / 12, 0, W / 12, H);
       }
     }
 
-    ctx.strokeStyle = "rgba(255,255,255,0.4)";
+    ctx.strokeStyle = "rgba(255,255,255,0.82)";
     ctx.lineWidth = 1.6;
     const tl = toCanvas(0, 0, W, H);
     const br = toCanvas(105, 68, W, H);
@@ -392,21 +397,25 @@ export default function TrainingSessionStudio({
 
     for (const pl of drillPlayers) {
       const pt = toCanvas(pl.x_m, pl.y_m, W, H);
+      const teamAColor = club.kit_hex || "#DC2626";
+      const isTeamALight = pl.team === "a" && isLightHex(teamAColor);
       ctx.save();
-      ctx.fillStyle = pl.team === "a" ? (club.kit_hex || "#EF4444") : pl.team === "joker" ? "#FACC15" : "#38BDF8";
+      ctx.fillStyle = pl.team === "a" ? teamAColor : pl.team === "joker" ? "#FACC15" : "#0284C7";
       ctx.beginPath();
       ctx.arc(pt.x, pt.y, 13, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = "#FFFFFF";
+      ctx.strokeStyle = pl.team === "joker" || isTeamALight ? "#0F172A" : "#FFFFFF";
       ctx.lineWidth = 2;
       ctx.stroke();
-      ctx.fillStyle = pl.team === "joker" || pl.team === "b" ? "#090D16" : "#FFFFFF";
+      ctx.fillStyle = pl.team === "joker" || isTeamALight ? "#0F172A" : "#FFFFFF";
       ctx.font = "bold 10px sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(String(pl.label || pl.id), pt.x, pt.y);
       if (pl.player_name) {
-        ctx.fillStyle = "#E2E8F0";
+        ctx.fillStyle = "rgba(15,23,42,0.84)";
+        ctx.fillRect(pt.x - 24, pt.y + 14, 48, 12);
+        ctx.fillStyle = "#FFFFFF";
         ctx.font = "600 9px sans-serif";
         ctx.fillText(pl.player_name.split(" ")[0], pt.x, pt.y + 20);
       }
@@ -492,16 +501,16 @@ export default function TrainingSessionStudio({
       <div className="studio-panel p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <Flame className="w-4 h-4 text-emerald-400" />
-            <h2 className="text-sm font-extrabold text-white">
+            <Flame className="w-4 h-4 text-emerald-600" />
+            <h2 className="text-sm font-extrabold text-slate-900">
               {isAr ? `الجدول الأسبوعي ومؤشر الأحمال (sRPE & RPE) — ${club.name_ar}` : `Weekly Periodization & sRPE — ${club.name_en}`}
             </h2>
           </div>
           <span
-            className={`px-2.5 py-1 rounded-full text-xs font-extrabold ${
+            className={`px-2.5 py-1 rounded-full text-xs font-extrabold border ${
               weeklySafety.status === "warning"
-                ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                : "bg-emerald-500/15 text-emerald-300 border border-emerald-500/35"
+                ? "bg-amber-50 text-amber-800 border-amber-200"
+                : "bg-emerald-50 text-emerald-700 border-emerald-200"
             }`}
           >
             {isAr ? `حمل الأسبوع: ${weeklySafety.total_weekly_au} AU` : `Weekly Load: ${weeklySafety.total_weekly_au} AU`}
@@ -522,12 +531,14 @@ export default function TrainingSessionStudio({
                     setTargetRpe(d.rpe);
                   }}
                   className={`p-2 rounded-xl border text-center transition ${
-                    active ? "bg-emerald-500/20 border-emerald-400 text-white" : "bg-[#090D16] border-white/[0.08] text-slate-300"
+                    active
+                      ? "bg-emerald-50 border-emerald-500 text-emerald-950 ring-1 ring-emerald-500/25 shadow-2xs"
+                      : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-white"
                   }`}
                 >
                   <div className="text-xs font-extrabold">{d.label}</div>
-                  <div className="text-[10px] text-slate-400">RPE {d.rpe}</div>
-                  <div className="text-[10px] text-emerald-300 font-bold">{d.dur}m</div>
+                  <div className="text-[10px] text-slate-500">RPE {d.rpe}</div>
+                  <div className="text-[10px] text-emerald-700 font-bold">{d.dur}m</div>
                 </button>
               );
             })}
@@ -538,7 +549,7 @@ export default function TrainingSessionStudio({
         </div>
 
         {weeklySafety.warnings_ar.map((w, i) => (
-          <div key={i} className="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/35 text-xs font-bold text-amber-200">
+          <div key={i} className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800">
             {w}
           </div>
         ))}
@@ -555,7 +566,7 @@ export default function TrainingSessionStudio({
                 if (found) applyDrillTemplate(found);
               }}
               aria-label={isAr ? "اختيار تمرين معتمد" : "Select UEFA Pro Drill"}
-              className="rounded-xl bg-[#090D16] border border-white/[0.12] px-3 py-1.5 text-xs font-bold text-white"
+              className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-900"
             >
               {drills.map((d) => (
                 <option key={d.drill_id} value={d.drill_id}>
@@ -568,8 +579,8 @@ export default function TrainingSessionStudio({
               <button
                 type="button"
                 onClick={() => setAnimating((v) => !v)}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-extrabold ${
-                  animating ? "bg-amber-400 text-slate-950" : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-extrabold border ${
+                  animating ? "bg-amber-500 text-white border-amber-500" : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
                 }`}
               >
                 {animating ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
@@ -578,7 +589,7 @@ export default function TrainingSessionStudio({
               <button
                 type="button"
                 onClick={() => setDrillArrows([])}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[#090D16] border border-white/10 text-[11px] text-slate-300"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-100"
                 title={isAr ? "مسح الأسهم" : "Clear Arrows"}
               >
                 <RotateCcw className="w-3 h-3" />
@@ -589,7 +600,7 @@ export default function TrainingSessionStudio({
                   type="button"
                   onClick={() => setPitchView(pv)}
                   className={`px-2 py-1 rounded-lg text-[11px] font-bold ${
-                    pitchView === pv ? "bg-emerald-500 text-slate-950" : "bg-[#090D16] text-slate-300 border border-white/10"
+                    pitchView === pv ? "bg-emerald-600 text-white" : "bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100"
                   }`}
                 >
                   {pv === "half" ? (isAr ? "نصف" : "Half") : pv === "full" ? (isAr ? "كامل" : "Full") : isAr ? "ركنية" : "Corner"}
@@ -617,7 +628,7 @@ export default function TrainingSessionStudio({
                 type="button"
                 onClick={() => setTool(tid)}
                 className={`px-2.5 py-1 rounded-lg font-bold transition ${
-                  tool === tid ? "bg-emerald-500 text-slate-950" : "bg-[#090D16] border border-white/[0.08] text-slate-300"
+                  tool === tid ? "bg-emerald-600 text-white shadow-2xs" : "bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100"
                 }`}
               >
                 {lbl}
@@ -632,18 +643,18 @@ export default function TrainingSessionStudio({
             onMouseDown={handleCanvasDown}
             onMouseMove={handleCanvasMove}
             onMouseUp={handleCanvasUp}
-            className="w-full rounded-2xl border border-emerald-500/25 cursor-crosshair bg-[#062016]"
+            className="w-full rounded-2xl border border-emerald-700/30 cursor-crosshair bg-[#15803D] shadow-sm"
           />
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-            <span className="text-slate-400">
+            <span className="text-slate-500">
               {isAr ? "اسحب أي لاعب أو قمع مباشرة أو شغّل حركة الكرة بالزر بالأعلى" : "Drag players/props or click Animate"}
             </span>
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={handleSaveBoardEdits}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold shadow-2xs"
               >
                 <Save className="w-3.5 h-3.5" />
                 <span>{isAr ? "حفظ الوحدة والتمرين" : "Save Session"}</span>
@@ -653,9 +664,9 @@ export default function TrainingSessionStudio({
                   href={`http://127.0.0.1:8080/api/coach/training/sessions/${encodeURIComponent(currentSession.session_id)}/print`}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#090D16] border border-white/15 text-slate-200 font-bold hover:border-emerald-400"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 font-bold hover:border-emerald-400"
                 >
-                  <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                  <Printer className="w-3.5 h-3.5 text-emerald-600" />
                   <span>{isAr ? "طباعة" : "Print"}</span>
                 </a>
               )}
@@ -666,7 +677,7 @@ export default function TrainingSessionStudio({
         {/* Right: Session Generator + 4 Phases + Saved Sessions */}
         <div className="xl:col-span-5 space-y-4">
           <div className="studio-panel p-4 space-y-3 text-xs">
-            <h3 className="text-xs font-extrabold text-emerald-300">
+            <h3 className="text-xs font-extrabold text-emerald-700">
               {isAr ? "توليد خطة الوحدة التدريبية الذكية" : "Smart Session Builder"}
             </h3>
 
@@ -675,23 +686,23 @@ export default function TrainingSessionStudio({
               value={focusTopic}
               onChange={(e) => setFocusTopic(e.target.value)}
               placeholder={isAr ? "هدف الحصة (مثال: كسر الضغط العالي والتحول السريع)" : "Session focus topic..."}
-              className="w-full rounded-xl bg-[#090D16] border border-white/[0.12] px-3 py-2 text-xs text-white outline-none focus:border-emerald-400"
+              className="w-full rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-emerald-500 focus:bg-white"
             />
 
             <div className="grid grid-cols-3 gap-2">
-              <div className="p-2 rounded-xl bg-[#090D16] border border-white/[0.08]">
-                <div className="text-[10px] text-slate-400">{isAr ? "المدة (دقيقة)" : "Duration"}</div>
+              <div className="p-2 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="text-[10px] text-slate-500">{isAr ? "المدة (دقيقة)" : "Duration"}</div>
                 <input
                   type="number"
                   min={20}
                   max={130}
                   value={durationMin}
                   onChange={(e) => setDurationMin(Number(e.target.value))}
-                  className="w-full bg-transparent text-sm font-extrabold text-white outline-none"
+                  className="w-full bg-transparent text-sm font-extrabold text-slate-900 outline-none"
                 />
               </div>
-              <div className="p-2 rounded-xl bg-[#090D16] border border-white/[0.08]">
-                <div className="text-[10px] text-slate-400">RPE (1–10)</div>
+              <div className="p-2 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="text-[10px] text-slate-500">RPE (1–10)</div>
                 <input
                   type="number"
                   step={0.5}
@@ -699,12 +710,12 @@ export default function TrainingSessionStudio({
                   max={10}
                   value={targetRpe}
                   onChange={(e) => setTargetRpe(Number(e.target.value))}
-                  className="w-full bg-transparent text-sm font-extrabold text-white outline-none"
+                  className="w-full bg-transparent text-sm font-extrabold text-slate-900 outline-none"
                 />
               </div>
-              <div className="p-2 rounded-xl bg-[#090D16] border border-white/[0.08]">
-                <div className="text-[10px] text-slate-400">{isAr ? "حمل sRPE" : "Load AU"}</div>
-                <div className="text-sm font-extrabold text-emerald-400">{srpePreview} AU</div>
+              <div className="p-2 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="text-[10px] text-slate-500">{isAr ? "حمل sRPE" : "Load AU"}</div>
+                <div className="text-sm font-extrabold text-emerald-700">{srpePreview} AU</div>
               </div>
             </div>
 
@@ -712,23 +723,23 @@ export default function TrainingSessionStudio({
               type="button"
               onClick={handleGenerate}
               disabled={generating}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold transition"
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold transition shadow-2xs"
             >
               <Plus className="w-4 h-4" />
               <span>{generating ? (isAr ? "جاري التوليد..." : "Generating...") : isAr ? `توليد وحفظ حصة ${selectedMd}` : `Build ${selectedMd} Session`}</span>
             </button>
 
             {currentSession && (
-              <div className="space-y-2 pt-2 border-t border-white/[0.08]">
-                <div className="font-extrabold text-white">{currentSession.title_ar}</div>
+              <div className="space-y-2 pt-2 border-t border-slate-200">
+                <div className="font-extrabold text-slate-900">{currentSession.title_ar}</div>
                 <div className="space-y-1.5">
                   {currentSession.phases.map((ph, i) => (
-                    <div key={i} className="p-2 rounded-xl bg-[#090D16] border border-white/[0.06]">
-                      <div className="flex items-center justify-between font-bold text-emerald-300">
+                    <div key={i} className="p-2 rounded-xl bg-slate-50 border border-slate-200">
+                      <div className="flex items-center justify-between font-bold text-emerald-700">
                         <span>{ph.title_ar}</span>
                         <span>{ph.duration_min} د</span>
                       </div>
-                      <div className="text-[11px] text-slate-300 mt-0.5">{ph.notes_ar}</div>
+                      <div className="text-[11px] text-slate-600 mt-0.5">{ph.notes_ar}</div>
                     </div>
                   ))}
                 </div>
@@ -737,32 +748,32 @@ export default function TrainingSessionStudio({
           </div>
 
           <div className="studio-panel p-4 space-y-2 text-xs">
-            <div className="font-extrabold text-white">
+            <div className="font-extrabold text-slate-900">
               {isAr ? `الحصص المحفوظة (${sessions.length})` : `Saved Sessions (${sessions.length})`}
             </div>
             {sessions.length === 0 ? (
-              <div className="text-slate-400">{isAr ? "اضغط توليد لإنشاء أول حصة تدريبية." : "Click generate to create your first session."}</div>
+              <div className="text-slate-500">{isAr ? "اضغط توليد لإنشاء أول حصة تدريبية." : "Click generate to create your first session."}</div>
             ) : (
               <div className="space-y-1.5 max-h-44 overflow-y-auto">
                 {sessions.map((s) => (
                   <div
                     key={s.session_id}
-                    className="flex items-center justify-between gap-2 p-2 rounded-xl bg-[#090D16] border border-white/[0.07]"
+                    className="flex items-center justify-between gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200"
                   >
                     <button
                       type="button"
                       onClick={() => loadSessionIntoCanvas(s)}
-                      className="text-start min-w-0 flex-1 hover:text-emerald-300"
+                      className="text-start min-w-0 flex-1 hover:text-emerald-700"
                     >
-                      <div className="font-bold text-white truncate">{s.title_ar}</div>
-                      <div className="text-[10px] text-slate-400">
+                      <div className="font-bold text-slate-900 truncate">{s.title_ar}</div>
+                      <div className="text-[10px] text-slate-500">
                         {s.session_date} • {s.duration_min} د • {s.srpe_au} AU
                       </div>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDeleteSession(s.session_id)}
-                      className="p-1.5 rounded-lg bg-rose-500/15 text-rose-300"
+                      className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-600"
                       title={isAr ? "حذف" : "Delete"}
                     >
                       <Trash2 className="w-3 h-3" />
