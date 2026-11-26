@@ -75,6 +75,31 @@
         {"jersey_number": 9, "name_ar": "فيستون ماييلي", "name_en": "Fiston Mayele", "position": "ST", "is_starter": true}
       ]
     },
+    "zamalek": {
+      "club_id": "zamalek",
+      "name_ar": "الزمالك",
+      "name_en": "Zamalek SC",
+      "kit_hex": "#F8FAFC",
+      "season": "2026/2027",
+      "source": "Official Wikipedia Squad / Live Sync Verified",
+      "verified_at": "2026-11-26",
+      "players": [
+        {"jersey_number": 16, "name_ar": "محمد صبحي", "name_en": "Mohamed Sobhi", "position": "GK", "is_starter": true},
+        {"jersey_number": 4, "name_ar": "عمر جابر", "name_en": "Omar Gaber", "position": "RB", "is_starter": true, "is_captain": true},
+        {"jersey_number": 28, "name_ar": "محمود حمدي الونش", "name_en": "Mahmoud Hamdy El Wensh", "position": "CB", "is_starter": true},
+        {"jersey_number": 2, "name_ar": "أحمد حسام", "name_en": "Ahmad Hossam", "position": "CB", "is_starter": true},
+        {"jersey_number": 24, "name_ar": "محمد إسماعيل", "name_en": "Mohamed Ismail", "position": "CB", "is_starter": true},
+        {"jersey_number": 3, "name_ar": "محمود بنتايك", "name_en": "Mahmoud Bentayg", "position": "LB", "is_starter": true},
+        {"jersey_number": 13, "name_ar": "أحمد فتوح", "name_en": "Ahmed Abou El Fotouh", "position": "LB", "is_starter": true},
+        {"jersey_number": 17, "name_ar": "محمد شحاتة", "name_en": "Mohamed Shehata", "position": "DM", "is_starter": true},
+        {"jersey_number": 6, "name_ar": "محمود جهاد", "name_en": "Mahmoud Gehad", "position": "CM", "is_starter": true},
+        {"jersey_number": 19, "name_ar": "عبد الله السعيد", "name_en": "Abdallah El Said", "position": "CAM", "is_starter": true},
+        {"jersey_number": 7, "name_ar": "حسام أشرف", "name_en": "Hossam Ashraf", "position": "LW", "is_starter": true},
+        {"jersey_number": 31, "name_ar": "أحمد شريف", "name_en": "Ahmed Sherif", "position": "RW", "is_starter": true},
+        {"jersey_number": 9, "name_ar": "ناصر منسي", "name_en": "Nasser Mansi", "position": "ST", "is_starter": true},
+        {"jersey_number": 37, "name_ar": "المهدي سليمان", "name_en": "El Mahdy Soliman", "position": "GK", "is_starter": false}
+      ]
+    },
     "al_masry": {
       "club_id": "al_masry",
       "name_ar": "المصري",

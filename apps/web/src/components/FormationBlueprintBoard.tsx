@@ -49,6 +49,12 @@ interface Props {
   externalBlueprint?: FormationBlueprintPayload | null;
   initialDrillNote?: string | null;
   onAttachBoardSlide?: (pngDataUrl: string) => void;
+  onFetchCustomBlueprint?: (
+    formA: string,
+    formB: string,
+    styleA: string,
+    styleB: string
+  ) => Promise<FormationBlueprintPayload | null>;
 }
 
 type DrawTool = "drag_player" | "run_arrow" | "pass_arrow" | "press_arrow" | "zone_box" | "freehand";
@@ -132,6 +138,7 @@ export default function FormationBlueprintBoard({
   externalBlueprint = null,
   initialDrillNote = null,
   onAttachBoardSlide,
+  onFetchCustomBlueprint,
 }: Props) {
   const isAr = lang === "ar";
   const [formationA, setFormationA] = useState(defaultFormation);
@@ -413,21 +420,23 @@ export default function FormationBlueprintBoard({
       return;
     }
     let alive = true;
-    const qs = new URLSearchParams({
-      formation_code: formationA,
-      opponent_formation_code: formationB,
-      team: "team_a",
-      tactical_mode: styleA,
-      opponent_tactical_mode: styleB,
-    });
-    apiFetch<FormationBlueprintPayload>(
-      `/api/matches/${encodeURIComponent(matchId)}/formation-blueprint?${qs.toString()}`,
-      {},
-      "club_demo_egypt",
-      role
-    )
+    const loader = onFetchCustomBlueprint
+      ? onFetchCustomBlueprint(formationA, formationB, styleA, styleB)
+      : apiFetch<FormationBlueprintPayload>(
+          `/api/matches/${encodeURIComponent(matchId)}/formation-blueprint?${new URLSearchParams({
+            formation_code: formationA,
+            opponent_formation_code: formationB,
+            team: "team_a",
+            tactical_mode: styleA,
+            opponent_tactical_mode: styleB,
+          }).toString()}`,
+          {},
+          "club_demo_egypt",
+          role
+        );
+    loader
       .then((res) => {
-        if (!alive) return;
+        if (!alive || !res) return;
         setBlueprint(res);
         setNodesA(res.nodes || []);
         setNodesB(res.opponent_nodes || []);
@@ -436,7 +445,7 @@ export default function FormationBlueprintBoard({
     return () => {
       alive = false;
     };
-  }, [matchId, formationA, formationB, styleA, styleB, role]);
+  }, [matchId, formationA, formationB, styleA, styleB, role, onFetchCustomBlueprint]);
 
   const handleAskAiDraw = async (customText?: string) => {
     const pText = (customText ?? aiPrompt).trim();

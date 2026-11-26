@@ -180,15 +180,20 @@ export default function HomePage() {
   return (
     <div dir={isAr ? "rtl" : "ltr"} className="min-h-screen flex bg-[#090D16] text-slate-100 overflow-x-hidden">
       {/* Clean 4-Tab Pro Sidebar (Desktop/Tablet) */}
-      <aside className="hidden md:flex w-52 shrink-0 bg-[#0C1220] border-e border-white/[0.08] flex-col justify-between py-4 px-3">
+      <aside className="relative z-30 hidden md:flex w-52 shrink-0 bg-[#0C1220] border-e border-white/[0.08] flex-col justify-between py-4 px-3">
         <div className="space-y-6">
           <div className="flex items-center gap-2.5 px-2">
             <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
               <Activity className="w-4 h-4" />
             </div>
             <div className="hidden md:block leading-tight">
-              <div className="text-sm font-extrabold tracking-tight text-white">EGY-SCOUT</div>
-              <div className="text-[11px] text-emerald-400 font-semibold">Pro Studio</div>
+              <div className="text-sm font-extrabold tracking-tight text-white flex items-center gap-1.5">
+                <span>EGY-SCOUT</span>
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-[9px] font-extrabold text-amber-300">
+                  Beta
+                </span>
+              </div>
+              <div className="text-[11px] text-emerald-400 font-semibold">Full Video Studio</div>
             </div>
           </div>
 
@@ -314,8 +319,16 @@ export default function HomePage() {
               )}
             </div>
 
-            {/* End: AI Assistant + Language + More Menu */}
+            {/* End: Coach Pro Edition Link + AI Assistant + Language + More Menu */}
             <div className="flex items-center gap-2">
+              <a
+                href="/coach"
+                className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-extrabold bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 transition"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{isAr ? "نسخة المدرب (مضمونة)" : "Coach Pro"}</span>
+              </a>
+
               <button
                 type="button"
                 onClick={() => setChatOpen((v) => !v)}

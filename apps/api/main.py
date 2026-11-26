@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from apps.api.rbac import TenantContext, get_tenant_context
+from apps.api.routes_coach import router as coach_router
 from apps.api.routes_players import router as players_router
 from apps.api.routes_pro import router as pro_router
 from apps.api.routes_v9 import router as v9_router
@@ -28,6 +29,7 @@ app.add_middleware(
 )
 
 service = ScoutV8Service()
+app.include_router(coach_router)
 app.include_router(pro_router)
 app.include_router(v9_router)
 app.include_router(players_router)
