@@ -6,13 +6,14 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-MAX_PHYSICAL_SPEED_KMH = 36.0
+MAX_PHYSICAL_SPEED_KMH = 34.5
 SPRINT_THRESHOLD_KMH = 25.0
 SPRINT_MIN_DURATION_S = 1.0
 MAX_STEP_GAP_S = 2.0
 MIN_STEP_GAP_GUARD = 0.04
 MIN_WORK_RATE_SECONDS = 300.0
 LOW_RES_BBOX_HEIGHT_PX = 96.0
+MAX_HUMAN_ACCEL_MPS2 = 5.5
 
 
 def stabilize_dataframe_homography_drift(df: pd.DataFrame) -> pd.DataFrame:
@@ -211,7 +212,24 @@ def compute_clean_trajectory_kinematics(
         with np.errstate(divide="ignore", invalid="ignore"):
             seg_kmh = np.where(seg_dt > 1e-4, (seg_dists / seg_dt) * 3.6, 0.0)
         seg_kmh = np.clip(seg_kmh, 0.0, MAX_PHYSICAL_SPEED_KMH)
-        total_dist += float(seg_dists.sum())
+
+        # Forward-backward biomechanical acceleration limit (5.5 m/s^2) crushes 2-frame homography snaps!
+        if len(seg_kmh) >= 4:
+            mps = seg_kmh / 3.6
+            for i_f in range(1, len(mps)):
+                max_up = mps[i_f - 1] + MAX_HUMAN_ACCEL_MPS2 * float(seg_dt[i_f])
+                if mps[i_f] > max_up:
+                    mps[i_f] = max_up
+            for i_b in range(len(mps) - 2, -1, -1):
+                max_dn = mps[i_b + 1] + MAX_HUMAN_ACCEL_MPS2 * float(seg_dt[i_b])
+                if mps[i_b] > max_dn:
+                    mps[i_b] = max_dn
+            seg_kmh = np.clip(mps * 3.6, 0.0, MAX_PHYSICAL_SPEED_KMH)
+            for idx_k in range(len(seg_kmh)):
+                if spds_kmh[s0 + idx_k] > seg_kmh[idx_k]:
+                    spds_kmh[s0 + idx_k] = seg_kmh[idx_k]
+
+        total_dist += float((np.minimum(seg_dists, (seg_kmh / 3.6) * seg_dt)).sum())
         total_dt += float(seg_dt.sum())
         valid_step_spds.extend(seg_kmh.tolist())
         valid_step_dts.extend(seg_dt.tolist())
@@ -232,12 +250,35 @@ def compute_clean_trajectory_kinematics(
 
     arr_spds = np.asarray(valid_step_spds, dtype=np.float64)
     arr_dts = np.asarray(valid_step_dts, dtype=np.float64)
-    # Also suppress common 2-frame residual jitter when computing top speed
-    if len(arr_spds) >= 6:
-        top_kmh = round(min(MAX_PHYSICAL_SPEED_KMH, float(np.percentile(arr_spds, 92))), 1)
-    else:
-        top_kmh = round(min(MAX_PHYSICAL_SPEED_KMH, float(np.percentile(arr_spds, 95))), 1)
     avg_kmh = round(min(MAX_PHYSICAL_SPEED_KMH, (total_dist / total_dt) * 3.6), 1)
+    # Sustained 1.0s rolling window top speed (eliminates 1-2 frame homography jitter spikes)
+    total_valid_dt = float(arr_dts.sum())
+    if total_valid_dt < 1.0:
+        top_kmh = avg_kmh
+    else:
+        step_dists = (arr_spds / 3.6) * arr_dts
+        max_win_kmh = 0.0
+        win_dist = 0.0
+        win_dt = 0.0
+        left = 0
+        for right in range(len(arr_dts)):
+            win_dist += float(step_dists[right])
+            win_dt += float(arr_dts[right])
+            while win_dt >= 1.0:
+                if win_dt > 1e-4:
+                    cand_kmh = (win_dist / win_dt) * 3.6
+                    if cand_kmh > max_win_kmh:
+                        max_win_kmh = cand_kmh
+                next_dt = win_dt - float(arr_dts[left])
+                if next_dt >= 1.0:
+                    win_dist -= float(step_dists[left])
+                    win_dt = next_dt
+                    left += 1
+                else:
+                    break
+        if max_win_kmh <= 0.0:
+            max_win_kmh = avg_kmh
+        top_kmh = round(min(MAX_PHYSICAL_SPEED_KMH, max_win_kmh), 1)
 
     sprints = 0
     seg_dur = 0.0
@@ -271,13 +312,19 @@ def assign_team_relative_positions(
     pitch_length: float = 105.0,
     pitch_width: float = 68.0,
 ) -> None:
-    """Assign realistic football positions relative to each team's active outfield distribution.
+    """Assign realistic football positions respecting actual pitch thirds AND team depth.
 
-    Prevents attacking-phase clips from labeling an entire team as 'ST'.
+    Prevents defenders/fullbacks in their own defensive third from EVER being labeled 'ST',
+    while preventing attacking-phase clips from labeling an entire team as 'ST'.
     """
     for team_key in ("team_a", "team_b"):
         atk_right = team_a_attacks_right if team_key == "team_a" else (not team_a_attacks_right)
-        outfield: list[tuple[dict[str, Any], float, float]] = []
+        has_gk = any(
+            (entry.get("is_gk") or str(entry.get("role", "")).lower() == "goalkeeper")
+            for entry in entries
+            if entry.get("team") == team_key
+        )
+        raw_outfield: list[tuple[dict[str, Any], float, float]] = []
         for entry in entries:
             if entry.get("team") != team_key or entry.get("is_gk") or str(entry.get("role", "")).lower() == "goalkeeper":
                 continue
@@ -288,16 +335,76 @@ def assign_team_relative_positions(
             ay = float(avg_pos["y_m"])
             ox = ax if atk_right else (pitch_length - ax)
             oy = ay if atk_right else (pitch_width - ay)
-            outfield.append((entry, ox, oy))
+            raw_outfield.append((entry, ox, oy))
+
+        # Goal-line GK inference: if team has no detected GK yet, promote closest goal-mouth player (ox<=8, 18<=oy<=50)
+        outfield: list[tuple[dict[str, Any], float, float]] = []
+        gk_cands = [(ent, ox, oy) for (ent, ox, oy) in raw_outfield if ox <= 8.0 and 18.0 <= oy <= 50.0]
+        if (not has_gk) and gk_cands:
+            gk_best = min(gk_cands, key=lambda item: item[1])[0]
+            gk_best["is_gk"] = True
+            gk_best["role"] = "goalkeeper"
+            ar_gk, en_gk = _POSITION_LABELS["GK"]
+            gk_best["position_label"] = {"code": "GK", "ar": ar_gk, "en": en_gk}
+            outfield = [(ent, ox, oy) for (ent, ox, oy) in raw_outfield if ent is not gk_best]
+        else:
+            outfield = raw_outfield
 
         m = len(outfield)
-        if m < 2:
+        if m == 0:
             continue
 
-        # Sort by advancing depth ox ascending (own goal -> opponent goal)
+        def _set_code(target_entry: dict[str, Any], code: str) -> None:
+            ar, en = _POSITION_LABELS[code]
+            target_entry["position_label"] = {"code": code, "ar": ar, "en": en}
+
+        # Absolute own-third guard for sparse clips (<7 players); when m>=7 always build relative team lines
+        team_med_ox = float(np.median([item[1] for item in outfield]))
+        if m < 3 or (m < 7 and team_med_ox < 44.0):
+            by_depth = sorted(outfield, key=lambda item: item[1])
+            st_assigned = 0
+            for idx_r, (ent, ox, oy) in enumerate(by_depth):
+                if ox < 34.0:
+                    if oy < 22.0:
+                        _set_code(ent, "LB")
+                    elif oy > 46.0:
+                        _set_code(ent, "RB")
+                    else:
+                        _set_code(ent, "CB")
+                elif ox < 50.0:
+                    if oy < 18.0:
+                        _set_code(ent, "LB" if idx_r < max(2, m // 2) else "LM")
+                    elif oy > 50.0:
+                        _set_code(ent, "RB" if idx_r < max(2, m // 2) else "RM")
+                    elif ox < 40.0:
+                        _set_code(ent, "DM")
+                    else:
+                        _set_code(ent, "CM")
+                elif ox < 64.0:
+                    if oy < 21.0:
+                        _set_code(ent, "LM")
+                    elif oy > 47.0:
+                        _set_code(ent, "RM")
+                    else:
+                        _set_code(ent, "CAM" if ox >= 56.0 else "CM")
+                else:
+                    if oy < 21.0:
+                        _set_code(ent, "LW")
+                    elif oy > 47.0:
+                        _set_code(ent, "RW")
+                    elif st_assigned < 2:
+                        _set_code(ent, "ST")
+                        st_assigned += 1
+                    else:
+                        _set_code(ent, "CAM")
+            continue
+
+        # Attacking / mixed phase with >= 3 outfield players & team_med_ox >= 44m:
+        # Partition into defenders / midfielders / forwards, while still forbidding ST when ox < 48m!
         by_depth = sorted(outfield, key=lambda item: item[1])
         n_def = min(4, max(1, int(round(m * 0.40))))
-        n_fwd = min(3, max(1, int(round(m * 0.25))))
+        max_eligible_fwd = sum(1 for _, ox, _ in by_depth if ox >= 50.0)
+        n_fwd = min(3, max_eligible_fwd, max(1, int(round(m * 0.25)))) if max_eligible_fwd > 0 else 0
         if n_def + n_fwd > m:
             n_fwd = max(0, m - n_def)
         n_mid = max(0, m - n_def - n_fwd)
@@ -306,13 +413,10 @@ def assign_team_relative_positions(
         mids = sorted(by_depth[n_def : n_def + n_mid], key=lambda item: item[2])
         fwds = sorted(by_depth[n_def + n_mid :], key=lambda item: item[2])
 
-        def _set_code(target_entry: dict[str, Any], code: str) -> None:
-            ar, en = _POSITION_LABELS[code]
-            target_entry["position_label"] = {"code": code, "ar": ar, "en": en}
-
         # Defenders
         if len(defs) == 1:
-            _set_code(defs[0][0], "CB")
+            oy0 = defs[0][2]
+            _set_code(defs[0][0], "LB" if oy0 < 18.0 else ("RB" if oy0 > 50.0 else "CB"))
         elif len(defs) == 2:
             if (defs[1][2] - defs[0][2]) > 20.0:
                 _set_code(defs[0][0], "LB")
@@ -328,13 +432,14 @@ def assign_team_relative_positions(
 
         # Midfielders
         if len(mids) == 1:
-            _set_code(mids[0][0], "CM")
+            oy0 = mids[0][2]
+            _set_code(mids[0][0], "LM" if oy0 < 16.0 else ("RM" if oy0 > 52.0 else "CM"))
         elif len(mids) == 2:
             if (mids[1][2] - mids[0][2]) > 24.0:
                 _set_code(mids[0][0], "LM")
                 _set_code(mids[1][0], "RM")
             else:
-                _set_code(mids[0][0], "CM")
+                _set_code(mids[0][0], "DM" if mids[0][1] < mids[1][1] - 4.0 else "CM")
                 _set_code(mids[1][0], "CM")
         elif len(mids) >= 3:
             _set_code(mids[0][0], "LM")
@@ -342,7 +447,7 @@ def assign_team_relative_positions(
                 _set_code(mid_m[0], "CM")
             _set_code(mids[-1][0], "RM")
 
-        # Forwards (capped to <=2 STs per team!)
+        # Forwards (capped to <=2 STs per team and NEVER placed deep!)
         if len(fwds) == 1:
             oy0 = fwds[0][2]
             _set_code(fwds[0][0], "LW" if oy0 < 16.0 else ("RW" if oy0 > 52.0 else "ST"))
@@ -358,6 +463,14 @@ def assign_team_relative_positions(
             for mid_f in fwds[1:-1]:
                 _set_code(mid_f[0], "ST")
             _set_code(fwds[-1][0], "RW")
+
+        # Post-assignment physical pitch-zone guards (apply across both branches)
+        for ent, ox, oy in outfield:
+            cur_code = str((ent.get("position_label") or {}).get("code") or "")
+            if cur_code in ("ST", "LW", "RW") and ox < 45.0:
+                _set_code(ent, "LM" if oy < 18.0 else ("RM" if oy > 50.0 else "CM"))
+            elif cur_code in ("CB", "LB", "RB") and ox > 84.0:
+                _set_code(ent, "LW" if oy < 18.0 else ("RW" if oy > 50.0 else "CAM"))
 
 
 def compute_card_tier(calibrated_ratio: float, observed_s: float) -> str:
@@ -518,7 +631,7 @@ def build_player_card_stats(
     xs = kin["xs"]
     ys = kin["ys"]
     distance_m = kin["distance_m"]
-    top_speed_kmh = kin["top_speed_kmh"]
+    top_speed_kmh = kin["top_speed_kmh"] if observed_s >= 2.0 else None
     avg_speed_kmh = kin["avg_speed_kmh"]
     sprints = kin["sprints"]
 

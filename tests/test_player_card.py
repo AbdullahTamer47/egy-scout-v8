@@ -283,19 +283,22 @@ class TestPlayerCardEngine(unittest.TestCase):
         self.assertGreater(len(players), 0)
         self.assertLessEqual(len(players), 22)
         p0 = players[0]
-        self.assertIn(p0.get("identity_source"), ("qa_verified", "ocr_verified", "gk_role_match", "unverified"))
+        self.assertIn(
+            p0.get("identity_source"),
+            ("qa_verified", "ocr_verified", "gk_role_match", "unverified"),
+        )
+        self.assertNotEqual(p0.get("identity_source"), "squad_spatial_match")
         self.assertIn("display_label_en", p0)
         self.assertIn("crop_is_low_res", p0)
         self.assertIsInstance(p0["crop_is_low_res"], bool)
-        # Unverified outfield track without OCR must NEVER invent a star player's jersey number or name
-        unver_out = [
-            p for p in players
-            if p.get("identity_source") == "unverified" and p.get("role") != "goalkeeper"
-        ]
-        self.assertGreater(len(unver_out), 0)
-        for u in unver_out:
-            self.assertIsNone(u["jersey_number"])
-            self.assertIsNone(u["verified_name"])
+        self.assertIn("nationality_code", p0)
+        # Zero Fake: NEVER bind squad_spatial_match and NEVER leak names/jerseys onto unverified tracks
+        for p in players:
+            self.assertNotEqual(p.get("identity_source"), "squad_spatial_match")
+            if p.get("identity_source") == "unverified":
+                self.assertIsNone(p["jersey_number"])
+                self.assertIsNone(p["verified_name"])
+                self.assertIsNone(p["nationality_code"])
 
     def test_pitch_calibrator_penalty_box_not_rejected_by_collinearity(self) -> None:
         from services.cv_worker.stages.pitch_calib import FIFA_KEYPOINTS, KeypointPitchCalibrator
@@ -483,6 +486,136 @@ class TestPlayerCardEngine(unittest.TestCase):
                     def_cnt = sum(1 for p in outfield if p["position_label"]["code"] in ("LB", "CB", "RB"))
                     self.assertLessEqual(st_cnt, 2, f"Too many STs in {mid} {t_key}")
                     self.assertGreaterEqual(def_cnt, 1, f"No defenders in {mid} {t_key}")
+
+    def test_calibrated_xg_real_ball_passes_and_zero_defensive_third_strikers(self) -> None:
+        from fastapi.testclient import TestClient
+        from apps.api.main import app, service
+        from packages.tactics_engine.counterfactual import compute_shot_xg
+        from packages.tactics_engine.event_models import analyze_match_advanced_events
+
+        # 1. Calibrated long-distance open-play xG at 84m must NEVER exceed 0.015
+        far_res = compute_shot_xg([], (84.0, 34.0), attacking_team="team_a", goal_x=0.0)
+        self.assertLessEqual(float(far_res["xg"]), 0.015)
+
+        # 2. Event model must NOT hallucinate passes when ball detections are sparse/absent
+        for mid in ("m1_ahly_sekka", "m2_ahly_enppi"):
+            _, df = service.get_legacy_and_v8_frames(mid)
+            ev = analyze_match_advanced_events(df, team_a_name="Team A", team_b_name="Team B")
+            self.assertLess(int(ev.get("passes_detected", 0)), 12, f"Hallucinated pass burst in {mid}")
+
+        # 3. Left-backs / deep defenders in m2_ahly_enppi & custom_1795438320857 must never be labeled ST
+        client = TestClient(app)
+        h = {"X-User-Role": "analyst", "X-Tenant-Id": "test_realism_v106"}
+        for mid in ("m2_ahly_enppi", "custom_1795438320857"):
+            r = client.get(f"/api/matches/{mid}/players", headers=h)
+            self.assertEqual(r.status_code, 200, r.text)
+            r_tl = client.get(f"/api/matches/{mid}/timeline", headers=h)
+            self.assertEqual(r_tl.status_code, 200, r_tl.text)
+            ta_right = bool(r_tl.json().get("team_a_attacks_right", True))
+            for p in r.json()["players"]:
+                if p.get("speed_kmh") is not None:
+                    self.assertLessEqual(float(p["speed_kmh"]), 34.5)
+                if p.get("top_speed_kmh") is not None:
+                    self.assertLessEqual(float(p["top_speed_kmh"]), 34.5)
+                if p["position_label"]["code"] == "ST" and p.get("avg_position"):
+                    ax = float(p["avg_position"]["x_m"])
+                    atk_r = ta_right if p["team"] == "team_a" else (not ta_right)
+                    ox = ax if atk_r else (105.0 - ax)
+                    self.assertGreater(ox, 44.0, f"Deep player {p['display_label']} in {mid} mislabeled ST at ox={ox}")
+
+        # 4. Online Server H.264 AR Video Render endpoint produces valid playable MP4
+        r_ren = client.post("/api/matches/m2_ahly_enppi/render-ar-video", json={"force": False}, headers=h)
+        self.assertEqual(r_ren.status_code, 200, r_ren.text)
+        j_ren = r_ren.json()
+        self.assertEqual(j_ren.get("codec"), "h264_yuv420p")
+        r_vid = client.get(j_ren["video_url"])
+        self.assertEqual(r_vid.status_code, 200)
+        self.assertIn(b"ftyp", r_vid.content[:64])
+
+    def test_identity_honesty_consistency_and_manual_assignment(self) -> None:
+        from fastapi.testclient import TestClient
+        from apps.api.main import app
+        from apps.api.service import DEFAULT_MATCH_ROSTERS
+
+        client = TestClient(app)
+        h = {"X-User-Role": "analyst", "X-Tenant-Id": "test_identity_v107"}
+        all_mids = [
+            "m1_ahly_sekka",
+            "m2_ahly_enppi",
+            "m3_enppi_mokawloon",
+            "custom_1795438320857",
+            "custom_1795439012452",
+        ]
+        for mid in all_mids:
+            r = client.get(f"/api/matches/{mid}/players", headers=h)
+            self.assertEqual(r.status_code, 200, r.text)
+            payload = r.json()
+            self.assertIn("short_tracks_count", payload)
+            players = payload["players"]
+            r_tl = client.get(f"/api/matches/{mid}/timeline", headers=h)
+            self.assertEqual(r_tl.status_code, 200, r_tl.text)
+            ta_right = bool(r_tl.json().get("team_a_attacks_right", True))
+
+            roster = DEFAULT_MATCH_ROSTERS.get(mid, [])
+            roster_by_team_name = {
+                (str(rr.get("team")), str(rr.get("name_ar") or "").strip()): int(rr.get("jersey_number") or 0)
+                for rr in roster
+            }
+
+            for t_key in ("team_a", "team_b"):
+                tps = [p for p in players if p["team"] == t_key]
+                gk_count = sum(1 for p in tps if p["position_label"]["code"] == "GK")
+                self.assertLessEqual(gk_count, 1, f"Multiple GKs in {mid} {t_key}")
+                cb_count = sum(1 for p in tps if p["position_label"]["code"] == "CB")
+                if len(tps) >= 7:
+                    self.assertLessEqual(cb_count, 4, f"Too many CBs in {mid} {t_key}: {cb_count}")
+
+                atk_r = ta_right if t_key == "team_a" else (not ta_right)
+                for p in tps:
+                    id_src = p.get("identity_source")
+                    self.assertNotEqual(id_src, "squad_spatial_match")
+                    self.assertTrue(
+                        float(p["observed_s"]) >= 3.0 or id_src in ("qa_verified", "ocr_verified", "gk_role_match"),
+                        f"Short unverified fragment leaked into {mid}: {p}",
+                    )
+                    if id_src in ("ocr_verified", "gk_role_match", "qa_verified"):
+                        expected_j = roster_by_team_name.get((t_key, str(p["display_label"]).strip()))
+                        if expected_j:
+                            self.assertEqual(p["jersey_number"], expected_j, f"Name/jersey mismatch in {mid}: {p}")
+                    ap = p.get("avg_position")
+                    if gk_count == 0 and isinstance(ap, dict) and ap.get("x_m") is not None and ap.get("y_m") is not None:
+                        ox = float(ap["x_m"]) if atk_r else (105.0 - float(ap["x_m"]))
+                        oy = float(ap["y_m"]) if atk_r else (68.0 - float(ap["y_m"]))
+                        self.assertFalse(
+                            ox <= 8.0 and 18.0 <= oy <= 50.0,
+                            f"Non-GK player stranded on goal line in {mid} {t_key}: ox={ox}, oy={oy}",
+                        )
+
+        # Manual 1-click identity assignment & undo roundtrip on m2_ahly_enppi
+        r_m2 = client.get("/api/matches/m2_ahly_enppi/players", headers=h)
+        target_p = r_m2.json()["players"][0]
+        tid = target_p["track_id"]
+        r_cand = client.get(f"/api/matches/m2_ahly_enppi/players/{tid}/identity-candidates", headers=h)
+        self.assertEqual(r_cand.status_code, 200, r_cand.text)
+        cands = r_cand.json()["candidates"]
+        self.assertGreater(len(cands), 0)
+        cand0 = next((c for c in cands if not c["already_assigned"]), cands[0])
+        r_set = client.post(
+            f"/api/matches/m2_ahly_enppi/players/{tid}/identity",
+            json={"team": target_p["team"], "jersey_number": cand0["jersey_number"]},
+            headers=h,
+        )
+        self.assertEqual(r_set.status_code, 200, r_set.text)
+        assigned_card = r_set.json()["card"]
+        self.assertEqual(assigned_card["identity_source"], "qa_verified")
+        self.assertEqual(assigned_card["jersey_number"], cand0["jersey_number"])
+
+        r_clr = client.post(
+            f"/api/matches/m2_ahly_enppi/players/{tid}/identity",
+            json={"team": target_p["team"], "jersey_number": None},
+            headers=h,
+        )
+        self.assertEqual(r_clr.status_code, 200, r_clr.text)
 
 
 if __name__ == "__main__":

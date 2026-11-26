@@ -2,21 +2,25 @@ import { API_BASE, PlayerCardPayload, PlayerCardSummary } from "@/lib/api";
 import { extractCardAttributes } from "@/components/PlayerCard";
 
 const TIER_GRADIENTS = {
-  gold: ["#F6DE8A", "#DFB54C", "#A8761E"],
-  silver: ["#F8FAFC", "#CBD5E1", "#7B8797"],
-  bronze: ["#E7AD77", "#B8763C", "#78481D"],
+  gold: ["#FBF0AD", "#ECCB5E", "#9F6F19"],
+  silver: ["#FFFFFF", "#CBD5E1", "#64748B"],
+  bronze: ["#F3C499", "#D28B50", "#6E3F18"],
 } as const;
 
-function drawFutShieldPath(ctx: CanvasRenderingContext2D, w: number, h: number) {
+function drawFc25ShieldPath(ctx: CanvasRenderingContext2D, w: number, h: number) {
   ctx.beginPath();
-  ctx.moveTo(w * 0.14, h * 0.042);
-  ctx.quadraticCurveTo(w * 0.5, h * 0.007, w * 0.86, h * 0.042);
-  ctx.quadraticCurveTo(w * 0.97, h * 0.063, w * 0.97, h * 0.141);
-  ctx.lineTo(w * 0.97, h * 0.831);
-  ctx.quadraticCurveTo(w * 0.97, h * 0.937, w * 0.5, h * 0.989);
-  ctx.quadraticCurveTo(w * 0.03, h * 0.937, w * 0.03, h * 0.831);
-  ctx.lineTo(w * 0.03, h * 0.141);
-  ctx.quadraticCurveTo(w * 0.03, h * 0.063, w * 0.14, h * 0.042);
+  ctx.moveTo(w * 0.11, h * 0.069);
+  ctx.lineTo(w * 0.18, h * 0.069);
+  ctx.quadraticCurveTo(w * 0.32, h * 0.069, w * 0.42, h * 0.035);
+  ctx.quadraticCurveTo(w * 0.5, h * 0.007, w * 0.58, h * 0.035);
+  ctx.quadraticCurveTo(w * 0.68, h * 0.069, w * 0.82, h * 0.069);
+  ctx.lineTo(w * 0.89, h * 0.069);
+  ctx.quadraticCurveTo(w * 0.97, h * 0.069, w * 0.97, h * 0.153);
+  ctx.lineTo(w * 0.97, h * 0.847);
+  ctx.quadraticCurveTo(w * 0.97, h * 0.917, w * 0.5, h * 0.986);
+  ctx.quadraticCurveTo(w * 0.03, h * 0.917, w * 0.03, h * 0.847);
+  ctx.lineTo(w * 0.03, h * 0.153);
+  ctx.quadraticCurveTo(w * 0.03, h * 0.069, w * 0.11, h * 0.069);
   ctx.closePath();
 }
 
@@ -30,46 +34,38 @@ function loadCorsImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function drawVectorJerseyOnCanvas(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  scale: number,
-  kitHex: string,
-  jerseyNum: number | null,
-  posCode: string
-) {
+function drawFlagOnCanvas(ctx: CanvasRenderingContext2D, cx: number, cy: number, code: string) {
+  const fw = 64;
+  const fh = 42;
+  const x = cx - fw / 2;
+  const y = cy - fh / 2;
+  const cc = (code || "EG").toUpperCase();
   ctx.save();
-  ctx.translate(cx, cy);
-  ctx.scale(scale, scale);
   ctx.beginPath();
-  ctx.moveTo(-22, -46);
-  ctx.lineTo(-42, -34);
-  ctx.lineTo(-52, -12);
-  ctx.lineTo(-36, -5);
-  ctx.lineTo(-29, -20);
-  ctx.lineTo(-29, 50);
-  ctx.quadraticCurveTo(0, 56, 29, 50);
-  ctx.lineTo(29, -20);
-  ctx.lineTo(36, -5);
-  ctx.lineTo(52, -12);
-  ctx.lineTo(42, -34);
-  ctx.lineTo(22, -46);
-  ctx.quadraticCurveTo(0, -34, -22, -46);
-  ctx.closePath();
-  const g = ctx.createLinearGradient(-40, -45, 40, 50);
-  g.addColorStop(0, kitHex || "#10B981");
-  g.addColorStop(1, "#0F172A");
-  ctx.fillStyle = g;
-  ctx.fill();
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = "rgba(255,255,255,0.9)";
-  ctx.stroke();
-
-  ctx.textAlign = "center";
-  ctx.fillStyle = "#FFFFFF";
-  ctx.font = jerseyNum ? "900 36px Inter, Cairo, sans-serif" : "900 22px Inter, Cairo, sans-serif";
-  ctx.fillText(jerseyNum && jerseyNum > 0 ? String(jerseyNum) : posCode, 0, 14);
+  ctx.roundRect(x, y, fw, fh, 5);
+  ctx.clip();
+  if (cc === "MA") {
+    ctx.fillStyle = "#C1272D";
+    ctx.fillRect(x, y, fw, fh);
+  } else if (cc === "DE") {
+    ctx.fillStyle = "#111827";
+    ctx.fillRect(x, y, fw, fh / 3);
+    ctx.fillStyle = "#DC2626";
+    ctx.fillRect(x, y + fh / 3, fw, fh / 3);
+    ctx.fillStyle = "#FACC15";
+    ctx.fillRect(x, y + (2 * fh) / 3, fw, fh / 3);
+  } else {
+    ctx.fillStyle = "#CE1126";
+    ctx.fillRect(x, y, fw, fh / 3);
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(x, y + fh / 3, fw, fh / 3);
+    ctx.fillStyle = "#111827";
+    ctx.fillRect(x, y + (2 * fh) / 3, fw, fh / 3);
+    ctx.fillStyle = "#C09300";
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
@@ -95,17 +91,16 @@ export async function exportPlayerCardPng(
   }
 
   const W = 1080;
-  const H = 1540;
+  const H = 1560;
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas 2D unavailable");
 
-  ctx.direction = isAr ? "rtl" : "ltr";
-
+  ctx.direction = "ltr";
   ctx.save();
-  drawFutShieldPath(ctx, W, H);
+  drawFc25ShieldPath(ctx, W, H);
   ctx.clip();
 
   const [c0, c1, c2] = TIER_GRADIENTS[card.tier] || TIER_GRADIENTS.bronze;
@@ -116,200 +111,136 @@ export async function exportPlayerCardPng(
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
-  ctx.strokeStyle = "rgba(255,255,255,0.10)";
-  ctx.lineWidth = 2;
-  for (let d = -H; d < W + H; d += 36) {
-    ctx.beginPath();
-    ctx.moveTo(d, 0);
-    ctx.lineTo(d + H, H);
-    ctx.stroke();
-  }
-  ctx.fillStyle = card.kit_hex || "#10B981";
-  ctx.fillRect(0, 0, W, 26);
+  // Diagonal EA FC 25 foil facets
+  ctx.fillStyle = "rgba(255, 250, 215, 0.28)";
+  ctx.beginPath();
+  ctx.moveTo(W * 0.36, H * 0.25);
+  ctx.lineTo(W * 0.97, H * 0.07);
+  ctx.lineTo(W * 0.97, H * 0.22);
+  ctx.lineTo(W * 0.45, H * 0.40);
+  ctx.closePath();
+  ctx.fill();
 
-  const isLightTier = card.tier === "gold" || card.tier === "silver";
-  const ink = isLightTier ? "#0F172A" : "#FFFBEB";
-  const subInk = isLightTier ? "rgba(15,23,42,0.82)" : "rgba(254,243,199,0.90)";
-  const divider = isLightTier ? "rgba(15,23,42,0.24)" : "rgba(254,243,199,0.30)";
+  const ink = card.tier === "silver" ? "#0F172A" : "#2A1805";
+  const subInk = card.tier === "silver" ? "rgba(15,23,42,0.82)" : "rgba(58,34,6,0.86)";
+  const divider = card.tier === "silver" ? "rgba(15,23,42,0.25)" : "rgba(58,34,6,0.25)";
 
   let photoIncluded = false;
-  const useJersey = Boolean(card.crop_is_low_res) && card.photo_source === "video";
   const basePhoto = card.photo_url.startsWith("http") ? card.photo_url : `${API_BASE}${card.photo_url}`;
   const photoSrc = `${basePhoto}${basePhoto.includes("?") ? "&" : "?"}cb=${photoVersion ?? Date.now()}`;
 
-  if (useJersey) {
-    drawVectorJerseyOnCanvas(
-      ctx,
-      isAr ? 340 : 680,
-      390,
-      4.3,
-      card.kit_hex || "#10B981",
-      card.jersey_number,
-      card.position_label.code
-    );
-  }
-
   try {
     const img = await loadCorsImage(photoSrc);
-    if (useJersey) {
-      const bx = isAr ? 175 : 830;
-      const by = 520;
-      const br = 72;
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(bx, by, br, 0, Math.PI * 2);
-      ctx.clip();
-      ctx.drawImage(img, bx - br, by - br, br * 2, br * 2);
-      ctx.restore();
-      ctx.beginPath();
-      ctx.arc(bx, by, br, 0, Math.PI * 2);
-      ctx.lineWidth = 6;
-      ctx.strokeStyle = "rgba(255,255,255,0.85)";
-      ctx.stroke();
+    const px = 280;
+    const py = 125;
+    const pw = 690;
+    const ph = 755;
+    const scale = Math.max(pw / img.width, ph / img.height);
+    const dw = img.width * scale;
+    const dh = img.height * scale;
+    const dx = (pw - dw) / 2;
+    const pCanvas = document.createElement("canvas");
+    pCanvas.width = pw;
+    pCanvas.height = ph;
+    const pCtx = pCanvas.getContext("2d");
+    if (pCtx) {
+      pCtx.drawImage(img, dx, 0, dw, dh);
+      pCtx.globalCompositeOperation = "destination-in";
+      const maskGrad = pCtx.createLinearGradient(0, 0, 0, ph);
+      maskGrad.addColorStop(0, "rgba(0,0,0,1)");
+      maskGrad.addColorStop(0.78, "rgba(0,0,0,1)");
+      maskGrad.addColorStop(1, "rgba(0,0,0,0)");
+      pCtx.fillStyle = maskGrad;
+      pCtx.fillRect(0, 0, pw, ph);
+      ctx.drawImage(pCanvas, px, py);
       photoIncluded = true;
-    } else {
-      const px = isAr ? 95 : 345;
-      const py = 105;
-      const pw = 640;
-      const ph = 600;
-      const scale = Math.max(pw / img.width, ph / img.height);
-      const dw = img.width * scale;
-      const dh = img.height * scale;
-      const dx = px + (pw - dw) / 2;
-      const pCanvas = document.createElement("canvas");
-      pCanvas.width = pw;
-      pCanvas.height = ph;
-      const pCtx = pCanvas.getContext("2d");
-      if (pCtx) {
-        pCtx.drawImage(img, dx - px, 0, dw, dh);
-        pCtx.globalCompositeOperation = "destination-in";
-        const maskGrad = pCtx.createLinearGradient(0, 0, 0, ph);
-        maskGrad.addColorStop(0, "rgba(0,0,0,1)");
-        maskGrad.addColorStop(0.75, "rgba(0,0,0,1)");
-        maskGrad.addColorStop(1, "rgba(0,0,0,0)");
-        pCtx.fillStyle = maskGrad;
-        pCtx.fillRect(0, 0, pw, ph);
-        ctx.drawImage(pCanvas, px, py);
-        photoIncluded = true;
-      }
     }
   } catch {
     photoIncluded = false;
   }
 
-  const colX = isAr ? W - 210 : 210;
+  // Left rating / number & position stack
+  const topVal =
+    card.jersey_number !== null && card.jersey_number > 0
+      ? String(card.jersey_number)
+      : card.top_speed_kmh !== null
+      ? String(Math.round(card.top_speed_kmh))
+      : String(Math.round((card.quality?.calibrated_ratio ?? 0) * 100));
+  const colX = 185;
   ctx.textAlign = "center";
   ctx.fillStyle = ink;
-  ctx.font = "900 112px Cairo, Inter, sans-serif";
-  ctx.fillText(card.jersey_number !== null && card.jersey_number > 0 ? String(card.jersey_number) : "—", colX, 250);
-  ctx.font = "800 38px Inter, Cairo, sans-serif";
-  ctx.fillText(card.position_label.code, colX, 310);
+  ctx.font = "900 132px Inter, Cairo, sans-serif";
+  ctx.fillText(topVal, colX, 290);
+  ctx.font = "900 44px Inter, Cairo, sans-serif";
+  ctx.fillText(card.position_label.code, colX, 355);
 
   ctx.fillStyle = divider;
-  ctx.fillRect(colX - 48, 334, 96, 3);
-
-  ctx.beginPath();
-  ctx.arc(colX, 410, 50, 0, Math.PI * 2);
-  ctx.fillStyle = card.kit_hex || "#10B981";
-  ctx.fill();
-  ctx.lineWidth = 5;
-  ctx.strokeStyle = "rgba(255,255,255,0.85)";
-  ctx.stroke();
+  ctx.fillRect(colX - 42, 385, 84, 3);
 
   const words = (card.team_name_en || card.team_name_ar || "FC").trim().split(/\s+/);
   const initials = words.length >= 2 ? `${words[0][0]}${words[1][0]}`.toUpperCase() : words[0].slice(0, 2).toUpperCase();
+  ctx.beginPath();
+  ctx.arc(colX, 455, 40, 0, Math.PI * 2);
+  ctx.fillStyle = card.kit_hex || "#10B981";
+  ctx.fill();
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "rgba(255,255,255,0.88)";
+  ctx.stroke();
   ctx.fillStyle = "#FFFFFF";
-  ctx.font = "900 32px Inter, sans-serif";
-  ctx.fillText(initials, colX, 422);
+  ctx.font = "900 26px Inter, sans-serif";
+  ctx.fillText(initials, colX, 464);
 
-  ctx.fillStyle = subInk;
-  ctx.font = "700 24px Cairo, Inter, sans-serif";
-  ctx.fillText(isAr ? card.team_name_ar : card.team_name_en, colX, 500);
-
+  // Nameplate Divider & Player Name directly on foil
   const labelText = isAr ? card.display_label : card.display_label_en || card.display_label;
   ctx.fillStyle = divider;
-  ctx.fillRect(105, 735, W - 210, 4);
+  ctx.fillRect(110, 912, W - 220, 3);
   ctx.fillStyle = ink;
-  ctx.font = "800 52px Cairo, Inter, sans-serif";
-  ctx.fillText(labelText, W / 2, 805, W - 180);
-  ctx.fillStyle = divider;
-  ctx.fillRect(105, 842, W - 210, 4);
+  ctx.font = "900 58px Cairo, Inter, sans-serif";
+  ctx.fillText(labelText, W / 2, 986, W - 180);
 
-  // Obsidian attributes panel
-  ctx.fillStyle = "rgba(2, 6, 23, 0.80)";
-  ctx.beginPath();
-  ctx.roundRect(105, 875, W - 210, 385, 28);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,0.16)";
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
+  // 6-Column Horizontal Stat Strip directly on metallic foil (zero black box)
   const attrs = extractCardAttributes(card, isAr);
   const hasAnyPct = attrs.some((a) => a.pct !== null);
-  const cellW = (W - 250) / 2;
-  const cellH = 115;
+  const stripLeft = 95;
+  const stripW = W - 190;
+  const colW = stripW / 6;
   attrs.forEach((attr, idx) => {
-    const col = idx % 2;
-    const row = Math.floor(idx / 2);
-    const x0 = 135 + col * (cellW + 20);
-    const y0 = 905 + row * cellH;
+    const cx = stripLeft + colW * (idx + 0.5);
+    const numVal = hasAnyPct && attr.pct !== null ? String(attr.pct) : attr.shortNum;
+    ctx.fillStyle = subInk;
+    ctx.font = "800 28px Inter, sans-serif";
+    ctx.fillText(attr.code, cx, 1080);
 
-    if (hasAnyPct) {
-      ctx.textAlign = "left";
-      ctx.fillStyle = "#FCD34D";
-      ctx.font = "900 52px Inter, Cairo, sans-serif";
-      ctx.fillText(attr.pct !== null ? String(attr.pct) : "—", x0 + 18, y0 + 58);
-
-      ctx.fillStyle = "#E2E8F0";
-      ctx.font = "800 26px Inter, sans-serif";
-      ctx.fillText(attr.code, x0 + 106, y0 + 56);
-
-      ctx.textAlign = "right";
-      ctx.fillStyle = "#CBD5E1";
-      ctx.font = "700 22px Cairo, Inter, sans-serif";
-      ctx.fillText(isAr ? attr.ar : attr.en, x0 + cellW - 14, y0 + 36);
-      ctx.font = "700 21px Inter, Cairo, sans-serif";
-      ctx.fillText(attr.rawText, x0 + cellW - 14, y0 + 70);
-    } else {
-      ctx.textAlign = "left";
-      ctx.fillStyle = "#FCD34D";
-      ctx.font = "900 26px Inter, sans-serif";
-      ctx.fillText(attr.code, x0 + 16, y0 + 40);
-
-      ctx.fillStyle = "#CBD5E1";
-      ctx.font = "700 21px Cairo, Inter, sans-serif";
-      ctx.fillText(isAr ? attr.ar : attr.en, x0 + 16, y0 + 72);
-
-      ctx.textAlign = "right";
-      ctx.fillStyle = "#FFFFFF";
-      ctx.font = "900 32px Inter, Cairo, sans-serif";
-      ctx.fillText(attr.rawText, x0 + cellW - 14, y0 + 62);
-    }
+    ctx.fillStyle = ink;
+    ctx.font = "900 48px Inter, Cairo, sans-serif";
+    ctx.fillText(numVal, cx, 1142);
   });
 
-  // Safe unclipped Footer inside lower wider shield
-  ctx.textAlign = "center";
+  // Bottom Trio: Country Flag (when verified) + League + Club Shield
+  if (card.nationality_code) {
+    drawFlagOnCanvas(ctx, W / 2 - 110, 1290, card.nationality_code);
+  }
   ctx.fillStyle = ink;
-  ctx.font = "700 22px Cairo, Inter, sans-serif";
-  const calPct = Math.round((card.quality?.calibrated_ratio ?? 0) * 100);
-  const line1 = hasAnyPct
-    ? isAr
-      ? "ترتيب اللاعب داخل المباراة (0–99)"
-      : "In-match percentile (0–99)"
-    : isAr
-    ? "قياسات فيديو حقيقية مقاسة"
-    : "Measured video telemetry";
-  const line2 = isAr
-    ? `${card.observed_s.toFixed(1)} ث • معايرة ${calPct}% • EGY-SCOUT`
-    : `${card.observed_s.toFixed(1)}s • ${calPct}% cal. • EGY-SCOUT`;
-  ctx.fillText(line1, W / 2, 1300, W - 360);
-  ctx.fillText(line2, W / 2, 1340, W - 380);
+  ctx.font = "900 26px Inter, sans-serif";
+  ctx.fillText(card.club_id === "bayer_leverkusen_alonso" ? "BL" : "EPL", W / 2, 1299);
+
+  ctx.beginPath();
+  ctx.arc(W / 2 + 110, 1290, 26, 0, Math.PI * 2);
+  ctx.fillStyle = card.kit_hex || "#10B981";
+  ctx.fill();
+  ctx.strokeStyle = "#FFFFFF";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.fillStyle = "#FFFFFF";
+  ctx.font = "900 18px Inter, sans-serif";
+  ctx.fillText(initials, W / 2 + 110, 1296);
+
   ctx.restore();
 
   ctx.save();
-  drawFutShieldPath(ctx, W, H);
+  drawFc25ShieldPath(ctx, W, H);
   ctx.lineWidth = 10;
-  ctx.strokeStyle = isLightTier ? "rgba(255,255,255,0.82)" : "rgba(253,186,116,0.82)";
+  ctx.strokeStyle = card.tier === "silver" ? "#FFFFFF" : "#FFF5BE";
   ctx.stroke();
   ctx.restore();
 
@@ -321,7 +252,6 @@ export async function exportPlayerCardPng(
   return { exported: true, photoIncluded };
 }
 
-/** Export a compact 420x588 transparent-background Mini FUT Card PNG ready for pitch/video overlays. */
 export async function exportMiniPlayerCardPng(
   card: PlayerCardSummary | PlayerCardPayload,
   lang: "ar" | "en",
@@ -333,7 +263,7 @@ export async function exportMiniPlayerCardPng(
   }
 
   const W = 420;
-  const H = 588;
+  const H = 604;
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
@@ -341,7 +271,7 @@ export async function exportMiniPlayerCardPng(
   if (!ctx) throw new Error("Canvas 2D unavailable");
 
   ctx.save();
-  drawFutShieldPath(ctx, W, H);
+  drawFc25ShieldPath(ctx, W, H);
   ctx.clip();
 
   const [c0, c1, c2] = TIER_GRADIENTS[card.tier] || TIER_GRADIENTS.bronze;
@@ -351,70 +281,51 @@ export async function exportMiniPlayerCardPng(
   grad.addColorStop(1, c2);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = card.kit_hex || "#10B981";
-  ctx.fillRect(0, 0, W, 14);
 
-  const isLight = card.tier === "gold" || card.tier === "silver";
-  const ink = isLight ? "#0F172A" : "#FFFBEB";
-
-  // Top jersey number + position badge
+  const ink = card.tier === "silver" ? "#0F172A" : "#2A1805";
   ctx.fillStyle = ink;
   ctx.font = "900 44px Inter, Cairo, sans-serif";
   ctx.textAlign = "left";
-  ctx.fillText(card.jersey_number && card.jersey_number > 0 ? String(card.jersey_number) : "—", 46, 86);
-
-  ctx.fillStyle = "rgba(2,6,23,0.85)";
-  ctx.beginPath();
-  ctx.roundRect(W - 118, 46, 74, 36, 10);
-  ctx.fill();
-  ctx.fillStyle = "#FFFFFF";
-  ctx.font = "800 20px Inter, sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText(card.position_label.code, W - 81, 71);
+  ctx.fillText(card.jersey_number && card.jersey_number > 0 ? String(card.jersey_number) : "—", 46, 98);
+  ctx.font = "900 22px Inter, sans-serif";
+  ctx.textAlign = "right";
+  ctx.fillText(card.position_label.code, W - 46, 94);
 
   let photoIncluded = false;
-  const useJersey = Boolean(card.crop_is_low_res) && card.photo_source === "video";
-  if (useJersey) {
-    drawVectorJerseyOnCanvas(ctx, W / 2, 240, 2.2, card.kit_hex || "#10B981", card.jersey_number, card.position_label.code);
-  } else {
-    try {
-      const basePhoto = card.photo_url.startsWith("http") ? card.photo_url : `${API_BASE}${card.photo_url}`;
-      const img = await loadCorsImage(`${basePhoto}${basePhoto.includes("?") ? "&" : "?"}cb=${photoVersion ?? Date.now()}`);
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(W / 2, 235, 112, 0, Math.PI * 2);
-      ctx.clip();
-      const s = Math.max(224 / img.width, 224 / img.height);
-      ctx.drawImage(img, W / 2 - (img.width * s) / 2, 123, img.width * s, img.height * s);
-      ctx.restore();
-      photoIncluded = true;
-    } catch {
-      drawVectorJerseyOnCanvas(ctx, W / 2, 240, 2.2, card.kit_hex || "#10B981", card.jersey_number, card.position_label.code);
-    }
+  try {
+    const basePhoto = card.photo_url.startsWith("http") ? card.photo_url : `${API_BASE}${card.photo_url}`;
+    const img = await loadCorsImage(`${basePhoto}${basePhoto.includes("?") ? "&" : "?"}cb=${photoVersion ?? Date.now()}`);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(W / 2, 245, 118, 0, Math.PI * 2);
+    ctx.clip();
+    const s = Math.max(236 / img.width, 236 / img.height);
+    ctx.drawImage(img, W / 2 - (img.width * s) / 2, 127, img.width * s, img.height * s);
+    ctx.restore();
+    photoIncluded = true;
+  } catch {
+    photoIncluded = false;
   }
 
   const labelText = isAr ? card.display_label : card.display_label_en || card.display_label;
   ctx.fillStyle = ink;
   ctx.font = "900 32px Cairo, Inter, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText(labelText, W / 2, 412, W - 80);
+  ctx.fillText(labelText, W / 2, 430, W - 70);
 
-  // Dark speed/distance stamp
-  ctx.fillStyle = "rgba(2,6,23,0.88)";
-  ctx.beginPath();
-  ctx.roundRect(70, 442, W - 140, 56, 16);
-  ctx.fill();
-  ctx.fillStyle = "#34D399";
   ctx.font = "800 22px Inter, sans-serif";
   const spd = card.top_speed_kmh !== null ? `${card.top_speed_kmh.toFixed(0)} km/h` : "—";
   const dst = card.distance_m !== null ? `${Math.round(card.distance_m)}m` : "—";
-  ctx.fillText(`${spd}  •  ${dst}`, W / 2, 478);
+  ctx.fillText(`${spd}  •  ${dst}`, W / 2, 486);
+  if (card.nationality_code) {
+    drawFlagOnCanvas(ctx, W / 2, 540, card.nationality_code);
+  }
 
   ctx.restore();
   ctx.save();
-  drawFutShieldPath(ctx, W, H);
+  drawFc25ShieldPath(ctx, W, H);
   ctx.lineWidth = 6;
-  ctx.strokeStyle = isLight ? "rgba(255,255,255,0.85)" : "rgba(253,186,116,0.85)";
+  ctx.strokeStyle = card.tier === "silver" ? "#FFFFFF" : "#FFF5BE";
   ctx.stroke();
   ctx.restore();
 

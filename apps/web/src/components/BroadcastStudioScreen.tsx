@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Circle,
+  Cloud,
   Download,
   EyeOff,
   FileText,
@@ -67,8 +68,10 @@ import {
   draw3DTapeMeasure,
   drawBallCometAndArc,
   drawBroadcastGroundRing,
+  drawBroadcastRadarMinimap,
   drawGhostSilhouette,
   drawGoalProbabilityCone,
+  drawPassingLanesOverlay,
   drawSpotlightBeamAndCard,
   drawTacticalChainWall,
   drawTacticalZone,
@@ -410,10 +413,13 @@ function evalInstantMetrics(
     }
   }
 
-  const effDist = Math.min(dist, 24);
-  const effAngle = Math.max(angleRad, 0.22);
-  const logit = 0.25 - 0.085 * effDist + 2.4 * effAngle - 0.55 * coneOcc - pressure;
-  const xg = Math.max(0.02, Math.min(0.92, 1 / (1 + Math.exp(-logit))));
+  let xg = 0.004;
+  if (dist > 36) {
+    xg = Math.max(0.001, Math.min(0.012, 0.004 * Math.exp(-(dist - 36) / 15)));
+  } else {
+    const logit = -1.1 - 0.135 * dist + 3.65 * angleRad - 0.65 * coneOcc - pressure;
+    xg = Math.max(0.004, Math.min(0.88, 1 / (1 + Math.exp(-logit))));
+  }
   const boxControlPct = (attZone / (attZone + defZone)) * 100;
   return { xg: Number(xg.toFixed(3)), boxControlPct: Number(boxControlPct.toFixed(1)) };
 }
@@ -522,7 +528,7 @@ export default function BroadcastStudioScreen({
   const [momentsBrief, setMomentsBrief] = useState<MomentsAndBriefPayload | null>(null);
 
   const [tool, setTool] = useState<ToolMode>("ghost");
-  const [arDensity, setArDensity] = useState<ArDensity>("focus");
+  const [arDensity, setArDensity] = useState<ArDensity>("all");
   const [showGoalCone, setShowGoalCone] = useState(true);
   const [showBallTrail, setShowBallTrail] = useState(true);
   const [turfOcclusion, setTurfOcclusion] = useState(true);
@@ -542,8 +548,8 @@ export default function BroadcastStudioScreen({
 
   const [ghostDx, setGhostDx] = useState(0);
   const [ghostDy, setGhostDy] = useState(0);
-  const [baseMetrics, setBaseMetrics] = useState({ xg: 0.221, boxControlPct: 59.4 });
-  const [liveMetrics, setLiveMetrics] = useState({ xg: 0.221, boxControlPct: 59.4 });
+  const [baseMetrics, setBaseMetrics] = useState({ xg: 0.01, boxControlPct: 50.0 });
+  const [liveMetrics, setLiveMetrics] = useState({ xg: 0.01, boxControlPct: 50.0 });
 
   // Live synced props for TacticalTwinCanvas
   const [twinPlayers, setTwinPlayers] = useState<RenderPlayer[]>([]);
@@ -553,6 +559,9 @@ export default function BroadcastStudioScreen({
   const [setPieceSim, setSetPieceSim] = useState<SetPieceSimState | null>(null);
   const [recordingAr, setRecordingAr] = useState(false);
   const [exportingMp4, setExportingMp4] = useState(false);
+  const [renderingOnlineAr, setRenderingOnlineAr] = useState(false);
+  const [renderedVideoUrl, setRenderedVideoUrl] = useState<string | null>(null);
+  const [useRenderedArSource, setUseRenderedArSource] = useState(false);
   const [exportNote, setExportNote] = useState("");
   const [hlsActive, setHlsActive] = useState(false);
   const [loadingHls, setLoadingHls] = useState(false);
@@ -716,6 +725,7 @@ export default function BroadcastStudioScreen({
     teamBName: "Team B",
     pinnedZoom: null as { vx: number; vy: number } | null,
     isAr,
+    useRenderedArSource: false,
   });
   stateRef.current = {
     tool,
@@ -742,6 +752,7 @@ export default function BroadcastStudioScreen({
     teamBName: timelineMeta.teamBName,
     pinnedZoom,
     isAr,
+    useRenderedArSource,
   };
 
   useEffect(() => {
@@ -750,6 +761,12 @@ export default function BroadcastStudioScreen({
       setAnalysisTab("board");
     }
   }, [externalBlueprint]);
+
+  // Reset rendered online AR stream when switching matches
+  useEffect(() => {
+    setUseRenderedArSource(false);
+    setRenderedVideoUrl(null);
+  }, [matchId]);
 
   // Jump to clip when requested from Scouting H2H / Evidence Clips
   useEffect(() => {
@@ -1017,7 +1034,12 @@ export default function BroadcastStudioScreen({
         ? fallbackImg
         : null;
 
-      const tCur = video && videoReadyRef.current ? video.currentTime : tlStartRef.current;
+      const rawVideoTime = video && videoReadyRef.current ? video.currentTime : tlStartRef.current;
+      const tCur = st.useRenderedArSource
+        ? tlStartRef.current + rawVideoTime
+        : rawVideoTime < tlStartRef.current - 0.5 && video?.paused
+        ? tlStartRef.current
+        : rawVideoTime;
       const interp = timelineRef.current.length
         ? interpolateTimeline(timelineRef.current, tCur)
         : {
@@ -1106,7 +1128,7 @@ export default function BroadcastStudioScreen({
           if (ctx && gctx) {
             ctx.drawImage(sourceEl, 0, 0, vw, vh);
 
-            if (st.arDensity !== "clean" && alpha > 0.02 && smoothedList.length > 0) {
+            if (!st.useRenderedArSource && st.arDensity !== "clean" && alpha > 0.02 && smoothedList.length > 0) {
               const phaseRad = (now * 0.0022) % (Math.PI * 2);
               const isPaused = !video || video.paused;
 
@@ -1137,14 +1159,22 @@ export default function BroadcastStudioScreen({
                 }
               }
 
-              // 3. Tactical Linked Defensive Chain Wall
+              // 3. Tactical Linked Defensive Chain Wall (auto-enabled in 'all' broadcast mode)
               const chainPlayers = st.chainIds.length >= 2
                 ? st.chainIds.map((id) => smoothedList.find((p) => p.track_id === id)).filter((x): x is TimelineTrack => Boolean(x))
-                : st.tool === "chain"
+                : st.tool === "chain" || st.arDensity === "all"
                 ? smoothedList.filter((p) => p.team === st.defendingTeam && p.role === "player").slice(0, 4)
                 : [];
               if (chainPlayers.length >= 2) {
                 drawTacticalChainWall(gctx, chainPlayers, vw, vh, false);
+              }
+
+              // 3b. Open Passing Option Lanes from Ball Carrier (Broadcast Tactical Lens)
+              if (st.arDensity === "all" && interp.ballCarrierId !== null) {
+                const carrierTrack = smoothedList.find((p) => p.track_id === interp.ballCarrierId);
+                if (carrierTrack) {
+                  drawPassingLanesOverlay(gctx, carrierTrack, smoothedList);
+                }
               }
 
               // 4. Player Broadcast Perspective Discs (Focus Mode keeps pitch ultra clean!)
@@ -1244,6 +1274,7 @@ export default function BroadcastStudioScreen({
               // Sky Sports MNF Spotlight Light Pillars & Telemetry Tag Cards
               const focusIds = new Set<number>(st.spotlightIds);
               if (st.selectedDefId !== null) focusIds.add(st.selectedDefId);
+              if (st.arDensity === "all" && interp.ballCarrierId !== null) focusIds.add(interp.ballCarrierId);
               for (const fid of focusIds) {
                 const fp = smoothedList.find((p) => p.track_id === fid);
                 if (!fp) continue;
@@ -1325,6 +1356,19 @@ export default function BroadcastStudioScreen({
               ctx.textAlign = "right";
               ctx.fillText(`${tCur.toFixed(1)}s`, hx + hudW - 10, cyMid + 0.5);
               ctx.restore();
+
+              // 2D FIFA Tactical Radar Minimap anchored bottom-center
+              if (!st.useRenderedArSource && smoothedList.length > 0 && st.arDensity === "all") {
+                drawBroadcastRadarMinimap(
+                  ctx,
+                  smoothedList,
+                  interp.ball ? [interp.ball.x_m, interp.ball.y_m] : activeBallRef.current,
+                  vw,
+                  vh,
+                  st.teamAHex,
+                  st.teamBHex
+                );
+              }
             }
 
             // V8.4 Pinned 2.2x Broadcast Zoom Loupe (KlipDraw-style corner magnifier)
@@ -1823,6 +1867,38 @@ export default function BroadcastStudioScreen({
     }
   };
 
+  const handleRenderOnlineArVideo = async () => {
+    if (useRenderedArSource && renderedVideoUrl) {
+      setUseRenderedArSource(false);
+      setExportNote(isAr ? "تم الرجوع للرسم التفاعلي المباشر" : "Switched to live interactive AR overlay");
+      return;
+    }
+    setRenderingOnlineAr(true);
+    setExportNote("");
+    try {
+      const res = await apiFetch<{ video_url: string; size_kb: number; render_mode: string }>(
+        `/api/matches/${encodeURIComponent(matchId)}/render-ar-video`,
+        { method: "POST", body: JSON.stringify({ force: false }) },
+        "club_demo_egypt",
+        role
+      );
+      setRenderedVideoUrl(res.video_url);
+      setUseRenderedArSource(true);
+      if (videoRef.current) {
+        videoRef.current.currentTime = 0;
+      }
+      setExportNote(
+        isAr
+          ? `تم الرندر أونلاين بنجاح (${res.size_kb} KB • H.264)`
+          : `Rendered online (${res.size_kb} KB • H.264)`
+      );
+    } catch {
+      setExportNote(isAr ? "تعذّر رندر الفيديو أونلاين" : "Online AR render failed");
+    } finally {
+      setRenderingOnlineAr(false);
+    }
+  };
+
   const xgDeltaPct =
     baseMetrics.xg > 0
       ? Math.round(((liveMetrics.xg - baseMetrics.xg) / baseMetrics.xg) * 100)
@@ -1833,14 +1909,14 @@ export default function BroadcastStudioScreen({
       {/* Hidden Video Backing Source */}
       <video
         ref={videoRef}
-        key={matchId}
-        src={matchVideoUrl(matchId)}
+        key={`${matchId}-${useRenderedArSource ? "ar" : "raw"}`}
+        src={useRenderedArSource && renderedVideoUrl ? `${API_BASE}${renderedVideoUrl}` : matchVideoUrl(matchId)}
         crossOrigin="anonymous"
         playsInline
         preload="auto"
         onLoadedMetadata={() => {
           if (videoRef.current) {
-            videoRef.current.currentTime = tlStartRef.current;
+            videoRef.current.currentTime = useRenderedArSource ? 0 : tlStartRef.current;
             videoReadyRef.current = true;
             lastMaskKeyRef.current = "";
             lastDrawTsRef.current = 0;
@@ -2253,6 +2329,31 @@ export default function BroadcastStudioScreen({
                 >
                   {recordingAr ? <Square className="w-3 h-3" /> : <Video className="w-3 h-3 text-emerald-400" />}
                   <span>{recordingAr ? (isAr ? "إيقاف التسجيل" : "Stop Rec") : isAr ? "تسجيل AR" : "Rec AR"}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={renderingOnlineAr}
+                  onClick={handleRenderOnlineArVideo}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold whitespace-nowrap transition disabled:opacity-50 ${
+                    useRenderedArSource
+                      ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-300"
+                      : "bg-[#090D16] border-white/[0.1] hover:border-emerald-500/50 text-slate-200"
+                  }`}
+                >
+                  <Cloud className={`w-3 h-3 ${renderingOnlineAr ? "animate-pulse text-amber-400" : "text-emerald-400"}`} />
+                  <span>
+                    {renderingOnlineAr
+                      ? isAr
+                        ? "جاري الرندر..."
+                        : "Rendering..."
+                      : useRenderedArSource
+                      ? isAr
+                        ? "عرض التفاعلي المباشر"
+                        : "Live AR Mode"
+                      : isAr
+                      ? "رندر الفيديو أونلاين"
+                      : "Render Online AR"}
+                  </span>
                 </button>
                 <button
                   type="button"

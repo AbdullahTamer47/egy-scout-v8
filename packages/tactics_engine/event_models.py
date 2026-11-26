@@ -135,19 +135,17 @@ def analyze_match_advanced_events(
         if len(players) < 4:
             continue
         ball_rows = sub[sub["role"] == "ball"].dropna(subset=["x_m", "y_m"])
-        if not ball_rows.empty:
-            bx = float(ball_rows.iloc[0]["x_m"])
-            by = float(ball_rows.iloc[0]["y_m"])
-        else:
-            bx = float(players["x_m"].median())
-            by = float(players["y_m"].median())
+        if ball_rows.empty:
+            continue
+        bx = float(ball_rows.iloc[0]["x_m"])
+        by = float(ball_rows.iloc[0]["y_m"])
 
         t_s = float(sub["time_s"].iloc[0]) if "time_s" in sub.columns else fid / 25.0
         pxs = players["x_m"].to_numpy(dtype=np.float64)
         pys = players["y_m"].to_numpy(dtype=np.float64)
         dists = np.hypot(pxs - bx, pys - by)
         min_idx = int(np.argmin(dists))
-        if dists[min_idx] <= 4.8:
+        if dists[min_idx] <= 3.4:
             c_row = players.iloc[min_idx]
             c_team = str(c_row["team"])
             if c_team in ("team_a", "team_b"):
@@ -216,43 +214,59 @@ def analyze_match_advanced_events(
             }
         return player_obv[key]
 
-    for a, b in zip(frame_carriers, frame_carriers[1:]):
-        dt = b["time_s"] - a["time_s"]
-        if dt <= 0 or dt > 3.5:
-            continue
-        dist = math.hypot(b["x_m"] - a["x_m"], b["y_m"] - a["y_m"])
-        att_r = team_a_attacks_right if a["team"] == "team_a" else (not team_a_attacks_right)
-        rec = _acc(a["team"], a["track_id"], a["label"])
+    # Consolidate noisy frame-level carrier touches into stable possession stints (>= 2 samples or >= 0.20s)
+    stints: list[dict[str, Any]] = []
+    for fc in frame_carriers:
+        if stints and stints[-1]["track_id"] == fc["track_id"] and (fc["time_s"] - stints[-1]["end_s"]) <= 0.45:
+            stints[-1]["end_s"] = fc["time_s"]
+            stints[-1]["end_x"] = fc["x_m"]
+            stints[-1]["end_y"] = fc["y_m"]
+            stints[-1]["samples"] += 1
+        else:
+            stints.append({**fc, "start_s": fc["time_s"], "end_s": fc["time_s"], "end_x": fc["x_m"], "end_y": fc["y_m"], "samples": 1})
+    stable_stints = [s for s in stints if s["samples"] >= 2 or (s["end_s"] - s["start_s"]) >= 0.20]
 
-        if a["track_id"] == b["track_id"] and dist >= 3.0:
-            # Progressive Carry
+    for s in stable_stints:
+        cdist = math.hypot(s["end_x"] - s["x_m"], s["end_y"] - s["y_m"])
+        if cdist >= 3.2:
             carries_count += 1
-            obv_res = compute_obv_delta(a["x_m"], a["y_m"], b["x_m"], b["y_m"], att_r, True)
+            att_r = team_a_attacks_right if s["team"] == "team_a" else (not team_a_attacks_right)
+            rec = _acc(s["team"], s["track_id"], s["label"])
+            obv_res = compute_obv_delta(s["x_m"], s["y_m"], s["end_x"], s["end_y"], att_r, True)
             rec["carry_obv"] += obv_res["obv"]
             rec["obv_total"] += obv_res["obv"]
-        elif a["track_id"] != b["track_id"] and dist >= 3.5:
-            completed = a["team"] == b["team"]
-            lane_defs = _count_defenders_in_lane(a["x_m"], a["y_m"], b["x_m"], b["y_m"], a["opp_xy"])
-            xp = compute_xpass_probability(a["x_m"], a["y_m"], b["x_m"], b["y_m"], att_r, a["press_m"], lane_defs)
-            obv_res = compute_obv_delta(a["x_m"], a["y_m"], b["x_m"], b["y_m"], att_r, completed)
-            rec["passes_attempted"] += 1
-            rec["passes_completed"] += 1 if completed else 0
-            rec["xpass_sum"] += xp
-            rec["pass_obv"] += obv_res["obv"]
-            rec["obv_total"] += obv_res["obv"]
-            passes.append(
-                {
-                    "time_s": b["time_s"],
-                    "from_label": a["label"],
-                    "to_label": b["label"],
-                    "team": a["team"],
-                    "distance_m": round(dist, 1),
-                    "completed": completed,
-                    "xpass": xp,
-                    "obv": obv_res["obv"],
-                    "lane_defenders": lane_defs,
-                }
-            )
+
+    for a, b in zip(stable_stints, stable_stints[1:]):
+        dt = b["start_s"] - a["end_s"]
+        if dt <= 0 or dt > 3.5:
+            continue
+        dist = math.hypot(b["x_m"] - a["end_x"], b["y_m"] - a["end_y"])
+        if dist < 4.5:
+            continue
+        att_r = team_a_attacks_right if a["team"] == "team_a" else (not team_a_attacks_right)
+        rec = _acc(a["team"], a["track_id"], a["label"])
+        completed = a["team"] == b["team"]
+        lane_defs = _count_defenders_in_lane(a["end_x"], a["end_y"], b["x_m"], b["y_m"], a["opp_xy"])
+        xp = compute_xpass_probability(a["end_x"], a["end_y"], b["x_m"], b["y_m"], att_r, a["press_m"], lane_defs)
+        obv_res = compute_obv_delta(a["end_x"], a["end_y"], b["x_m"], b["y_m"], att_r, completed)
+        rec["passes_attempted"] += 1
+        rec["passes_completed"] += 1 if completed else 0
+        rec["xpass_sum"] += xp
+        rec["pass_obv"] += obv_res["obv"]
+        rec["obv_total"] += obv_res["obv"]
+        passes.append(
+            {
+                "time_s": b["start_s"],
+                "from_label": a["label"],
+                "to_label": b["label"],
+                "team": a["team"],
+                "distance_m": round(dist, 1),
+                "completed": completed,
+                "xpass": xp,
+                "obv": obv_res["obv"],
+                "lane_defenders": lane_defs,
+            }
+        )
 
     # Summarize per-team & top OBV/CxP players
     team_summary = {}

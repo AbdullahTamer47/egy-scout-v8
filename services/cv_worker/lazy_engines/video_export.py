@@ -114,6 +114,39 @@ def export_watermarked_clip(
         best = min(ar_fids, key=lambda x: abs(x - target_f))
         return best if abs(best - target_f) <= 5 else None
 
+    def _draw_radar_minimap(
+        img: np.ndarray,
+        players_list: list[dict[str, Any]],
+        ball_xy_m: Optional[tuple[float, float]] = None,
+    ) -> None:
+        mw, mh = min(168, max(120, w // 6)), min(108, max(76, h // 6))
+        mx = (w - mw) // 2
+        my = h - mh - 12
+        sub = img[my : my + mh, mx : mx + mw].copy()
+        bg = np.full_like(sub, (18, 28, 20))
+        cv2.addWeighted(bg, 0.78, sub, 0.22, 0, dst=sub)
+        img[my : my + mh, mx : mx + mw] = sub
+        cv2.rectangle(img, (mx, my), (mx + mw - 1, my + mh - 1), (110, 231, 183), 1, cv2.LINE_AA)
+        cv2.line(img, (mx + mw // 2, my + 4), (mx + mw // 2, my + mh - 5), (160, 200, 175), 1, cv2.LINE_AA)
+        cv2.circle(img, (mx + mw // 2, my + mh // 2), max(8, mh // 6), (160, 200, 175), 1, cv2.LINE_AA)
+        for pl in players_list:
+            xm = pl.get("x_m")
+            ym = pl.get("y_m")
+            if xm is None or ym is None:
+                continue
+            px = mx + int(np.clip(float(xm) / 105.0, 0.02, 0.98) * (mw - 8)) + 4
+            py = my + int(np.clip(float(ym) / 68.0, 0.03, 0.97) * (mh - 8)) + 4
+            role_p = str(pl.get("role") or "player")
+            col_p = (238, 211, 34) if role_p == "goalkeeper" else (team_a_bgr if pl.get("team") == "team_a" else team_b_bgr)
+            cv2.circle(img, (px, py), 4, col_p, -1, cv2.LINE_AA)
+            cv2.circle(img, (px, py), 4, (255, 255, 255), 1, cv2.LINE_AA)
+        if ball_xy_m is not None:
+            bx = mx + int(np.clip(ball_xy_m[0] / 105.0, 0.02, 0.98) * (mw - 8)) + 4
+            by = my + int(np.clip(ball_xy_m[1] / 68.0, 0.03, 0.97) * (mh - 8)) + 4
+            cv2.circle(img, (bx, by), 4, (255, 255, 255), -1, cv2.LINE_AA)
+            cv2.circle(img, (bx, by), 5, (16, 185, 129), 1, cv2.LINE_AA)
+
+    tmp_raw_mp4 = out_p.with_name(f"{out_p.stem}.raw_tmp.mp4")
     try:
         if not cap.isOpened():
             raise FileNotFoundError(f"Cannot open video: {input_mp4}")
@@ -124,7 +157,7 @@ def export_watermarked_clip(
         f_end = max(f_start + 1, int(round(end_s * fps)))
         total_f = max(1, f_end - f_start)
 
-        writer = cv2.VideoWriter(str(out_p), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+        writer = cv2.VideoWriter(str(tmp_raw_mp4), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
         cap.set(cv2.CAP_PROP_POS_FRAMES, f_start)
         for fid in range(f_start, f_end):
             ok, frame = cap.read()
@@ -132,47 +165,108 @@ def export_watermarked_clip(
                 break
             progress = (fid - f_start) / float(total_f)
             show_rings = True
-            show_ball = (not sequential_reveal) or (progress >= 0.25)
-            show_chain = (not sequential_reveal) or (progress >= 0.55)
+            show_ball = (not sequential_reveal) or (progress >= 0.08)
+            show_chain = (not sequential_reveal) or (progress >= 0.16)
 
-            # Burn Broadcast AR Open-Base Ground Rings + Turf Chroma Occlusion (Phase 1+)
             nfid = _nearest_fid(fid)
-            if show_rings and nfid is not None and ar_tracks_by_frame:
+            frame_players = ar_tracks_by_frame.get(nfid, []) if (nfid is not None and ar_tracks_by_frame) else []
+            ball_pt = ar_ball_by_frame.get(nfid) if (ar_ball_by_frame and nfid is not None) else None
+
+            # Identify ball carrier in pitch coordinates or pixel proximity
+            carrier_p: Optional[dict[str, Any]] = None
+            best_c_dist = 9999.0
+            if ball_pt is not None and frame_players:
+                bu, bv = float(ball_pt[0]), float(ball_pt[1])
+                for p in frame_players:
+                    if str(p.get("role")) not in ("player", "goalkeeper"):
+                        continue
+                    x1, y1, x2, y2 = [float(v) for v in p["bbox"]]
+                    d_px = float(np.hypot(((x1 + x2) * 0.5) - bu, y2 - bv))
+                    if d_px < best_c_dist and d_px < max(42.0, (y2 - y1) * 1.15):
+                        best_c_dist = d_px
+                        carrier_p = p
+
+            # Burn Broadcast AR Double-Rings + Chain + Passing Lanes (Turf Occluded)
+            if show_rings and frame_players:
                 overlay = np.zeros_like(frame)
-                def_pts: list[tuple[int, int]] = []
-                for p in ar_tracks_by_frame.get(nfid, []):
+                def_pts: list[tuple[int, int, float]] = []
+                for p in frame_players:
                     role = str(p.get("role", "player"))
                     if role not in ("player", "goalkeeper"):
                         continue
                     x1, y1, x2, y2 = [float(v) for v in p["bbox"]]
                     cx, cy = int((x1 + x2) * 0.5), int(y2)
                     bh = max(20.0, y2 - y1)
-                    rx = int(max(13, min(34, bh * 0.32)))
-                    ry = max(5, int(rx * 0.31))
-                    col = (238, 211, 34) if role == "goalkeeper" else (team_a_bgr if p.get("team") == "team_a" else team_b_bgr)
-                    # Open Base 270° arc behind player's boots
-                    cv2.ellipse(overlay, (cx, cy), (rx, ry), 0, 130, 410, col, 2, cv2.LINE_AA)
+                    rx = int(max(14, min(36, bh * 0.34)))
+                    ry = max(6, int(rx * 0.32))
+                    is_carrier = carrier_p is not None and p.get("track_id") == carrier_p.get("track_id")
+                    col = (
+                        (129, 231, 16)
+                        if is_carrier
+                        else ((238, 211, 34) if role == "goalkeeper" else (team_a_bgr if p.get("team") == "team_a" else team_b_bgr))
+                    )
+                    # Outer glow ellipse + inner open 270 deg ring
+                    cv2.ellipse(overlay, (cx, cy), (rx + 4, ry + 2), 0, 0, 360, col, 1, cv2.LINE_AA)
+                    cv2.ellipse(overlay, (cx, cy), (rx, ry), 0, 125, 415, col, 3 if is_carrier else 2, cv2.LINE_AA)
                     if p.get("team") == "team_b" and role == "player":
-                        def_pts.append((cx, cy))
-                # Sequential Reveal Phase 3: connect defensive backline chain
+                        def_pts.append((cx, cy, float(p.get("x_m") or 50.0)))
+
+                # Connected Defending Backline Chain (sorted left-to-right on screen)
                 if show_chain and len(def_pts) >= 2:
                     def_pts.sort(key=lambda pt: pt[0])
-                    for a_pt, b_pt in zip(def_pts[:4], def_pts[1:4]):
-                        cv2.line(overlay, a_pt, b_pt, (129, 185, 16), 2, cv2.LINE_AA)
-                # Green-turf occlusion mask so rings stay underneath players' boots/socks
-                hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-                turf = (hsv[:, :, 0] >= 28) & (hsv[:, :, 0] <= 90) & (hsv[:, :, 1] >= 42) & (hsv[:, :, 2] >= 35)
-                has_ar = (overlay.sum(axis=2) > 0) & turf
-                frame[has_ar] = cv2.addWeighted(frame, 0.35, overlay, 0.65, 0)[has_ar]
+                    chain = def_pts[:4]
+                    for a_pt, b_pt in zip(chain, chain[1:]):
+                        cv2.line(overlay, (a_pt[0], a_pt[1]), (b_pt[0], b_pt[1]), (160, 245, 70), 2, cv2.LINE_AA)
 
-            # Sequential Reveal Phase 2: Burn Kalman Ball Comet Trail
-            if show_ball and ar_ball_by_frame and nfid is not None and nfid in ar_ball_by_frame:
-                bu, bv = ar_ball_by_frame[nfid]
+                # Passing option lanes from ball carrier to 2 nearest teammates
+                if carrier_p is not None:
+                    cx1, cy1, cx2, cy2 = [float(v) for v in carrier_p["bbox"]]
+                    c_pt = (int((cx1 + cx2) * 0.5), int(cy2))
+                    mates: list[tuple[float, tuple[int, int]]] = []
+                    for p in frame_players:
+                        if p.get("team") != carrier_p.get("team") or p.get("track_id") == carrier_p.get("track_id"):
+                            continue
+                        px1, py1, px2, py2 = [float(v) for v in p["bbox"]]
+                        pt_m = (int((px1 + px2) * 0.5), int(py2))
+                        d = float(np.hypot(pt_m[0] - c_pt[0], pt_m[1] - c_pt[1]))
+                        if 45.0 < d < w * 0.45:
+                            mates.append((d, pt_m))
+                    mates.sort(key=lambda item: item[0])
+                    for _, m_pt in mates[:2]:
+                        cv2.line(overlay, c_pt, m_pt, (250, 200, 60), 2, cv2.LINE_AA)
+
+                hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                turf = (hsv[:, :, 0] >= 26) & (hsv[:, :, 0] <= 94) & (hsv[:, :, 1] >= 36) & (hsv[:, :, 2] >= 30)
+                has_ar = (overlay.sum(axis=2) > 0) & turf
+                blended = cv2.addWeighted(frame, 0.28, overlay, 0.72, 0)
+                frame[has_ar] = blended[has_ar]
+
+            # Ball Carrier Spotlight Beam & Clean Name/Speed Tag (ASCII safe in cv2)
+            if carrier_p is not None:
+                x1, y1, x2, y2 = [float(v) for v in carrier_p["bbox"]]
+                cx = int((x1 + x2) * 0.5)
+                ty = max(24, int(y1) - 10)
+                cv2.line(frame, (cx, int(y1)), (cx, max(6, ty - 14)), (16, 220, 140), 2, cv2.LINE_AA)
+                j_num = carrier_p.get("jersey_number")
+                spd = float(carrier_p.get("speed_kmh") or 0.0)
+                raw_name = str(carrier_p.get("verified_name_en") or carrier_p.get("verified_name") or f"T{int(carrier_p['track_id']) % 100}")
+                ascii_name = raw_name.encode("ascii", errors="ignore").decode("ascii").strip() or f"T{int(carrier_p['track_id']) % 100}"
+                tag_txt = f"#{j_num} {ascii_name[:16]} {spd:.0f}km/h" if j_num else f"{ascii_name[:16]} {spd:.0f}km/h"
+                tw = min(220, max(96, len(tag_txt) * 8 + 16))
+                bx1 = max(8, min(w - tw - 8, cx - tw // 2))
+                by1 = max(8, ty - 22)
+                cv2.rectangle(frame, (bx1, by1), (bx1 + tw, by1 + 20), (12, 18, 32), -1)
+                cv2.rectangle(frame, (bx1, by1), (bx1 + tw, by1 + 20), (16, 220, 140), 1, cv2.LINE_AA)
+                cv2.putText(frame, tag_txt, (bx1 + 6, by1 + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.43, (236, 253, 245), 1, cv2.LINE_AA)
+
+            # Burn Kalman Ball Comet Trail
+            if show_ball and ball_pt is not None:
+                bu, bv = ball_pt
                 ball_trail.append((int(bu), int(bv)))
-                if len(ball_trail) > 10:
+                if len(ball_trail) > 12:
                     ball_trail.pop(0)
                 for i in range(1, len(ball_trail)):
-                    cv2.line(frame, ball_trail[i - 1], ball_trail[i], (129, 185, 16), max(1, i // 2), cv2.LINE_AA)
+                    cv2.line(frame, ball_trail[i - 1], ball_trail[i], (129, 231, 16), max(2, i // 2), cv2.LINE_AA)
                 cv2.circle(frame, ball_trail[-1], 6, (255, 255, 255), 2, cv2.LINE_AA)
 
             # Optional Youth GDPR Auto Face-Blur
@@ -187,23 +281,64 @@ def export_watermarked_clip(
                         if roi.size > 0:
                             frame[iy1:iy2, ix1:ix2] = cv2.GaussianBlur(roi, (15, 15), 0)
 
-            # Broadcast DRM Watermark Pill
+            # Bottom-Center 2D Pitch Radar Minimap
+            if frame_players:
+                _draw_radar_minimap(frame, frame_players)
+
+            # Broadcast DRM Watermark Pill (Bottom Left)
             if club_watermark:
-                cv2.rectangle(frame, (14, h - 38), (min(w - 14, 14 + len(club_watermark) * 10 + 18), h - 10), (12, 18, 32), -1)
+                cv2.rectangle(frame, (14, h - 38), (min(w // 2 - 20, 14 + len(club_watermark) * 9 + 16), h - 10), (12, 18, 32), -1)
                 cv2.putText(
                     frame,
-                    club_watermark,
+                    club_watermark[:28],
                     (22, h - 19),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.52,
+                    0.48,
                     (165, 243, 210),
                     1,
                     cv2.LINE_AA,
                 )
             writer.write(frame)
         writer.release()
+
+        # Transcode to universal browser-playable H.264 + faststart MP4
+        ffmpeg_exe = resolve_ffmpeg_binary()
+        if ffmpeg_exe:
+            subprocess.run(
+                [
+                    ffmpeg_exe,
+                    "-y",
+                    "-i",
+                    str(tmp_raw_mp4),
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "22",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-movflags",
+                    "+faststart",
+                    str(out_p),
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            try:
+                tmp_raw_mp4.unlink(missing_ok=True)
+            except OSError:
+                pass
+        else:
+            tmp_raw_mp4.replace(out_p)
     finally:
         cap.release()
+        if tmp_raw_mp4.exists() and out_p.exists():
+            try:
+                tmp_raw_mp4.unlink(missing_ok=True)
+            except OSError:
+                pass
         if proxy is not None and proxy.exists():
             try:
                 proxy.unlink()

@@ -742,3 +742,103 @@ export function drawGhostSilhouette(
 
   ctx.restore();
 }
+
+/** Draw subtle glowing pass option lanes from ball carrier to open nearby teammates. */
+export function drawPassingLanesOverlay(
+  ctx: CanvasRenderingContext2D,
+  carrier: RenderPlayer,
+  players: RenderPlayer[]
+): void {
+  const cx = (carrier.bbox[0] + carrier.bbox[2]) * 0.5;
+  const cy = carrier.bbox[3];
+  const mates = players
+    .filter((p) => p.team === carrier.team && p.track_id !== carrier.track_id && p.role === "player")
+    .map((p) => ({
+      p,
+      ux: (p.bbox[0] + p.bbox[2]) * 0.5,
+      uy: p.bbox[3],
+      dM: Math.hypot(p.x_m - carrier.x_m, p.y_m - carrier.y_m),
+    }))
+    .filter((item) => item.dM >= 4.0 && item.dM <= 32.0)
+    .sort((a, b) => a.dM - b.dM)
+    .slice(0, 2);
+
+  if (!mates.length) return;
+  ctx.save();
+  ctx.direction = "ltr";
+  for (const m of mates) {
+    ctx.strokeStyle = "rgba(250, 204, 21, 0.72)";
+    ctx.lineWidth = 2.0;
+    ctx.setLineDash([7, 5]);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(m.ux, m.uy);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+/** Draw compact 2D FIFA Tactical Radar Minimap anchored bottom-center of broadcast canvas. */
+export function drawBroadcastRadarMinimap(
+  ctx: CanvasRenderingContext2D,
+  players: RenderPlayer[],
+  ballXY: [number, number] | null,
+  vw: number,
+  vh: number,
+  teamAHex: string,
+  teamBHex: string
+): void {
+  if (!players.length) return;
+  const mw = Math.min(184, Math.max(132, Math.round(vw * 0.17)));
+  const mh = Math.round(mw * 0.64);
+  const mx = Math.round((vw - mw) * 0.5);
+  const my = vh - mh - 12;
+
+  ctx.save();
+  ctx.direction = "ltr";
+  ctx.fillStyle = "rgba(9, 20, 16, 0.80)";
+  ctx.strokeStyle = "rgba(110, 231, 183, 0.48)";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.roundRect(mx, my, mw, mh, 7);
+  ctx.fill();
+  ctx.stroke();
+
+  // Pitch markings
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.22)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(mx + mw * 0.5, my + 3);
+  ctx.lineTo(mx + mw * 0.5, my + mh - 3);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(mx + mw * 0.5, my + mh * 0.5, Math.max(8, mh * 0.16), 0, Math.PI * 2);
+  ctx.stroke();
+
+  for (const p of players) {
+    const px = mx + 5 + Math.max(0, Math.min(1, p.x_m / 105)) * (mw - 10);
+    const py = my + 5 + Math.max(0, Math.min(1, p.y_m / 68)) * (mh - 10);
+    ctx.fillStyle =
+      p.role === "goalkeeper" ? "#22D3EE" : p.team === "team_a" ? teamAHex : teamBHex;
+    ctx.beginPath();
+    ctx.arc(px, py, 3.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#FFFFFF";
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+  }
+
+  if (ballXY) {
+    const bx = mx + 5 + Math.max(0, Math.min(1, ballXY[0] / 105)) * (mw - 10);
+    const by = my + 5 + Math.max(0, Math.min(1, ballXY[1] / 68)) * (mh - 10);
+    ctx.fillStyle = "#FFFFFF";
+    ctx.beginPath();
+    ctx.arc(bx, by, 4.0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#10B981";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+  ctx.restore();
+}

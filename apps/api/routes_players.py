@@ -225,6 +225,51 @@ def api_fetch_all_verified_photos(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.get("/api/matches/{match_id}/players/{track_id}/identity-candidates")
+def api_get_identity_candidates(
+    match_id: str,
+    track_id: int,
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    ctx.require("read:matches")
+    from apps.api.main import service
+
+    try:
+        return service.get_identity_candidates(ctx.tenant_id, match_id, track_id)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/api/matches/{match_id}/players/{track_id}/identity")
+def api_assign_track_identity(
+    match_id: str,
+    track_id: int,
+    payload: dict[str, Any],
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    _require_photo_write(ctx)
+    from apps.api.main import service
+
+    team = str(payload.get("team") or "").strip()
+    if team not in ("team_a", "team_b"):
+        raise HTTPException(status_code=400, detail="team must be 'team_a' or 'team_b'")
+    raw_j = payload.get("jersey_number")
+    jersey_number: int | None
+    if raw_j is None:
+        jersey_number = None
+    else:
+        try:
+            jersey_number = int(raw_j)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="jersey_number must be integer 1..99 or null")
+        if jersey_number < 1 or jersey_number > 99:
+            raise HTTPException(status_code=400, detail="jersey_number must be between 1 and 99")
+    try:
+        return service.assign_track_identity(ctx.tenant_id, match_id, track_id, team, jersey_number)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.post("/api/plans/pass-probabilities")
 def api_compute_pass_probabilities(
     payload: dict[str, Any],

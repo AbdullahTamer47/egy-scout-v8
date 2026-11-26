@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import html as html_lib
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
@@ -446,6 +446,47 @@ def api_serve_hls_file(match_id: str, filename: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="HLS asset not found")
     media = "application/vnd.apple.mpegurl" if filename.endswith(".m3u8") else "video/MP2T"
     return FileResponse(str(fpath), media_type=media)
+
+
+@router.post("/api/matches/{match_id}/render-ar-video")
+def api_render_ar_video(
+    match_id: str,
+    payload: Optional[dict[str, Any]] = None,
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    """Render full H.264 broadcast AR video online (with optional remote cloud worker offload)."""
+    ctx.require("read:matches")
+    from apps.api.main import service
+
+    body = payload or {}
+    force = bool(body.get("force", False))
+    cloud_url = str(body.get("cloud_worker_url") or "").strip() or None
+    try:
+        return service.render_match_ar_video(
+            ctx.tenant_id,
+            match_id,
+            force=force,
+            cloud_worker_url=cloud_url,
+        )
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/api/matches/{match_id}/rendered-ar-video")
+def api_serve_rendered_ar_video(match_id: str) -> FileResponse:
+    """Serve H.264 AR-rendered broadcast MP4 with byte-range streaming support."""
+    from apps.api.main import service
+
+    try:
+        fpath = service.get_rendered_ar_video_path(match_id)
+        return FileResponse(
+            str(fpath),
+            media_type="video/mp4",
+            filename=f"{match_id}_ar_broadcast.mp4",
+            headers={"Cache-Control": "no-cache"},
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.post("/api/matches/{match_id}/auto-assign-qa")

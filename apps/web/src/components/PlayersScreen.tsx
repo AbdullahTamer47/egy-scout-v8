@@ -46,6 +46,15 @@ interface Props {
   onPinCardToStudio?: (card: PlayerCardSummary) => void;
 }
 
+interface IdentityCandidate {
+  jersey_number: number;
+  name_ar: string;
+  name_en: string;
+  position: string;
+  compat: number;
+  already_assigned: boolean;
+}
+
 interface PlayersListResponse {
   match_id: string;
   team_a_name: string;
@@ -54,6 +63,7 @@ interface PlayersListResponse {
   team_b_name_ar: string;
   players: PlayerCardSummary[];
   count: number;
+  short_tracks_count?: number;
 }
 
 export default function PlayersScreen({
@@ -89,6 +99,9 @@ export default function PlayersScreen({
 
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [candidates, setCandidates] = useState<IdentityCandidate[]>([]);
+  const [loadingCandidates, setLoadingCandidates] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const batchFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -123,6 +136,8 @@ export default function PlayersScreen({
   const openCardModal = useCallback(
     async (summary: PlayerCardSummary) => {
       setPortraitMode("auto");
+      setAssignOpen(false);
+      setCandidates([]);
       setSelectedCard({ ...summary, heatmap: null });
       setCompareOpen(false);
       setCompareTid(null);
@@ -318,6 +333,87 @@ export default function PlayersScreen({
     }
   };
 
+  const handleBatchFetchOfficialPhotos = async () => {
+    setBusyAction("batch_fetch");
+    setToastMsg(null);
+    try {
+      const res = await apiFetch<{ fetched_count: number; card_count?: number }>(
+        `/api/matches/${encodeURIComponent(matchId)}/players/fetch-verified-photos`,
+        { method: "POST" },
+        "club_demo_egypt",
+        role
+      );
+      setPhotoVersion(Date.now());
+      await loadPlayers();
+      setToastMsg(
+        isAr
+          ? `تم جلب صور اللاعبين الحقيقية (${res.fetched_count} لاعب).`
+          : `Fetched official player portraits (${res.fetched_count} players).`
+      );
+    } catch (err) {
+      setToastMsg(String(err));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleOpenAssign = async () => {
+    if (!selectedCard) return;
+    if (assignOpen) {
+      setAssignOpen(false);
+      return;
+    }
+    setAssignOpen(true);
+    setLoadingCandidates(true);
+    try {
+      const res = await apiFetch<{ candidates: IdentityCandidate[] }>(
+        `/api/matches/${encodeURIComponent(matchId)}/players/${selectedCard.track_id}/identity-candidates`,
+        {},
+        "club_demo_egypt",
+        role
+      );
+      setCandidates(res.candidates || []);
+    } catch (err) {
+      setToastMsg(String(err));
+    } finally {
+      setLoadingCandidates(false);
+    }
+  };
+
+  const handleAssignIdentity = async (jerseyNumber: number | null) => {
+    if (!selectedCard) return;
+    setBusyAction("assign");
+    setToastMsg(null);
+    try {
+      const res = await apiFetch<{ card: PlayerCardPayload }>(
+        `/api/matches/${encodeURIComponent(matchId)}/players/${selectedCard.track_id}/identity`,
+        {
+          method: "POST",
+          body: JSON.stringify({ team: selectedCard.team, jersey_number: jerseyNumber }),
+        },
+        "club_demo_egypt",
+        role
+      );
+      setPhotoVersion(Date.now());
+      setSelectedCard(res.card);
+      setAssignOpen(false);
+      await loadPlayers();
+      setToastMsg(
+        jerseyNumber === null
+          ? isAr
+            ? "تم إلغاء تحديد اللاعب."
+            : "Cleared player assignment."
+          : isAr
+          ? `تم تحديد هوية اللاعب (#${jerseyNumber} ${res.card.display_label}) بنجاح.`
+          : `Assigned player (#${jerseyNumber} ${res.card.display_label_en || res.card.display_label}).`
+      );
+    } catch (err) {
+      setToastMsg(String(err));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const handleOpenRosters = async () => {
     setRostersOpen(true);
     if (!rostersData) {
@@ -503,6 +599,23 @@ export default function PlayersScreen({
                   />
                   <button
                     type="button"
+                    disabled={busyAction !== null}
+                    onClick={handleBatchFetchOfficialPhotos}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/40 text-amber-200 font-bold transition disabled:opacity-50"
+                  >
+                    <ImagePlus className="w-3.5 h-3.5" />
+                    <span>
+                      {busyAction === "batch_fetch"
+                        ? isAr
+                          ? "جاري جلب الصور..."
+                          : "Fetching..."
+                        : isAr
+                        ? "جلب صور اللاعبين الحقيقية"
+                        : "Fetch Real Portraits"}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleOpenRosters}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/35 text-sky-200 font-bold transition"
                   >
@@ -593,6 +706,14 @@ export default function PlayersScreen({
               ))}
             </div>
           )}
+
+          {(data?.short_tracks_count ?? 0) > 0 && (
+            <div className="text-center text-[11px] text-slate-400 py-1">
+              {isAr
+                ? `تم إخفاء ${data?.short_tracks_count} لقطات قصيرة (< 3 ث) غير كافية للتحليل`
+                : `${data?.short_tracks_count} short tracks (<3s) hidden`}
+            </div>
+          )}
         </>
       )}
 
@@ -638,6 +759,30 @@ export default function PlayersScreen({
               />
               {!isReadOnly && (
                 <>
+                  <button
+                    type="button"
+                    disabled={busyAction !== null}
+                    onClick={handleOpenAssign}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-bold disabled:opacity-50 ${
+                      assignOpen
+                        ? "bg-amber-400 text-slate-950 border-amber-300"
+                        : "bg-amber-500/20 hover:bg-amber-500/30 border-amber-400/45 text-amber-200"
+                    }`}
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>{isAr ? "تحديد هوية اللاعب" : "Assign Player"}</span>
+                  </button>
+                  {selectedCard.identity_source === "qa_verified" && (
+                    <button
+                      type="button"
+                      disabled={busyAction !== null}
+                      onClick={() => handleAssignIdentity(null)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-400/35 text-rose-200 font-bold disabled:opacity-50"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      <span>{isAr ? "إلغاء التحديد" : "Clear ID"}</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={busyAction !== null}
@@ -768,6 +913,61 @@ export default function PlayersScreen({
                 </button>
               )}
             </div>
+
+            {assignOpen && (
+              <div className="p-3 rounded-xl bg-[#090D16] border border-amber-400/35 space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-amber-200">
+                  <span>
+                    {isAr
+                      ? "اختر اللاعب المطابق من قائمة الفريق:"
+                      : "Pick matching squad player:"}
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    {isAr ? "اقتراحات مرتبة حسب المركز (ليست تخميناً تلقائياً)" : "Position-ranked suggestions"}
+                  </span>
+                </div>
+                {loadingCandidates ? (
+                  <div className="text-xs text-slate-400 py-2">
+                    {isAr ? "جاري تحميل القائمة..." : "Loading candidates..."}
+                  </div>
+                ) : candidates.length === 0 ? (
+                  <div className="text-xs text-slate-400 py-2">
+                    {isAr ? "لا توجد قائمة معتمدة لهذا الفريق — قم بتوريد القائمة أولاً." : "No squad roster loaded for this team."}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-56 overflow-y-auto">
+                    {candidates.map((c, idx) => (
+                      <button
+                        key={`${c.jersey_number}-${c.name_en}`}
+                        type="button"
+                        disabled={c.already_assigned || busyAction !== null}
+                        onClick={() => handleAssignIdentity(c.jersey_number)}
+                        className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[#111827] hover:bg-emerald-500/20 border border-white/[0.1] hover:border-emerald-400/50 text-start text-xs disabled:opacity-40 disabled:cursor-not-allowed transition"
+                      >
+                        <div className="min-w-0 flex items-center gap-2">
+                          <span dir="ltr" className="px-1.5 py-0.5 rounded bg-white/10 font-black text-amber-300 tabular-nums shrink-0">
+                            #{c.jersey_number}
+                          </span>
+                          <span className="font-bold text-white truncate">
+                            {isAr ? c.name_ar : c.name_en}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {idx < 3 && c.compat >= 60 && !c.already_assigned && (
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
+                              {isAr ? "مقترح" : "Suggested"}
+                            </span>
+                          )}
+                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-bold">
+                            {c.position}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {toastMsg && (
               <div className="px-3 py-2 rounded-lg bg-[#090D16] border border-emerald-500/35 text-xs text-emerald-300">

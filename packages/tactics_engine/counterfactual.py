@@ -134,12 +134,12 @@ def compute_shot_xg(
                 blockers += 1
             cone_occlusion += 0.55 * float(np.exp(-((perp / 2.2) ** 2)))
 
-    # Calibrated continuous logistic xG (uses effective attack distance so midfield simulations
-    # also reflect real chance-creation threat sensitivity to defender positioning)
-    eff_dist = min(dist, 24.0)
-    eff_angle = max(angle_rad, 0.22)
-    logit = 0.25 - 0.085 * eff_dist + 2.4 * eff_angle - 0.55 * cone_occlusion - pressure_penalty
-    xg = float(np.clip(1.0 / (1.0 + np.exp(-logit)), 0.02, 0.92))
+    # Calibrated continuous open-play Shot xG (honest physical decay past 36m — zero fake 21% xG at 84m!)
+    if dist > 36.0:
+        xg = float(0.004 * np.exp(-(dist - 36.0) / 15.0))
+    else:
+        logit = -1.10 - 0.135 * dist + 3.65 * angle_rad - 0.65 * cone_occlusion - pressure_penalty
+        xg = float(np.clip(1.0 / (1.0 + np.exp(-logit)), 0.005, 0.92))
     return {
         "xg": round(xg, 3),
         "goal_x": round(target_goal_x, 1),

@@ -917,12 +917,14 @@ export interface PlayerCardSummary {
   jersey_number: number | null;
   verified_name: string | null;
   verified: boolean;
-  identity_source?: "qa_verified" | "ocr_verified" | "gk_role_match" | "roster_spatial" | "unverified";
+  identity_source?: "qa_verified" | "ocr_verified" | "gk_role_match" | "squad_spatial_match" | "roster_spatial" | "unverified";
   display_label: string;
   display_label_en?: string;
+  club_id?: string;
+  nationality_code?: string | null;
   position_label: { code: string; ar: string; en: string };
   photo_url: string;
-  photo_source: "upload" | "video";
+  photo_source: "upload" | "club_portrait" | "video";
   crop_is_low_res?: boolean;
   peak_frame_id?: number;
   first_frame: number;
