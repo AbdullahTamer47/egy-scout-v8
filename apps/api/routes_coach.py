@@ -24,9 +24,11 @@ from packages.coach_engine.director_admin import (
 )
 from packages.coach_engine.live_data_hub import (
     EGYPTIAN_CLUB_PRESETS,
+    SQUAD_CACHE_TTL_SECONDS,
     SUPPORTED_LEAGUES,
     fetch_live_league_hub,
     load_all_coach_clubs,
+    sync_365scores_club_squad,
     sync_espn_team_roster,
     sync_wikipedia_club_squad,
 )
@@ -121,6 +123,7 @@ def api_coach_clubs(
                 "league_id": c.get("league_id") or "egy.1",
                 "season": c.get("season") or "2026/2027",
                 "source": c.get("source") or "",
+                "head_coach_ar": c.get("head_coach_ar") or "",
                 "player_count": len(c.get("players") or []),
                 "live_rank": st.get("rank") if st else None,
                 "live_points": st.get("points") if st else None,
@@ -167,23 +170,37 @@ def api_coach_overview(
     club_raw = clubs_map.get(active_cid) or next(iter(clubs_map.values()))
     opp_raw = clubs_map.get(active_oid) or next((v for k, v in clubs_map.items() if k != club_raw["club_id"]), club_raw)
 
-    # Auto-hydrate on demand if a club has 0 cached players and has a Wikipedia preset
-    if not club_raw.get("players") and active_cid in EGYPTIAN_CLUB_PRESETS:
+    def _maybe_refresh_club(c_id: str, raw: dict[str, Any]) -> dict[str, Any]:
+        preset = EGYPTIAN_CLUB_PRESETS.get(c_id)
+        if not preset or not preset.get("ts_365_id"):
+            return raw
+        synced_ts = float(raw.get("synced_ts") or 0.0)
+        needs_sync = (
+            not raw.get("players")
+            or "365Scores" not in str(raw.get("source") or "")
+            or (time.time() - synced_ts) > SQUAD_CACHE_TTL_SECONDS
+        )
+        if not needs_sync:
+            return raw
         try:
-            preset = EGYPTIAN_CLUB_PRESETS[active_cid]
-            club_raw = sync_wikipedia_club_squad(
-                preset["wiki_page"],
-                active_cid,
+            fresh = sync_365scores_club_squad(
+                comp_id=int(preset["ts_365_id"]),
+                club_id=c_id,
                 name_ar=preset["name_ar"],
                 name_en=preset["name_en"],
                 kit_hex=preset["kit_hex"],
-                ar_wiki_page=preset.get("ar_wiki_page"),
                 stadium_ar=preset.get("stadium_ar", ""),
                 city_ar=preset.get("city_ar", ""),
             )
-            store.save_club_roster(ctx.tenant_id, active_cid, club_raw)
+            store.save_club_roster(ctx.tenant_id, c_id, fresh)
+            return fresh
         except Exception:
-            pass
+            return raw
+
+    import time
+
+    club_raw = _maybe_refresh_club(club_raw["club_id"], club_raw)
+    opp_raw = _maybe_refresh_club(opp_raw["club_id"], opp_raw)
 
     club_enriched = _enrich_club_with_admin(store, ctx.tenant_id, club_raw)
     opp_enriched = _enrich_club_with_admin(store, ctx.tenant_id, opp_raw)
@@ -287,6 +304,7 @@ def api_coach_tactics_blueprint(
     from packages.tactics_engine.moment_analyzer import match_masterclass_preset
 
     preset = match_masterclass_preset(preset_kw) if preset_kw else None
+    team_size = int(payload.get("team_size") or 11)
     return build_three_phase_tactical_package(
         club=club_enriched,
         opponent=opp_enriched,
@@ -297,6 +315,7 @@ def api_coach_tactics_blueprint(
         tactical_mode=tactical_mode,
         opponent_tactical_mode=opp_mode,
         masterclass_preset=preset,
+        team_size=team_size,
     )
 
 
@@ -370,19 +389,31 @@ def api_coach_sync_club(
         else:
             cid = str(payload.get("club_id") or "al_ahly")
             preset = EGYPTIAN_CLUB_PRESETS.get(cid, {})
-            wiki_page = str(payload.get("wiki_page") or preset.get("wiki_page") or "")
-            if not wiki_page:
-                raise ValueError("wiki_page is required for Wikipedia sync")
-            synced = sync_wikipedia_club_squad(
-                wiki_page=wiki_page,
-                club_id=cid,
-                name_ar=payload.get("name_ar") or preset.get("name_ar"),
-                name_en=payload.get("name_en") or preset.get("name_en"),
-                kit_hex=str(payload.get("kit_hex") or preset.get("kit_hex") or "#10B981"),
-                ar_wiki_page=preset.get("ar_wiki_page"),
-                stadium_ar=preset.get("stadium_ar", ""),
-                city_ar=preset.get("city_ar", ""),
-            )
+            ts_id = payload.get("ts_365_id") or preset.get("ts_365_id")
+            if ts_id:
+                synced = sync_365scores_club_squad(
+                    comp_id=int(ts_id),
+                    club_id=cid,
+                    name_ar=payload.get("name_ar") or preset.get("name_ar"),
+                    name_en=payload.get("name_en") or preset.get("name_en"),
+                    kit_hex=str(payload.get("kit_hex") or preset.get("kit_hex") or "#0FB5AE"),
+                    stadium_ar=preset.get("stadium_ar", ""),
+                    city_ar=preset.get("city_ar", ""),
+                )
+            else:
+                wiki_page = str(payload.get("wiki_page") or preset.get("wiki_page") or "")
+                if not wiki_page:
+                    raise ValueError("ts_365_id or wiki_page is required for sync")
+                synced = sync_wikipedia_club_squad(
+                    wiki_page=wiki_page,
+                    club_id=cid,
+                    name_ar=payload.get("name_ar") or preset.get("name_ar"),
+                    name_en=payload.get("name_en") or preset.get("name_en"),
+                    kit_hex=str(payload.get("kit_hex") or preset.get("kit_hex") or "#10B981"),
+                    ar_wiki_page=preset.get("ar_wiki_page"),
+                    stadium_ar=preset.get("stadium_ar", ""),
+                    city_ar=preset.get("city_ar", ""),
+                )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Live club sync failed: {exc}")
 

@@ -9,6 +9,7 @@ from typing import Any, Optional
 import httpx
 
 from packages.coach_engine.director_admin import (
+    _assign_roster_by_position,
     build_official_matchday_sheet,
     build_squad_depth_report,
 )
@@ -19,6 +20,195 @@ from packages.tactics_engine.moment_analyzer import (
     match_masterclass_preset,
 )
 from packages.tactics_engine.plan_validator import validate_tactical_plan
+
+
+SMALL_SIDED_FORMATIONS: dict[int, dict[str, list[dict[str, Any]]]] = {
+    5: {
+        "1-2-1": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.07, "y_norm": 0.50},
+            {"slot": "CB", "role_ar": "ليبرو / مدافع خماسي (Fixo)", "x_norm": 0.25, "y_norm": 0.50},
+            {"slot": "RW", "role_ar": "جناح أيمن (Ala)", "x_norm": 0.52, "y_norm": 0.80},
+            {"slot": "LW", "role_ar": "جناح أيسر (Ala)", "x_norm": 0.52, "y_norm": 0.20},
+            {"slot": "ST", "role_ar": "رأس حربة / بيفوت (Pivot)", "x_norm": 0.78, "y_norm": 0.50},
+        ],
+        "2-2": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.07, "y_norm": 0.50},
+            {"slot": "RB", "role_ar": "مدافع أيمن", "x_norm": 0.28, "y_norm": 0.72},
+            {"slot": "LB", "role_ar": "مدافع أيسر", "x_norm": 0.28, "y_norm": 0.28},
+            {"slot": "RW", "role_ar": "مهاجم أيمن", "x_norm": 0.70, "y_norm": 0.72},
+            {"slot": "LW", "role_ar": "مهاجم أيسر", "x_norm": 0.70, "y_norm": 0.28},
+        ],
+        "1-1-2": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.07, "y_norm": 0.50},
+            {"slot": "CB", "role_ar": "قلب دفاع", "x_norm": 0.25, "y_norm": 0.50},
+            {"slot": "CM", "role_ar": "صانع لعب محوري", "x_norm": 0.50, "y_norm": 0.50},
+            {"slot": "RW", "role_ar": "مهاجم أيمن", "x_norm": 0.74, "y_norm": 0.74},
+            {"slot": "LW", "role_ar": "مهاجم أيسر", "x_norm": 0.74, "y_norm": 0.26},
+        ],
+    },
+    6: {
+        "2-2-1": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.07, "y_norm": 0.50},
+            {"slot": "RCB", "role_ar": "مدافع أيمن", "x_norm": 0.25, "y_norm": 0.68},
+            {"slot": "LCB", "role_ar": "مدافع أيسر", "x_norm": 0.25, "y_norm": 0.32},
+            {"slot": "RW", "role_ar": "وسط/جناح أيمن", "x_norm": 0.53, "y_norm": 0.78},
+            {"slot": "LW", "role_ar": "وسط/جناح أيسر", "x_norm": 0.53, "y_norm": 0.22},
+            {"slot": "ST", "role_ar": "مهاجم صريح", "x_norm": 0.79, "y_norm": 0.50},
+        ],
+        "2-1-2": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.07, "y_norm": 0.50},
+            {"slot": "RCB", "role_ar": "مدافع أيمن", "x_norm": 0.25, "y_norm": 0.68},
+            {"slot": "LCB", "role_ar": "مدافع أيسر", "x_norm": 0.25, "y_norm": 0.32},
+            {"slot": "CM", "role_ar": "ارتكاز وسط", "x_norm": 0.49, "y_norm": 0.50},
+            {"slot": "RW", "role_ar": "مهاجم أيمن", "x_norm": 0.76, "y_norm": 0.68},
+            {"slot": "LW", "role_ar": "مهاجم أيسر", "x_norm": 0.76, "y_norm": 0.32},
+        ],
+    },
+    7: {
+        "2-3-1": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.07, "y_norm": 0.50},
+            {"slot": "RCB", "role_ar": "قلب دفاع أيمن", "x_norm": 0.25, "y_norm": 0.67},
+            {"slot": "LCB", "role_ar": "قلب دفاع أيسر", "x_norm": 0.25, "y_norm": 0.33},
+            {"slot": "RW", "role_ar": "جناح أيمن", "x_norm": 0.54, "y_norm": 0.82},
+            {"slot": "CM", "role_ar": "محور وسط", "x_norm": 0.49, "y_norm": 0.50},
+            {"slot": "LW", "role_ar": "جناح أيسر", "x_norm": 0.54, "y_norm": 0.18},
+            {"slot": "ST", "role_ar": "رأس حربة", "x_norm": 0.80, "y_norm": 0.50},
+        ],
+        "3-2-1": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.07, "y_norm": 0.50},
+            {"slot": "RB", "role_ar": "ظهير أيمن", "x_norm": 0.27, "y_norm": 0.78},
+            {"slot": "CB", "role_ar": "قلب دفاع", "x_norm": 0.22, "y_norm": 0.50},
+            {"slot": "LB", "role_ar": "ظهير أيسر", "x_norm": 0.27, "y_norm": 0.22},
+            {"slot": "RCM", "role_ar": "وسط أيمن", "x_norm": 0.54, "y_norm": 0.66},
+            {"slot": "LCM", "role_ar": "وسط أيسر", "x_norm": 0.54, "y_norm": 0.34},
+            {"slot": "ST", "role_ar": "مهاجم صريح", "x_norm": 0.80, "y_norm": 0.50},
+        ],
+    },
+    8: {
+        "3-3-1": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.06, "y_norm": 0.50},
+            {"slot": "RB", "role_ar": "ظهير أيمن", "x_norm": 0.26, "y_norm": 0.80},
+            {"slot": "CB", "role_ar": "قلب دفاع", "x_norm": 0.22, "y_norm": 0.50},
+            {"slot": "LB", "role_ar": "ظهير أيسر", "x_norm": 0.26, "y_norm": 0.20},
+            {"slot": "RW", "role_ar": "جناح أيمن", "x_norm": 0.54, "y_norm": 0.82},
+            {"slot": "CM", "role_ar": "ارتكاز وسط", "x_norm": 0.48, "y_norm": 0.50},
+            {"slot": "LW", "role_ar": "جناح أيسر", "x_norm": 0.54, "y_norm": 0.18},
+            {"slot": "ST", "role_ar": "رأس حربة", "x_norm": 0.80, "y_norm": 0.50},
+        ],
+        "2-3-2": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.06, "y_norm": 0.50},
+            {"slot": "RCB", "role_ar": "قلب دفاع أيمن", "x_norm": 0.24, "y_norm": 0.67},
+            {"slot": "LCB", "role_ar": "قلب دفاع أيسر", "x_norm": 0.24, "y_norm": 0.33},
+            {"slot": "RCM", "role_ar": "وسط أيمن", "x_norm": 0.50, "y_norm": 0.78},
+            {"slot": "DM", "role_ar": "ارتكاز محوري", "x_norm": 0.45, "y_norm": 0.50},
+            {"slot": "LCM", "role_ar": "وسط أيسر", "x_norm": 0.50, "y_norm": 0.22},
+            {"slot": "RST", "role_ar": "مهاجم أيمن", "x_norm": 0.78, "y_norm": 0.64},
+            {"slot": "LST", "role_ar": "مهاجم أيسر", "x_norm": 0.78, "y_norm": 0.36},
+        ],
+    },
+    9: {
+        "3-3-2": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.06, "y_norm": 0.50},
+            {"slot": "RB", "role_ar": "ظهير أيمن", "x_norm": 0.26, "y_norm": 0.80},
+            {"slot": "CB", "role_ar": "قلب دفاع", "x_norm": 0.22, "y_norm": 0.50},
+            {"slot": "LB", "role_ar": "ظهير أيسر", "x_norm": 0.26, "y_norm": 0.20},
+            {"slot": "RM", "role_ar": "وسط أيمن", "x_norm": 0.50, "y_norm": 0.78},
+            {"slot": "DM", "role_ar": "ارتكاز", "x_norm": 0.44, "y_norm": 0.50},
+            {"slot": "LM", "role_ar": "وسط أيسر", "x_norm": 0.50, "y_norm": 0.22},
+            {"slot": "RST", "role_ar": "مهاجم أيمن", "x_norm": 0.78, "y_norm": 0.64},
+            {"slot": "LST", "role_ar": "مهاجم أيسر", "x_norm": 0.78, "y_norm": 0.36},
+        ],
+        "3-2-3": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.06, "y_norm": 0.50},
+            {"slot": "RB", "role_ar": "ظهير أيمن", "x_norm": 0.26, "y_norm": 0.78},
+            {"slot": "CB", "role_ar": "قلب دفاع", "x_norm": 0.22, "y_norm": 0.50},
+            {"slot": "LB", "role_ar": "ظهير أيسر", "x_norm": 0.26, "y_norm": 0.22},
+            {"slot": "RDM", "role_ar": "محور أيمن", "x_norm": 0.46, "y_norm": 0.64},
+            {"slot": "LDM", "role_ar": "محور أيسر", "x_norm": 0.46, "y_norm": 0.36},
+            {"slot": "RW", "role_ar": "جناح أيمن", "x_norm": 0.74, "y_norm": 0.80},
+            {"slot": "ST", "role_ar": "رأس حربة", "x_norm": 0.81, "y_norm": 0.50},
+            {"slot": "LW", "role_ar": "جناح أيسر", "x_norm": 0.74, "y_norm": 0.20},
+        ],
+    },
+    10: {
+        "3-4-2": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.06, "y_norm": 0.50},
+            {"slot": "RCB", "role_ar": "مدافع أيمن", "x_norm": 0.23, "y_norm": 0.74},
+            {"slot": "CB", "role_ar": "مدافع أوسط", "x_norm": 0.20, "y_norm": 0.50},
+            {"slot": "LCB", "role_ar": "مدافع أيسر", "x_norm": 0.23, "y_norm": 0.26},
+            {"slot": "RWB", "role_ar": "جناح وسط أيمن", "x_norm": 0.49, "y_norm": 0.85},
+            {"slot": "RDM", "role_ar": "ارتكاز أيمن", "x_norm": 0.44, "y_norm": 0.61},
+            {"slot": "LDM", "role_ar": "ارتكاز أيسر", "x_norm": 0.44, "y_norm": 0.39},
+            {"slot": "LWB", "role_ar": "جناح وسط أيسر", "x_norm": 0.49, "y_norm": 0.15},
+            {"slot": "RST", "role_ar": "مهاجم أيمن", "x_norm": 0.77, "y_norm": 0.63},
+            {"slot": "LST", "role_ar": "مهاجم أيسر", "x_norm": 0.77, "y_norm": 0.37},
+        ],
+        "4-3-2": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.06, "y_norm": 0.50},
+            {"slot": "RB", "role_ar": "ظهير أيمن", "x_norm": 0.26, "y_norm": 0.84},
+            {"slot": "RCB", "role_ar": "قلب دفاع أيمن", "x_norm": 0.22, "y_norm": 0.62},
+            {"slot": "LCB", "role_ar": "قلب دفاع أيسر", "x_norm": 0.22, "y_norm": 0.38},
+            {"slot": "LB", "role_ar": "ظهير أيسر", "x_norm": 0.26, "y_norm": 0.16},
+            {"slot": "RCM", "role_ar": "وسط أيمن", "x_norm": 0.52, "y_norm": 0.72},
+            {"slot": "DM", "role_ar": "ارتكاز", "x_norm": 0.45, "y_norm": 0.50},
+            {"slot": "LCM", "role_ar": "وسط أيسر", "x_norm": 0.52, "y_norm": 0.28},
+            {"slot": "CAM", "role_ar": "صانع ألعاب", "x_norm": 0.70, "y_norm": 0.38},
+            {"slot": "ST", "role_ar": "رأس حربة", "x_norm": 0.81, "y_norm": 0.60},
+        ],
+    },
+}
+
+
+def _build_small_sided_team(
+    team_size: int,
+    formation_code: str,
+    roster: list[dict[str, Any]],
+    attack_right: bool,
+    team_key: str,
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    catalog = SMALL_SIDED_FORMATIONS.get(team_size, SMALL_SIDED_FORMATIONS[7])
+    resolved_code = formation_code if formation_code in catalog else next(iter(catalog.keys()))
+    spec_nodes = catalog[resolved_code]
+    matched = _assign_roster_by_position([str(n["slot"]) for n in spec_nodes], roster)
+
+    nodes_out: list[dict[str, Any]] = []
+    for idx, nd in enumerate(spec_nodes):
+        xn = float(nd["x_norm"]) if attack_right else (1.0 - float(nd["x_norm"]))
+        yn = float(nd["y_norm"]) if attack_right else (1.0 - float(nd["y_norm"]))
+        xm = round(xn * 105.0, 2)
+        ym = round(yn * 68.0, 2)
+        pl = matched[idx] if idx < len(matched) else None
+        lbl = (pl.get("name_ar") or pl.get("name_en") or nd["slot"]) if pl else nd["slot"]
+        nodes_out.append(
+            {
+                "team": team_key,
+                "slot": nd["slot"],
+                "role_ar": nd["role_ar"],
+                "player_label": str(lbl),
+                "jersey_number": int(pl.get("jersey_number") or (idx + 1)) if pl else (idx + 1),
+                "x_m": xm,
+                "y_m": ym,
+            }
+        )
+
+    arrows_out: list[dict[str, Any]] = []
+    by_x = sorted(nodes_out, key=lambda n: n["x_m"] if attack_right else -n["x_m"])
+    for k in range(max(0, len(by_x) - 2)):
+        n1, n2 = by_x[k], by_x[k + 1]
+        arrows_out.append(
+            {
+                "team": team_key,
+                "from_slot": n1["slot"],
+                "to_slot": n2["slot"],
+                "from_x_m": n1["x_m"],
+                "from_y_m": n1["y_m"],
+                "to_x_m": n2["x_m"],
+                "to_y_m": n2["y_m"],
+                "label_ar": "ربط الخطوط" if k == 0 else "تدرج وتمرير",
+                "kind": "pass",
+            }
+        )
+    return resolved_code, nodes_out, arrows_out
 
 
 def _resolve_groq_key() -> str:
@@ -75,35 +265,57 @@ def build_three_phase_tactical_package(
     tactical_mode: str = "tiki_taka",
     opponent_tactical_mode: str = "balanced",
     masterclass_preset: Optional[dict[str, Any]] = None,
+    team_size: int = 11,
 ) -> dict[str, Any]:
-    """Build 3 distinct, editable tactical phase states (Possession / Attack / Defense) for both clubs."""
+    """Build 3 distinct, editable tactical phase states (Possession / Attack / Defense) for 5v5..11v11."""
+    clamped_size = max(5, min(11, int(team_size or 11)))
     team_name = str(club.get("name_ar") or club.get("name_en") or "فريقك")
     opp_name = str(opponent.get("name_ar") or opponent.get("name_en") or "الخصم")
-    base_form = masterclass_preset["formation_code"] if masterclass_preset else formation_code
-    opp_form = masterclass_preset.get("opponent_formation_code", opponent_formation_code) if masterclass_preset else opponent_formation_code
 
-    bp_pos = build_formation_blueprint(
-        formation_code=base_form,
-        team_name=team_name,
-        opponent_name=opp_name,
-        attack_right=True,
-        roster_players=fit_players,
-        tactical_mode=masterclass_preset.get("style", tactical_mode) if masterclass_preset else (tactical_mode or "tiki_taka"),
-        opponent_formation_code=opp_form,
-        opponent_roster_players=opp_players,
-        opponent_tactical_mode=opponent_tactical_mode or "balanced",
-    )
-    if masterclass_preset:
-        bp_pos["title_ar"] = f"{team_name}: {masterclass_preset['title_ar']}"
-        bp_pos["philosophy_ar"] = masterclass_preset["philosophy_ar"]
-        m_arrows = enrich_arrows_with_probabilities(
-            masterclass_preset.get("passes", []),
-            bp_pos["nodes"],
-            bp_pos.get("opponent_nodes", []),
+    if clamped_size < 11:
+        base_form, s_nodes_a, s_arr_a = _build_small_sided_team(clamped_size, formation_code, fit_players, True, "team_a")
+        opp_form, s_nodes_b, s_arr_b = _build_small_sided_team(clamped_size, opponent_formation_code, opp_players, False, "team_b")
+        bp_pos: dict[str, Any] = {
+            "formation_code": base_form,
+            "opponent_formation_code": opp_form,
+            "team_size": clamped_size,
+            "title_ar": f"{team_name}: خطة {clamped_size} ضد {clamped_size} ({base_form})",
+            "philosophy_ar": f"تنظيم تكتيكي لـ {clamped_size} ضد {clamped_size} بالحالات الثلاث.",
+            "team_name": team_name,
+            "opponent_name": opp_name,
+            "tactical_mode": tactical_mode or "tiki_taka",
+            "nodes": s_nodes_a,
+            "opponent_nodes": s_nodes_b,
+            "passing_arrows": enrich_arrows_with_probabilities(s_arr_a, s_nodes_a, s_nodes_b, attack_right=True),
+            "opponent_passing_arrows": enrich_arrows_with_probabilities(s_arr_b, s_nodes_b, s_nodes_a, attack_right=False),
+        }
+    else:
+        base_form = masterclass_preset["formation_code"] if masterclass_preset else formation_code
+        opp_form = masterclass_preset.get("opponent_formation_code", opponent_formation_code) if masterclass_preset else opponent_formation_code
+
+        bp_pos = build_formation_blueprint(
+            formation_code=base_form,
+            team_name=team_name,
+            opponent_name=opp_name,
             attack_right=True,
+            roster_players=fit_players,
+            tactical_mode=masterclass_preset.get("style", tactical_mode) if masterclass_preset else (tactical_mode or "tiki_taka"),
+            opponent_formation_code=opp_form,
+            opponent_roster_players=opp_players,
+            opponent_tactical_mode=opponent_tactical_mode or "balanced",
         )
-        if m_arrows:
-            bp_pos["passing_arrows"] = m_arrows
+        bp_pos["team_size"] = 11
+        if masterclass_preset:
+            bp_pos["title_ar"] = f"{team_name}: {masterclass_preset['title_ar']}"
+            bp_pos["philosophy_ar"] = masterclass_preset["philosophy_ar"]
+            m_arrows = enrich_arrows_with_probabilities(
+                masterclass_preset.get("passes", []),
+                bp_pos["nodes"],
+                bp_pos.get("opponent_nodes", []),
+                attack_right=True,
+            )
+            if m_arrows:
+                bp_pos["passing_arrows"] = m_arrows
 
     bp_pos["kit_colors"] = {
         "team_a_hex": str(club.get("kit_hex") or "#EF4444"),
@@ -122,9 +334,29 @@ def build_three_phase_tactical_package(
     att_arrows_raw = []
     front_slots = [n for n in att_a if n.get("slot") != "GK"]
     by_x = sorted(front_slots, key=lambda n: float(n.get("x_m") or 0.0))
-    if len(by_x) >= 6:
-        for i, j, lbl in [(1, 4, "كسر الخط الأول"), (4, 7, "دخول نصف المساحة"), (7, len(by_x) - 1, "تمريرة حاسمة للمهاجم"), (5, len(by_x) - 2, "تحول على الطرف")]:
-            att_arrows_raw.append({"from_slot": by_x[i]["slot"], "to_slot": by_x[j]["slot"], "label_ar": lbl, "kind": "pass", "color": "#FACC15"})
+    if len(by_x) >= 3:
+        m = len(by_x)
+        i0 = min(1, m - 1)
+        i1 = min(max(1, m // 3 + 1), m - 1)
+        i2 = min(max(i1 + 1, (2 * m) // 3), m - 1)
+        i3 = m - 1
+        i_wing = max(0, m - 2)
+        for idx_a, idx_b, lbl in [
+            (i0, i1, "كسر الخط الأول"),
+            (i1, i2, "دخول نصف المساحة"),
+            (i2, i3, "تمريرة حاسمة للمهاجم"),
+            (i1, i_wing, "تحول على الطرف"),
+        ]:
+            if by_x[idx_a]["slot"] != by_x[idx_b]["slot"]:
+                att_arrows_raw.append(
+                    {
+                        "from_slot": by_x[idx_a]["slot"],
+                        "to_slot": by_x[idx_b]["slot"],
+                        "label_ar": lbl,
+                        "kind": "pass",
+                        "color": "#E0A526",
+                    }
+                )
     att_arrows = enrich_arrows_with_probabilities(att_arrows_raw or pos_arrows, att_a, att_b, attack_right=True)
     att_opp_arrows = enrich_arrows_with_probabilities(bp_pos.get("opponent_passing_arrows", []), att_b, att_a, attack_right=False)
 

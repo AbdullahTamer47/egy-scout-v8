@@ -12,31 +12,35 @@ import {
   Sparkles,
   Users,
 } from "lucide-react";
-import { CoachClubDetail, CoachOverviewPayload, CoachPlayer, CoachProfile, isLightHex } from "./coachTypes";
+import { CoachClubDetail, CoachOverviewPayload, CoachPlayer, CoachProfile, getShortArabicName, isLightHex } from "./coachTypes";
 
 interface Props {
   lang: "ar" | "en";
   profile: CoachProfile;
   overview: CoachOverviewPayload;
+  onFormationChange?: (formation: string) => void;
   onNavigate: (tab: "tactics" | "training" | "director" | "admin" | "live") => void;
   onSelectPlayer: (player: CoachPlayer, club: CoachClubDetail) => void;
   onRunAiPrompt: (q: string) => void;
 }
 
-const DEFAULT_WEEK_LOAD = [
-  { md: "MD-5", au: 135, rpe: 3.0 },
-  { md: "MD-4", au: 525, rpe: 7.0 },
-  { md: "MD-3", au: 680, rpe: 8.0 },
-  { md: "MD-2", au: 390, rpe: 6.0 },
-  { md: "MD-1", au: 180, rpe: 4.0 },
-  { md: "MD", au: 902, rpe: 9.5 },
-  { md: "MD+1", au: 100, rpe: 2.5 },
+const WEEK_SLOTS = [
+  { md: "MD-5", refAu: 135 },
+  { md: "MD-4", refAu: 525 },
+  { md: "MD-3", refAu: 680 },
+  { md: "MD-2", refAu: 390 },
+  { md: "MD-1", refAu: 180 },
+  { md: "MD", refAu: 900 },
+  { md: "MD+1", refAu: 100 },
 ];
+
+const DASHBOARD_FORMATIONS = ["4-2-3-1", "4-3-3", "3-4-2-1", "3-2-4-1", "3-5-2", "4-4-2", "5-3-2"];
 
 export default function CoachDashboardHome({
   lang,
   profile,
   overview,
+  onFormationChange,
   onNavigate,
   onSelectPlayer,
   onRunAiPrompt,
@@ -60,12 +64,14 @@ export default function CoachDashboardHome({
     const el = chartRef.current;
     if (!el) return;
     const chart = echarts.init(el);
-    const mergedData = DEFAULT_WEEK_LOAD.map((base) => {
-      const saved = overview.training_sessions.find((s) => s.md_code === base.md);
+    // Real-only logged training sessions (0 AU for unlogged days) + UEFA Periodization reference line
+    const mergedData = WEEK_SLOTS.map((slot) => {
+      const saved = overview.training_sessions.find((s) => s.md_code === slot.md);
       return {
-        md: base.md,
-        au: saved ? saved.srpe_au : base.au,
-        rpe: saved ? saved.target_rpe : base.rpe,
+        md: slot.md,
+        au: saved ? saved.srpe_au : 0,
+        rpe: saved ? saved.target_rpe : 0,
+        refAu: slot.refAu,
       };
     });
     chart.setOption({
@@ -73,33 +79,45 @@ export default function CoachDashboardHome({
       tooltip: {
         trigger: "axis",
         backgroundColor: "#FFFFFF",
-        borderColor: "#CBD5E1",
-        textStyle: { color: "#0F172A", fontSize: 11 },
+        borderColor: "#D8E3EB",
+        textStyle: { color: "#0B1F3A", fontSize: 11 },
       },
-      grid: { left: 38, right: 16, top: 24, bottom: 26 },
+      legend: {
+        top: 0,
+        textStyle: { color: "#5C6A7C", fontSize: 10 },
+      },
+      grid: { left: 40, right: 16, top: 28, bottom: 24 },
       xAxis: {
         type: "category",
         data: mergedData.map((d) => d.md),
-        axisLabel: { color: "#475569", fontSize: 10 },
-        axisLine: { lineStyle: { color: "#CBD5E1" } },
+        axisLabel: { color: "#5C6A7C", fontSize: 10 },
+        axisLine: { lineStyle: { color: "#D8E3EB" } },
       },
       yAxis: {
         type: "value",
-        axisLabel: { color: "#475569", fontSize: 10 },
-        splitLine: { lineStyle: { color: "#E2E8F0" } },
+        axisLabel: { color: "#5C6A7C", fontSize: 10 },
+        splitLine: { lineStyle: { color: "#EEF3F6" } },
       },
       series: [
         {
-          name: "sRPE (AU)",
+          name: isAr ? "المسجل فعلياً (AU)" : "Logged (AU)",
           type: "bar",
-          barWidth: "46%",
+          barWidth: "42%",
           data: mergedData.map((d) => ({
             value: d.au,
             itemStyle: {
-              borderRadius: [6, 6, 0, 0],
-              color: d.rpe >= 8 ? "#EF4444" : d.rpe >= 6 ? "#F59E0B" : "#10B981",
+              borderRadius: [5, 5, 0, 0],
+              color: d.rpe >= 8 ? "#EF4444" : d.rpe >= 6 ? "#E0A526" : "#0FB5AE",
             },
           })),
+        },
+        {
+          name: isAr ? "المرجع الإرشادي (UEFA)" : "UEFA Ref",
+          type: "line",
+          smooth: true,
+          symbol: "none",
+          lineStyle: { color: "#0B1F3A", type: "dashed", width: 1.5, opacity: 0.45 },
+          data: mergedData.map((d) => d.refAu),
         },
       ],
     });
@@ -109,7 +127,7 @@ export default function CoachDashboardHome({
       window.removeEventListener("resize", onResize);
       chart.dispose();
     };
-  }, [overview.training_sessions]);
+  }, [overview.training_sessions, isAr]);
 
   const clubKitLight = isLightHex(overview.club.kit_hex);
 
@@ -131,13 +149,14 @@ export default function CoachDashboardHome({
               <div className="text-[11px] font-bold text-emerald-700">
                 {isAr ? `غرفة قيادة كابتن ${profile.coach_name}` : `Coach ${profile.coach_name} HQ`}
               </div>
-              <div className="text-base font-extrabold text-slate-900">
-                {overview.club.name_ar} <span className="text-slate-400 mx-1">×</span> {overview.opponent.name_ar}
+              <div className="text-base font-extrabold text-[#0B1F3A]">
+                {overview.club.name_ar} <span className="text-[#5C6A7C] mx-1">×</span> {overview.opponent.name_ar}
               </div>
-              <div className="text-[11px] text-slate-600">
+              <div className="text-[11px] text-[#5C6A7C]">
                 {clubSt ? `${clubSt.points} نقطة (${clubSt.wins}ف ${clubSt.draws}ت ${clubSt.losses}خ)` : `${overview.club.players.length} لاعباً`}
                 {" • "}
-                {overview.club.stadium_ar || "الدوري المصري الممتاز"}
+                {overview.club.head_coach_ar ? `المدرب: ${overview.club.head_coach_ar} • ` : ""}
+                {overview.club.stadium_ar || "الدوري المصري الممتاز 2026/27"}
                 {oppSt ? ` | الخصم: #${oppSt.rank} (${oppSt.points} ن)` : ""}
               </div>
             </div>
@@ -222,19 +241,33 @@ export default function CoachDashboardHome({
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
         {/* Interactive 11-Player Sunlit Stadium Pitch Preview */}
         <div className="xl:col-span-6 studio-panel p-4 space-y-2.5">
-          <div className="flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2 font-extrabold text-slate-900">
-              <Users className="w-4 h-4 text-emerald-600" />
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 font-extrabold text-[#0B1F3A]">
+              <Users className="w-4 h-4 text-[#0D717A]" />
               <span>
                 {isAr
                   ? `التشكيل الأساسي الجاهز (${overview.formation}) — اضغط على أي لاعب للتفاصيل`
                   : `Fit Starting XI (${overview.formation}) — Click any player`}
               </span>
             </div>
-            <span className="text-[10px] text-emerald-700 font-bold">{overview.club.name_ar}</span>
+            <div className="flex items-center gap-2">
+              {onFormationChange && (
+                <select
+                  aria-label={isAr ? "تغيير التشكيل الأساسي" : "Change Starting Formation"}
+                  value={overview.formation}
+                  onChange={(e) => onFormationChange(e.target.value)}
+                  className="rounded-lg bg-[#E6F8F7] border border-[#0FB5AE]/50 px-2 py-1 text-[11px] font-extrabold text-[#0D717A] cursor-pointer outline-none"
+                >
+                  {DASHBOARD_FORMATIONS.map((f) => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              )}
+              <span className="text-[10px] text-[#0D717A] font-bold">{overview.club.name_ar}</span>
+            </div>
           </div>
 
-          <div className="relative w-full aspect-[16/10] rounded-2xl border border-emerald-700/30 bg-[#15803D] overflow-hidden select-none shadow-sm">
+          <div className="relative w-full min-h-[340px] aspect-[16/10] rounded-2xl border border-[#0D717A]/35 bg-[#15803D] overflow-hidden select-none shadow-sm">
             <svg viewBox="0 0 105 68" className="w-full h-full">
               <rect x="0" y="0" width="105" height="68" fill="#15803D" />
               {[0, 2, 4, 6, 8].map((i) => (
@@ -247,34 +280,35 @@ export default function CoachDashboardHome({
               <rect x="86.5" y="13.84" width="16.5" height="40.32" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="0.45" />
             </svg>
 
-            {overview.squad_depth.slots.map((sl) => {
-              const leftPct = Math.max(7, Math.min(93, sl.x_norm * 100));
-              const topPct = Math.max(10, Math.min(90, sl.y_norm * 100));
+            {overview.squad_depth.slots.map((sl, idx) => {
+              const leftPct = Math.max(8, Math.min(92, sl.x_norm * 100));
+              const topPct = Math.max(13, Math.min(87, sl.y_norm * 100));
               const p = sl.starter;
-              const shortNm = p
-                ? (isAr ? p.name_ar || p.name_en : p.name_en).split(" ").slice(-1)[0]
-                : sl.slot;
+              const fullNm = p ? getShortArabicName(p) : sl.slot;
               const isGk = sl.slot === "GK";
               const darkInk = isGk || clubKitLight;
               return (
                 <button
-                  key={sl.slot}
+                  key={`${sl.slot}-${idx}`}
                   type="button"
                   disabled={!p}
                   onClick={() => p && onSelectPlayer(p, overview.club)}
                   style={{ left: `${leftPct}%`, top: `${topPct}%` }}
-                  className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group"
+                  className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group z-10 hover:z-20 cursor-pointer"
                 >
+                  <span className="mb-0.5 px-1 rounded bg-[#0B1F3A]/85 text-[8px] font-extrabold text-[#0FB5AE]">
+                    {sl.slot}
+                  </span>
                   <div
-                    className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-[11px] font-extrabold shadow-md group-hover:scale-110 transition ${
-                      darkInk ? "border-slate-900 text-slate-900" : "border-white text-white"
+                    className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full border-2 flex items-center justify-center text-[10.5px] font-extrabold shadow-md group-hover:scale-110 transition ${
+                      darkInk ? "border-[#0B1F3A] text-[#0B1F3A]" : "border-white text-white"
                     }`}
-                    style={{ backgroundColor: isGk ? "#FACC15" : overview.club.kit_hex || "#DC2626" }}
+                    style={{ backgroundColor: isGk ? "#E0A526" : overview.club.kit_hex || "#DC2626" }}
                   >
                     {p ? p.jersey_number : "?"}
                   </div>
-                  <span className="mt-0.5 px-1.5 py-0.5 rounded bg-slate-900/85 text-[9px] font-bold text-white whitespace-nowrap max-w-[76px] truncate shadow-xs">
-                    {shortNm}
+                  <span className="mt-0.5 px-1.5 py-0.5 rounded bg-[#0B1F3A]/90 text-[9px] font-bold text-white whitespace-nowrap shadow-xs">
+                    {fullNm}
                   </span>
                 </button>
               );

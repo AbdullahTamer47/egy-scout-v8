@@ -20,6 +20,7 @@ export interface CoachClubListItem {
   kit_hex: string;
   stadium_ar?: string;
   city_ar?: string;
+  head_coach_ar?: string;
   league_id: string;
   season: string;
   source: string;
@@ -103,6 +104,8 @@ export interface CoachClubDetail {
   kit_hex: string;
   stadium_ar?: string;
   city_ar?: string;
+  head_coach_ar?: string;
+  head_coach_en?: string;
   league_id?: string;
   season?: string;
   source?: string;
@@ -189,6 +192,7 @@ export interface TacticalPhaseSnapshot {
 export interface ThreePhaseBlueprint {
   formation_code: string;
   opponent_formation_code?: string;
+  team_size?: number;
   title_ar: string;
   philosophy_ar: string;
   team_name: string;
@@ -200,6 +204,14 @@ export interface ThreePhaseBlueprint {
   passing_arrows: EditableArrow[];
   opponent_passing_arrows?: EditableArrow[];
   phase_states?: Record<TacticalPhaseId, TacticalPhaseSnapshot>;
+}
+
+export function getShortArabicName(player?: { name_ar?: string; name_en?: string; player_label?: string } | null): string {
+  if (!player) return "";
+  const raw = (player.name_ar || player.player_label || player.name_en || "").trim();
+  const words = raw.split(/\s+/).filter(Boolean);
+  if (words.length <= 2) return raw;
+  return `${words[0]} ${words[words.length - 1]}`;
 }
 
 export interface DrillSetup {
@@ -296,6 +308,7 @@ export interface LiveHubPayload {
   is_live: boolean;
   cache_hit: boolean;
   fetched_at_utc: string;
+  fetched_at_cairo?: string;
   standings: LiveStandingRow[];
   upcoming_fixtures: LiveFixtureRow[];
   recent_results: LiveFixtureRow[];

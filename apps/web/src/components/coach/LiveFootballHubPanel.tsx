@@ -91,9 +91,10 @@ export default function LiveFootballHubPanel({ lang, initialHub, onClubSynced }:
               </h2>
               <div className="text-[11px] text-slate-500">
                 {hub.source} •{" "}
-                <span className={hub.is_live ? "text-emerald-700 font-bold" : "text-amber-700 font-bold"}>
+                <span className={hub.is_live ? "text-[#0D717A] font-bold" : "text-amber-700 font-bold"}>
                   {hub.is_live ? (isAr ? "مباشر الآن" : "LIVE") : isAr ? "نسخة مخزنة" : "Cached"}
                 </span>
+                {hub.fetched_at_cairo ? ` • ${isAr ? "تحديث:" : "Updated:"} ${hub.fetched_at_cairo}` : ""}
               </div>
             </div>
           </div>
@@ -176,7 +177,14 @@ export default function LiveFootballHubPanel({ lang, initialHub, onClubSynced }:
                     <td className="py-2">
                       <div className="flex items-center gap-2">
                         {row.logo_url ? (
-                          <img src={row.logo_url} alt={row.team_name} className="w-5 h-5 object-contain shrink-0" />
+                          <img
+                            src={row.logo_url}
+                            alt={row.team_name}
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).style.display = "none";
+                            }}
+                            className="w-5 h-5 object-contain shrink-0"
+                          />
                         ) : (
                           <span
                             className="w-3 h-3 rounded-full border border-slate-400 shrink-0"

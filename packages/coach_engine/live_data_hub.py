@@ -86,30 +86,27 @@ SUPPORTED_LEAGUES: dict[str, dict[str, str]] = {
     },
 }
 
-EGYPTIAN_CLUB_PRESETS: dict[str, dict[str, str]] = {
-    "al_ahly": {"code": "AHL", "wiki_page": "Al_Ahly_SC", "ar_wiki_page": "النادي_الأهلي_(مصر)", "name_ar": "الأهلي", "name_en": "Al Ahly", "kit_hex": "#EF4444", "stadium_ar": "ستاد القاهرة الدولي", "city_ar": "القاهرة"},
-    "zamalek": {"code": "ZAM", "wiki_page": "Zamalek_SC", "ar_wiki_page": "نادي_الزمالك", "name_ar": "الزمالك", "name_en": "Zamalek", "kit_hex": "#F8FAFC", "stadium_ar": "ستاد القاهرة الدولي", "city_ar": "الجيزة"},
-    "pyramids": {"code": "PYR", "wiki_page": "Pyramids_FC", "ar_wiki_page": "نادي_بيراميدز", "name_ar": "بيراميدز", "name_en": "Pyramids", "kit_hex": "#0EA5E9", "stadium_ar": "ستاد الدفاع الجوي", "city_ar": "القاهرة"},
-    "al_masry": {"code": "MAS", "wiki_page": "Al_Masry_SC", "ar_wiki_page": "النادي_المصري", "name_ar": "المصري البورسعيدي", "name_en": "Al Masry", "kit_hex": "#10B981", "stadium_ar": "ستاد السويس الجديد", "city_ar": "بورسعيد"},
-    "ceramica": {"code": "CER", "wiki_page": "Ceramica_Cleopatra_FC", "ar_wiki_page": "نادي_سيراميكا_كليوباترا", "name_ar": "سيراميكا كليوباترا", "name_en": "Ceramica Cleopatra", "kit_hex": "#DC2626", "stadium_ar": "ستاد المقاولون العرب", "city_ar": "القاهرة"},
-    "al_ittihad": {"code": "ITH", "wiki_page": "Al_Ittihad_Alexandria_Club", "ar_wiki_page": "نادي_الاتحاد_السكندري", "name_ar": "الاتحاد السكندري", "name_en": "Al Ittihad Alexandria", "kit_hex": "#16A34A", "stadium_ar": "ستاد الإسكندرية", "city_ar": "الإسكندرية"},
-    "smouha": {"code": "SMO", "wiki_page": "Smouha_SC", "ar_wiki_page": "نادي_سموحة", "name_ar": "سموحة", "name_en": "Smouha", "kit_hex": "#2563EB", "stadium_ar": "ستاد الإسكندرية", "city_ar": "الإسكندرية"},
-    "enppi": {"code": "SEI", "wiki_page": "ENPPI_SC", "ar_wiki_page": "نادي_إنبي", "name_ar": "إنبي", "name_en": "ENPPI", "kit_hex": "#38BDF8", "stadium_ar": "ستاد بتروسبورت", "city_ar": "القاهرة"},
-    "modern_sport": {"code": "MOD", "wiki_page": "Modern_Sport_FC", "ar_wiki_page": "نادي_مودرن_سبورت", "name_ar": "مودرن سبورت", "name_en": "Modern Sport", "kit_hex": "#E11D48", "stadium_ar": "ستاد السلام", "city_ar": "القاهرة"},
-    "zed": {"code": "ZED", "wiki_page": "ZED_FC", "ar_wiki_page": "نادي_زد", "name_ar": "زد إف سي", "name_en": "ZED FC", "kit_hex": "#22C55E", "stadium_ar": "ستاد القاهرة الدولي", "city_ar": "الجيزة"},
-    "national_bank": {"code": "NBE", "wiki_page": "National_Bank_of_Egypt_SC", "ar_wiki_page": "نادي_البنك_الأهلي_المصري", "name_ar": "البنك الأهلي", "name_en": "National Bank of Egypt", "kit_hex": "#F97316", "stadium_ar": "ستاد القاهرة الدولي", "city_ar": "القاهرة"},
-    "el_gaish": {"code": "TGS", "wiki_page": "Tala'ea_El_Gaish_SC", "ar_wiki_page": "نادي_طلائع_الجيش", "name_ar": "طلائع الجيش", "name_en": "Tala'ea El Gaish", "kit_hex": "#B91C1C", "stadium_ar": "ستاد جهاز الرياضة العسكري", "city_ar": "القاهرة"},
-    "mokawloon": {"code": "MOK", "wiki_page": "Al_Mokawloon_Al_Arab_SC", "ar_wiki_page": "نادي_المقاولون_العرب", "name_ar": "المقاولون العرب", "name_en": "Al Mokawloon", "kit_hex": "#FACC15", "stadium_ar": "ستاد المقاولون العرب", "city_ar": "القاهرة"},
-    "ghazl_mahalla": {"code": "GMH", "wiki_page": "Ghazl_El_Mahalla_SC", "ar_wiki_page": "نادي_غزل_المحلة", "name_ar": "غزل المحلة", "name_en": "Ghazl El Mahalla", "kit_hex": "#0284C7", "stadium_ar": "ستاد غزل المحلة", "city_ar": "المحلة الكبرى"},
-    "el_gouna": {"code": "GOU", "wiki_page": "El_Gouna_FC", "ar_wiki_page": "نادي_الجونة", "name_ar": "الجونة", "name_en": "El Gouna", "kit_hex": "#14B8A6", "stadium_ar": "ستاد خالد بشارة", "city_ar": "الغردقة"},
-    "petrojet": {"code": "MSP", "wiki_page": "Petrojet_SC", "ar_wiki_page": "نادي_بتروجيت", "name_ar": "بتروجيت", "name_en": "Petrojet", "kit_hex": "#EA580C", "stadium_ar": "ستاد بتروسبورت", "city_ar": "السويس"},
-    "wadi_degla": {"code": "WAD", "wiki_page": "Wadi_Degla_SC", "ar_wiki_page": "نادي_وادي_دجلة", "name_ar": "وادي دجلة", "name_en": "Wadi Degla", "kit_hex": "#EAB308", "stadium_ar": "ستاد السلام", "city_ar": "القاهرة"},
-    "abou_qir": {"code": "ABO", "wiki_page": "Abou_Qir_Fertilizers_SC", "ar_wiki_page": "نادي_أبو_قير_للأسمدة", "name_ar": "أبو قير للأسمدة", "name_en": "Abou Qir", "kit_hex": "#059669", "stadium_ar": "ستاد الإسكندرية", "city_ar": "الإسكندرية"},
-    "asyut_petroleum": {"code": "ASY", "wiki_page": "Asyut_Petroleum_SC", "ar_wiki_page": "نادي_بترول_أسيوط", "name_ar": "بترول أسيوط", "name_en": "Asyut Petroleum", "kit_hex": "#D97706", "stadium_ar": "ستاد بترول أسيوط", "city_ar": "أسيوط"},
-    "el_qanah": {"code": "QAN", "wiki_page": "El_Qanah_FC", "ar_wiki_page": "نادي_القناة", "name_ar": "القناة", "name_en": "El Qanah", "kit_hex": "#0D9488", "stadium_ar": "ستاد هيئة قناة السويس", "city_ar": "الإسماعيلية"},
-    "ismaily": {"code": "ISM", "wiki_page": "Ismaily_SC", "ar_wiki_page": "النادي_الإسماعيلي", "name_ar": "الإسماعيلي", "name_en": "Ismaily", "kit_hex": "#FDE047", "stadium_ar": "ستاد الإسماعيلية", "city_ar": "الإسماعيلية"},
-    "pharco": {"code": "PHA", "wiki_page": "Pharco_FC", "ar_wiki_page": "نادي_فاركو", "name_ar": "فاركو", "name_en": "Pharco", "kit_hex": "#F59E0B", "stadium_ar": "ستاد حرس الحدود", "city_ar": "الإسكندرية"},
-    "haras_el_hodood": {"code": "HAR", "wiki_page": "Haras_El_Hodoud_SC", "ar_wiki_page": "نادي_حرس_الحدود", "name_ar": "حرس الحدود", "name_en": "Haras El Hodoud", "kit_hex": "#991B1B", "stadium_ar": "ستاد حرس الحدود", "city_ar": "الإسكندرية"},
+EGYPTIAN_CLUB_PRESETS: dict[str, dict[str, Any]] = {
+    "pyramids": {"code": "PYR", "ts_365_id": 22143, "wiki_page": "Pyramids_FC", "ar_wiki_page": "نادي_بيراميدز", "name_ar": "بيراميدز", "name_en": "Pyramids FC", "kit_hex": "#0EA5E9", "stadium_ar": "ستاد الدفاع الجوي", "city_ar": "القاهرة"},
+    "zamalek": {"code": "ZAM", "ts_365_id": 8201, "wiki_page": "Zamalek_SC", "ar_wiki_page": "نادي_الزمالك", "name_ar": "الزمالك", "name_en": "Zamalek SC", "kit_hex": "#F8FAFC", "stadium_ar": "ستاد القاهرة الدولي", "city_ar": "الجيزة"},
+    "al_ahly": {"code": "AHL", "ts_365_id": 8200, "wiki_page": "Al_Ahly_SC", "ar_wiki_page": "النادي_الأهلي_(مصر)", "name_ar": "الأهلي", "name_en": "Al Ahly SC", "kit_hex": "#DC2626", "stadium_ar": "ستاد القاهرة الدولي", "city_ar": "القاهرة"},
+    "ceramica": {"code": "CER", "ts_365_id": 50882, "wiki_page": "Ceramica_Cleopatra_FC", "ar_wiki_page": "نادي_سيراميكا_كليوباترا", "name_ar": "سيراميكا كليوباترا", "name_en": "Ceramica Cleopatra", "kit_hex": "#E01F1F", "stadium_ar": "ستاد المقاولون العرب", "city_ar": "القاهرة"},
+    "al_ittihad": {"code": "ITH", "ts_365_id": 8312, "wiki_page": "Al_Ittihad_Alexandria_Club", "ar_wiki_page": "نادي_الاتحاد_السكندري", "name_ar": "الاتحاد السكندري", "name_en": "Al Ittihad Alexandria", "kit_hex": "#16A34A", "stadium_ar": "ستاد الإسكندرية", "city_ar": "الإسكندرية"},
+    "mokawloon": {"code": "MOK", "ts_365_id": 8310, "wiki_page": "Al_Mokawloon_Al_Arab_SC", "ar_wiki_page": "نادي_المقاولون_العرب", "name_ar": "المقاولون العرب", "name_en": "Al Mokawloon", "kit_hex": "#FACC15", "stadium_ar": "ستاد المقاولون العرب", "city_ar": "القاهرة"},
+    "modern_sport": {"code": "MOD", "ts_365_id": 50877, "wiki_page": "Modern_Sport_FC", "ar_wiki_page": "نادي_مودرن_سبورت", "name_ar": "مودرن سبورت", "name_en": "Modern Sport", "kit_hex": "#E11D48", "stadium_ar": "ستاد السلام", "city_ar": "القاهرة"},
+    "national_bank": {"code": "NBE", "ts_365_id": 50527, "wiki_page": "National_Bank_of_Egypt_SC", "ar_wiki_page": "نادي_البنك_الأهلي_المصري", "name_ar": "البنك الأهلي", "name_en": "National Bank of Egypt", "kit_hex": "#F97316", "stadium_ar": "ستاد القاهرة الدولي", "city_ar": "القاهرة"},
+    "al_masry": {"code": "MAS", "ts_365_id": 8303, "wiki_page": "Al_Masry_SC", "ar_wiki_page": "النادي_المصري", "name_ar": "المصري البورسعيدي", "name_en": "Al Masry", "kit_hex": "#0D9488", "stadium_ar": "ستاد السويس الجديد", "city_ar": "بورسعيد"},
+    "smouha": {"code": "SMO", "ts_365_id": 8309, "wiki_page": "Smouha_SC", "ar_wiki_page": "نادي_سموحة", "name_ar": "سموحة", "name_en": "Smouha", "kit_hex": "#2563EB", "stadium_ar": "ستاد الإسكندرية", "city_ar": "الإسكندرية"},
+    "zed": {"code": "ZED", "ts_365_id": 29732, "wiki_page": "ZED_FC", "ar_wiki_page": "نادي_زد", "name_ar": "زد إف سي", "name_en": "ZED FC", "kit_hex": "#16A34A", "stadium_ar": "ستاد القاهرة الدولي", "city_ar": "الجيزة"},
+    "enppi": {"code": "SEI", "ts_365_id": 8300, "wiki_page": "ENPPI_SC", "ar_wiki_page": "نادي_إنبي", "name_ar": "إنبي", "name_en": "ENPPI", "kit_hex": "#38BDF8", "stadium_ar": "ستاد بتروسبورت", "city_ar": "القاهرة"},
+    "ghazl_mahalla": {"code": "GMH", "ts_365_id": 8610, "wiki_page": "Ghazl_El_Mahalla_SC", "ar_wiki_page": "نادي_غزل_المحلة", "name_ar": "غزل المحلة", "name_en": "Ghazl El Mahalla", "kit_hex": "#0284C7", "stadium_ar": "ستاد غزل المحلة", "city_ar": "المحلة الكبرى"},
+    "el_gaish": {"code": "TGS", "ts_365_id": 8306, "wiki_page": "Tala'ea_El_Gaish_SC", "ar_wiki_page": "نادي_طلائع_الجيش", "name_ar": "طلائع الجيش", "name_en": "Tala'ea El Gaish", "kit_hex": "#B91C1C", "stadium_ar": "ستاد جهاز الرياضة العسكري", "city_ar": "القاهرة"},
+    "petrojet": {"code": "MSP", "ts_365_id": 8302, "wiki_page": "Petrojet_SC", "ar_wiki_page": "نادي_بتروجيت", "name_ar": "بتروجيت", "name_en": "Petrojet", "kit_hex": "#EA580C", "stadium_ar": "ستاد بتروسبورت", "city_ar": "السويس"},
+    "wadi_degla": {"code": "WAD", "ts_365_id": 8311, "wiki_page": "Wadi_Degla_SC", "ar_wiki_page": "نادي_وادي_دجلة", "name_ar": "وادي دجلة", "name_en": "Wadi Degla", "kit_hex": "#EAB308", "stadium_ar": "ستاد السلام", "city_ar": "القاهرة"},
+    "el_qanah": {"code": "QAN", "ts_365_id": 12252, "wiki_page": "El_Qanah_FC", "ar_wiki_page": "نادي_القناة", "name_ar": "القناة", "name_en": "El Qanah", "kit_hex": "#0D9488", "stadium_ar": "ستاد هيئة قناة السويس", "city_ar": "الإسماعيلية"},
+    "asyut_petroleum": {"code": "ASY", "ts_365_id": 12254, "wiki_page": "Asyut_Petroleum_SC", "ar_wiki_page": "نادي_بترول_أسيوط", "name_ar": "بترول أسيوط", "name_en": "Asyut Petroleum", "kit_hex": "#D97706", "stadium_ar": "ستاد بترول أسيوط", "city_ar": "أسيوط"},
+    "abou_qir": {"code": "ABO", "ts_365_id": 19480, "wiki_page": "Abou_Qir_Fertilizers_SC", "ar_wiki_page": "نادي_أبو_قير_للأسمدة", "name_ar": "أبو قير للأسمدة", "name_en": "Abou Qir", "kit_hex": "#059669", "stadium_ar": "ستاد الإسكندرية", "city_ar": "الإسكندرية"},
+    "el_gouna": {"code": "GOU", "ts_365_id": 8308, "wiki_page": "El_Gouna_FC", "ar_wiki_page": "نادي_الجونة", "name_ar": "الجونة", "name_en": "El Gouna", "kit_hex": "#14B8A6", "stadium_ar": "ستاد خالد بشارة", "city_ar": "الغردقة"},
 }
 
 EGY_TEAM_NAME_AR: dict[str, str] = {v["name_en"]: v["name_ar"] for v in EGYPTIAN_CLUB_PRESETS.values()}
@@ -188,7 +185,90 @@ FS_PLAYER_RE = re.compile(
     r"\{\{(?:Fs player2?|Football squad player|تشكيلة لاعب|لاعب تشكيلة كرة قدم)\s*\|([^}]+)\}\}",
     flags=re.IGNORECASE,
 )
-CACHE_TTL_SECONDS = 900
+CACHE_TTL_SECONDS = 300
+SQUAD_CACHE_TTL_SECONDS = 21600
+
+THREESIXFIVE_COMPETITION_EGY = 552
+THREESIXFIVE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+}
+THREESIXFIVE_CLUB_ID_MAP: dict[int, str] = {
+    int(v["ts_365_id"]): cid for cid, v in EGYPTIAN_CLUB_PRESETS.items() if v.get("ts_365_id")
+}
+THREESIXFIVE_POS_MAP: dict[str, str] = {
+    "goalkeeper": "GK",
+    "centre back": "CB",
+    "center back": "CB",
+    "defender": "CB",
+    "right back": "RB",
+    "left back": "LB",
+    "right wing back": "RWB",
+    "left wing back": "LWB",
+    "defensive midfield": "DM",
+    "central midfield": "CM",
+    "midfielder": "CM",
+    "attacking midfield": "CAM",
+    "right midfield": "RM",
+    "left midfield": "LM",
+    "right forward": "RW",
+    "left forward": "LW",
+    "right winger": "RW",
+    "left winger": "LW",
+    "centre forward": "ST",
+    "center forward": "ST",
+    "forward": "ST",
+    "striker": "ST",
+    "حارس مرمى": "GK",
+    "قلب دفاع": "CB",
+    "ظهير أيمن": "RB",
+    "ظهير أيسر": "LB",
+    "الدفاع": "CB",
+    "وسط دفاعي": "DM",
+    "وسط محوري": "CM",
+    "وسط هجومي": "CAM",
+    "الوسط": "CM",
+    "مهاجم أيمن": "RW",
+    "مهاجم أيسر": "LW",
+    "مهاجم صريح": "ST",
+    "رأس حربة": "ST",
+    "الهجوم": "ST",
+}
+THREESIXFIVE_COUNTRY_ISO: dict[int, tuple[str, str, str]] = {
+    131: ("EGY", "🇪🇬", "مصر"),
+    127: ("MAR", "🇲🇦", "المغرب"),
+    135: ("TUN", "🇹🇳", "تونس"),
+    139: ("ALG", "🇩🇿", "الجزائر"),
+    226: ("PLE", "🇵🇸", "فلسطين"),
+    119: ("JOR", "🇯🇴", "الأردن"),
+    114: ("IRQ", "🇮🇶", "العراق"),
+    123: ("LBN", "🇱🇧", "لبنان"),
+    21: ("BRA", "🇧🇷", "البرازيل"),
+    5: ("FRA", "🇫🇷", "فرنسا"),
+    7: ("NED", "🇳🇱", "هولندا"),
+    46: ("SVN", "🇸🇮", "سلوفينيا"),
+    65: ("GHA", "🇬🇭", "غانا"),
+    67: ("SLE", "🇸🇱", "سيراليون"),
+    68: ("ERI", "🇪🇷", "إريتريا"),
+    69: ("GUI", "🇬🇳", "غينيا"),
+    71: ("TOG", "🇹🇬", "توغو"),
+    72: ("CGO", "🇨🇬", "الكونغو"),
+    73: ("CMR", "🇨🇲", "الكاميرون"),
+    74: ("CIV", "🇨🇮", "كوت ديفوار"),
+    83: ("NGA", "🇳🇬", "نيجيريا"),
+    129: ("BEN", "🇧🇯", "بنين"),
+    132: ("ZAM", "🇿🇲", "زامبيا"),
+    133: ("SEN", "🇸🇳", "السنغال"),
+    134: ("RSA", "🇿🇦", "جنوب إفريقيا"),
+    136: ("ANG", "🇦🇴", "أنجولا"),
+    137: ("UGA", "🇺🇬", "أوغندا"),
+    138: ("LBR", "🇱🇷", "ليبيريا"),
+    141: ("TAN", "🇹🇿", "تنزانيا"),
+    142: ("RWA", "🇷🇼", "رواندا"),
+    150: ("BFA", "🇧🇫", "بوركينا فاسو"),
+    191: ("MTN", "🇲🇷", "موريتانيا"),
+    235: ("COD", "🇨🇩", "الكونغو الديمقراطية"),
+}
 
 
 def _cache_dir() -> Path:
@@ -259,8 +339,301 @@ def _nat_details(nat_raw: str) -> tuple[str, str, str]:
     return upper[:3] or "EGY", "🌍", clean
 
 
+def _ts365_score_str(val: Any) -> str:
+    if val is None or val == "" or float(val) < 0:
+        return "-"
+    try:
+        return str(int(round(float(val))))
+    except (TypeError, ValueError):
+        return "-"
+
+
+def fetch_365scores_egyptian_standings_and_games() -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Fetch LIVE today-updated 2026/27 (Season 74) Egyptian Premier League table, crests, results & upcoming games."""
+    from datetime import timedelta
+
+    standings: list[dict[str, Any]] = []
+    upcoming: list[dict[str, Any]] = []
+    recent: list[dict[str, Any]] = []
+
+    now_local = datetime.now(timezone(timedelta(hours=2)))
+    start_str = now_local.strftime("%d/%m/%Y")
+    end_str = (now_local + timedelta(days=28)).strftime("%d/%m/%Y")
+
+    with httpx.Client(headers=THREESIXFIVE_HEADERS, timeout=12.0) as client:
+        r_ar = client.get(
+            "https://webws.365scores.com/web/standings/",
+            params={"appTypeId": 5, "langId": 27, "timezoneName": "Africa/Cairo", "userCountryId": 21, "competitions": THREESIXFIVE_COMPETITION_EGY},
+        )
+        r_ar.raise_for_status()
+        r_en = client.get(
+            "https://webws.365scores.com/web/standings/",
+            params={"appTypeId": 5, "langId": 1, "timezoneName": "Africa/Cairo", "userCountryId": 21, "competitions": THREESIXFIVE_COMPETITION_EGY},
+        )
+        en_rows = ((r_en.json().get("standings") or [{}])[0].get("rows") or []) if r_en.status_code == 200 else []
+        en_by_id = {int((rw.get("competitor") or {}).get("id") or 0): str((rw.get("competitor") or {}).get("name") or "") for rw in en_rows}
+
+        st_block = (r_ar.json().get("standings") or [{}])[0]
+        for row in st_block.get("rows") or []:
+            comp = row.get("competitor") or {}
+            comp_id = _safe_int(comp.get("id"))
+            cid = THREESIXFIVE_CLUB_ID_MAP.get(comp_id) or CLUB_NAME_TO_ID.get(en_by_id.get(comp_id, "").lower(), f"ts_{comp_id}")
+            preset = EGYPTIAN_CLUB_PRESETS.get(cid, {})
+            img_ver = _safe_int(comp.get("imageVersion"), 1)
+            logo_url = (
+                f"https://imagecache.365scores.com/image/upload/f_png,w_64,h_64,c_limit,q_auto:eco,dpr_2,"
+                f"d_Competitors:default1.png/v{img_ver}/Competitors/{comp_id}"
+            )
+            gf = _safe_int(row.get("for"))
+            ga = _safe_int(row.get("against"))
+            standings.append(
+                {
+                    "rank": _safe_int(row.get("position"), len(standings) + 1),
+                    "team_id": cid,
+                    "ts_365_id": comp_id,
+                    "code": preset.get("code", ""),
+                    "team_name": en_by_id.get(comp_id) or preset.get("name_en") or str(comp.get("name") or ""),
+                    "team_name_ar": preset.get("name_ar") or str(comp.get("name") or ""),
+                    "kit_hex": preset.get("kit_hex") or str(comp.get("color") or "#0FB5AE"),
+                    "stadium_ar": preset.get("stadium_ar", ""),
+                    "logo_url": logo_url,
+                    "group": "",
+                    "played": _safe_int(row.get("gamePlayed")),
+                    "wins": _safe_int(row.get("gamesWon")),
+                    "draws": _safe_int(row.get("gamesEven")),
+                    "losses": _safe_int(row.get("gamesLost")),
+                    "gf": gf,
+                    "ga": ga,
+                    "gd": gf - ga,
+                    "points": _safe_int(row.get("points")),
+                    "form": "",
+                }
+            )
+
+        r_cur = client.get(
+            "https://webws.365scores.com/web/games/current/",
+            params={"appTypeId": 5, "langId": 27, "timezoneName": "Africa/Cairo", "competitions": THREESIXFIVE_COMPETITION_EGY},
+        )
+        if r_cur.status_code == 200:
+            for ev in (r_cur.json().get("games") or []):
+                hc = ev.get("homeCompetitor") or {}
+                ac = ev.get("awayCompetitor") or {}
+                sg = _safe_int(ev.get("statusGroup"))
+                item = {
+                    "event_id": str(ev.get("id") or ""),
+                    "date_utc": str(ev.get("startTime") or ""),
+                    "name": f"{hc.get('name','')} × {ac.get('name','')}",
+                    "status": str(ev.get("statusText") or ""),
+                    "home_team": str(hc.get("name") or ""),
+                    "away_team": str(ac.get("name") or ""),
+                    "home_logo": f"https://imagecache.365scores.com/image/upload/f_png,w_48,h_48,c_limit,q_auto:eco/v{_safe_int(hc.get('imageVersion'),1)}/Competitors/{_safe_int(hc.get('id'))}",
+                    "away_logo": f"https://imagecache.365scores.com/image/upload/f_png,w_48,h_48,c_limit,q_auto:eco/v{_safe_int(ac.get('imageVersion'),1)}/Competitors/{_safe_int(ac.get('id'))}",
+                    "home_score": _ts365_score_str(hc.get("score")),
+                    "away_score": _ts365_score_str(ac.get("score")),
+                }
+                if sg == 4:
+                    recent.append(item)
+                else:
+                    upcoming.append(item)
+
+        r_up = client.get(
+            "https://webws.365scores.com/web/games/allscores/",
+            params={
+                "appTypeId": 5,
+                "langId": 27,
+                "timezoneName": "Africa/Cairo",
+                "competitions": THREESIXFIVE_COMPETITION_EGY,
+                "startDate": start_str,
+                "endDate": end_str,
+            },
+        )
+        if r_up.status_code == 200:
+            seen_ids = {x["event_id"] for x in upcoming}
+            for ev in (r_up.json().get("games") or []):
+                eid = str(ev.get("id") or "")
+                if eid in seen_ids or _safe_int(ev.get("statusGroup")) == 4:
+                    continue
+                hc = ev.get("homeCompetitor") or {}
+                ac = ev.get("awayCompetitor") or {}
+                upcoming.append(
+                    {
+                        "event_id": eid,
+                        "date_utc": str(ev.get("startTime") or ""),
+                        "name": f"{hc.get('name','')} × {ac.get('name','')}",
+                        "status": str(ev.get("statusText") or "مجدولة"),
+                        "home_team": str(hc.get("name") or ""),
+                        "away_team": str(ac.get("name") or ""),
+                        "home_logo": f"https://imagecache.365scores.com/image/upload/f_png,w_48,h_48,c_limit,q_auto:eco/v{_safe_int(hc.get('imageVersion'),1)}/Competitors/{_safe_int(hc.get('id'))}",
+                        "away_logo": f"https://imagecache.365scores.com/image/upload/f_png,w_48,h_48,c_limit,q_auto:eco/v{_safe_int(ac.get('imageVersion'),1)}/Competitors/{_safe_int(ac.get('id'))}",
+                        "home_score": "-",
+                        "away_score": "-",
+                    }
+                )
+
+    standings.sort(key=lambda r: (r["rank"], -r["points"], -r["gd"]))
+    upcoming.sort(key=lambda x: x["date_utc"])
+    recent.sort(key=lambda x: x["date_utc"], reverse=True)
+    return standings, upcoming[:14], recent[:14]
+
+
+def sync_365scores_club_squad(
+    comp_id: int,
+    club_id: str,
+    name_ar: Optional[str] = None,
+    name_en: Optional[str] = None,
+    kit_hex: Optional[str] = None,
+    stadium_ar: Optional[str] = None,
+    city_ar: Optional[str] = None,
+) -> dict[str, Any]:
+    """Fetch exact live 2026/27 first-team squad, HD portraits, ages, heights, positions & head coach via 365Scores."""
+    from datetime import timedelta
+
+    preset = EGYPTIAN_CLUB_PRESETS.get(club_id, {})
+    with httpx.Client(headers=THREESIXFIVE_HEADERS, timeout=15.0) as client:
+        r_ar = client.get(
+            "https://webws.365scores.com/web/squads/",
+            params={"appTypeId": 5, "langId": 27, "timezoneName": "Africa/Cairo", "competitors": comp_id},
+        )
+        r_ar.raise_for_status()
+        j_ar = r_ar.json()
+        r_en = client.get(
+            "https://webws.365scores.com/web/squads/",
+            params={"appTypeId": 5, "langId": 1, "timezoneName": "Africa/Cairo", "competitors": comp_id},
+        )
+        j_en = r_en.json() if r_en.status_code == 200 else {}
+
+    en_athletes = {
+        int(a.get("id") or 0): a
+        for a in ((j_en.get("squads") or [{}])[0].get("athletes") or [])
+        if a.get("id")
+    }
+    country_names_ar = {int(c.get("id") or 0): str(c.get("name") or "") for c in (j_ar.get("countries") or []) if c.get("id")}
+    comp_meta = next((c for c in (j_ar.get("competitors") or []) if int(c.get("id") or 0) == comp_id), {})
+    img_cver = _safe_int(comp_meta.get("imageVersion"), 1)
+    logo_url = (
+        f"https://imagecache.365scores.com/image/upload/f_png,w_96,h_96,c_limit,q_auto:eco,dpr_2,"
+        f"d_Competitors:default1.png/v{img_cver}/Competitors/{comp_id}"
+    )
+
+    players: list[dict[str, Any]] = []
+    used_nums: set[int] = set()
+    head_coach_ar = ""
+    head_coach_en = ""
+    pos_rank = {"GK": 0, "CB": 1, "RB": 2, "LB": 3, "RWB": 4, "LWB": 5, "DM": 6, "CM": 7, "CAM": 8, "RM": 9, "LM": 10, "RW": 11, "LW": 12, "ST": 13}
+
+    raw_aths = ((j_ar.get("squads") or [{}])[0].get("athletes") or [])
+    fallback_jersey = 40
+    for ath in raw_aths:
+        aid = int(ath.get("id") or 0)
+        a_en = en_athletes.get(aid, {})
+        fpos_en = str((a_en.get("formationPosition") or {}).get("name") or "").strip()
+        pos_en = str((a_en.get("position") or {}).get("name") or "").strip()
+        fpos_ar = str((ath.get("formationPosition") or {}).get("name") or "").strip()
+        pos_ar = str((ath.get("position") or {}).get("name") or "").strip()
+
+        if fpos_en.lower() == "coach" or pos_ar == "الإدارة" or (ath.get("position") is None and "coach" in fpos_en.lower()):
+            head_coach_ar = str(ath.get("name") or "").strip()
+            head_coach_en = str(a_en.get("name") or head_coach_ar).strip()
+            continue
+
+        num = _safe_int(ath.get("jerseyNum"), 0)
+        if not (1 <= num <= 99):
+            while fallback_jersey in used_nums and fallback_jersey < 99:
+                fallback_jersey += 1
+            if fallback_jersey >= 99:
+                continue
+            num = fallback_jersey
+            fallback_jersey += 1
+        elif num in used_nums:
+            while fallback_jersey in used_nums and fallback_jersey < 99:
+                fallback_jersey += 1
+            num = fallback_jersey
+            fallback_jersey += 1
+        used_nums.add(num)
+
+        resolved_pos = (
+            THREESIXFIVE_POS_MAP.get(fpos_en.lower())
+            or THREESIXFIVE_POS_MAP.get(fpos_ar)
+            or THREESIXFIVE_POS_MAP.get(pos_en.lower())
+            or THREESIXFIVE_POS_MAP.get(pos_ar)
+            or "CM"
+        )
+        nat_id = _safe_int(ath.get("nationalityId"), 131)
+        if nat_id in THREESIXFIVE_COUNTRY_ISO:
+            nat_iso, nat_flag, nat_ar_name = THREESIXFIVE_COUNTRY_ISO[nat_id]
+        else:
+            nat_ar_name = country_names_ar.get(nat_id, "دولي")
+            nat_iso = f"C{nat_id}"
+            nat_flag = "🌍"
+
+        age_val = _safe_int(ath.get("age"), 0)
+        ht_val = _safe_int(ath.get("height"), 0)
+        dob_raw = str(ath.get("birthdate") or "")[:10]
+        img_ver = _safe_int(ath.get("imageVersion"), 1)
+        photo_url = (
+            f"https://imagecache.365scores.com/image/upload/f_png,w_160,h_160,c_thumb,g_face,q_auto:eco,dpr_2,"
+            f"d_Athletes:default.png/v{img_ver}/Athletes/{aid}"
+        ) if aid else None
+
+        nm_ar = str(ath.get("name") or a_en.get("name") or f"لاعب #{num}").strip()
+        nm_en = str(a_en.get("name") or nm_ar).strip()
+        short_ar = str(ath.get("shortName") or nm_ar).strip()
+
+        players.append(
+            {
+                "athlete_id": aid,
+                "jersey_number": num,
+                "name_en": nm_en,
+                "name_ar": nm_ar,
+                "short_name_ar": short_ar,
+                "position": resolved_pos,
+                "position_label_ar": fpos_ar or pos_ar or resolved_pos,
+                "nationality": nat_iso,
+                "nationality_flag": nat_flag,
+                "nationality_ar": nat_ar_name,
+                "birth_date": dob_raw or None,
+                "age": age_val if 15 <= age_val <= 48 else None,
+                "height_cm": ht_val if 155 <= ht_val <= 215 else None,
+                "preferred_foot": None,
+                "is_captain": False,
+                "is_starter": True,
+                "photo_url": photo_url,
+                "source": "365Scores Live 2026/27",
+            }
+        )
+
+    players.sort(
+        key=lambda p: (
+            pos_rank.get(p["position"], 9),
+            0 if 1 <= int(p["jersey_number"]) <= 35 else 1,
+            0 if p.get("age") else 1,
+            int(p["jersey_number"]),
+        )
+    )
+    for idx, pl in enumerate(players):
+        pl["is_starter"] = idx < 11
+
+    cairo_now = datetime.now(timezone(timedelta(hours=2))).strftime("%Y-%m-%d %H:%M")
+    return {
+        "club_id": club_id,
+        "ts_365_id": comp_id,
+        "name_ar": name_ar or preset.get("name_ar") or str(comp_meta.get("name") or club_id),
+        "name_en": name_en or preset.get("name_en") or club_id,
+        "kit_hex": kit_hex or preset.get("kit_hex") or "#0FB5AE",
+        "stadium_ar": stadium_ar or preset.get("stadium_ar") or "",
+        "city_ar": city_ar or preset.get("city_ar") or "",
+        "logo_url": logo_url,
+        "head_coach_ar": head_coach_ar,
+        "head_coach_en": head_coach_en,
+        "league_id": "egy.1",
+        "season": "2026/2027",
+        "source": "365Scores Live 2026/27",
+        "verified_at": f"{cairo_now} (توقيت القاهرة)",
+        "synced_ts": time.time(),
+        "is_live": True,
+        "players": players,
+    }
 def fetch_wikipedia_egyptian_standings() -> list[dict[str, Any]]:
-    """Fast (<400ms), authoritative live 2026-27 Egyptian Premier League standings via MediaWiki."""
     with httpx.Client(headers=WIKI_HEADERS, timeout=10.0) as client:
         r = client.get(
             "https://en.wikipedia.org/w/api.php",
@@ -400,69 +773,18 @@ def fetch_live_league_hub(league_id: str = "egy.1", force_refresh: bool = False)
 
     if lid == "egy.1":
         try:
-            standings = fetch_wikipedia_egyptian_standings()
-            source_name = "Wikipedia Live Egyptian Premier League 2026/27"
+            standings, upcoming, recent = fetch_365scores_egyptian_standings_and_games()
+            source_name = "365Scores Live — الدوري المصري الممتاز 2026/2027"
             is_live = bool(standings)
         except Exception:
             standings = []
-
-        # Enrich optionally with TheSportsDB badges & upcoming/past fixtures under a tight timeout
-        try:
-            with httpx.Client(headers=PUBLIC_HEADERS, timeout=4.5) as client:
-                r_tbl = client.get(f"https://www.thesportsdb.com/api/v1/json/123/lookuptable.php?l={meta['tsdb_id']}")
-                if r_tbl.status_code == 200:
-                    badge_by_cid = {}
-                    for row in (r_tbl.json().get("table") or []):
-                        cid = CLUB_NAME_TO_ID.get(str(row.get("strTeam") or "").strip().lower())
-                        if cid and row.get("strBadge"):
-                            badge_by_cid[cid] = {"badge": str(row["strBadge"]), "form": str(row.get("strForm") or "")}
-                    for s in standings:
-                        extra = badge_by_cid.get(s.get("team_id") or "")
-                        if extra:
-                            s["logo_url"] = extra["badge"]
-                            s["form"] = extra["form"]
-                r_next = client.get(f"https://www.thesportsdb.com/api/v1/json/123/eventsnextleague.php?id={meta['tsdb_id']}")
-                if r_next.status_code == 200:
-                    for ev in (r_next.json().get("events") or [])[:10]:
-                        ht = str(ev.get("strHomeTeam") or "")
-                        at = str(ev.get("strAwayTeam") or "")
-                        upcoming.append(
-                            {
-                                "event_id": str(ev.get("idEvent") or ""),
-                                "date_utc": str(ev.get("strTimestamp") or ev.get("dateEvent") or ""),
-                                "name": str(ev.get("strEvent") or f"{ht} vs {at}"),
-                                "status": str(ev.get("strStatus") or "Scheduled"),
-                                "home_team": EGY_TEAM_NAME_AR.get(ht, ht),
-                                "away_team": EGY_TEAM_NAME_AR.get(at, at),
-                                "home_logo": str(ev.get("strHomeTeamBadge") or ""),
-                                "away_logo": str(ev.get("strAwayTeamBadge") or ""),
-                                "home_score": "-",
-                                "away_score": "-",
-                            }
-                        )
-                r_past = client.get(f"https://www.thesportsdb.com/api/v1/json/123/eventspastleague.php?id={meta['tsdb_id']}")
-                if r_past.status_code == 200:
-                    for ev in (r_past.json().get("events") or [])[:10]:
-                        ht = str(ev.get("strHomeTeam") or "")
-                        at = str(ev.get("strAwayTeam") or "")
-                        recent.append(
-                            {
-                                "event_id": str(ev.get("idEvent") or ""),
-                                "date_utc": str(ev.get("strTimestamp") or ev.get("dateEvent") or ""),
-                                "name": str(ev.get("strEvent") or f"{ht} vs {at}"),
-                                "status": str(ev.get("strStatus") or "Finished"),
-                                "home_team": EGY_TEAM_NAME_AR.get(ht, ht),
-                                "away_team": EGY_TEAM_NAME_AR.get(at, at),
-                                "home_logo": str(ev.get("strHomeTeamBadge") or ""),
-                                "away_logo": str(ev.get("strAwayTeamBadge") or ""),
-                                "home_score": str(ev.get("intHomeScore") if ev.get("intHomeScore") is not None else "-"),
-                                "away_score": str(ev.get("intAwayScore") if ev.get("intAwayScore") is not None else "-"),
-                            }
-                        )
-                    if source_name:
-                        source_name += " + TheSportsDB Fixtures"
-        except Exception:
-            pass
+        if not standings:
+            try:
+                standings = fetch_wikipedia_egyptian_standings()
+                source_name = "Wikipedia Live Egyptian Premier League 2026/27 (Fallback)"
+                is_live = bool(standings)
+            except Exception:
+                standings = []
     else:
         try:
             slug = meta["espn_slug"]
@@ -486,15 +808,20 @@ def fetch_live_league_hub(league_id: str = "egy.1", force_refresh: bool = False)
             stale["source"] = f"{stale.get('source', 'cache')} (offline cache)"
             return stale
 
+    from datetime import timedelta
+
+    cairo_str = datetime.now(timezone(timedelta(hours=2))).strftime("%Y-%m-%d %H:%M")
     payload = {
         "league_id": lid,
         "league_name_ar": meta["name_ar"],
         "league_name_en": meta["name_en"],
+        "season": "2026/2027",
         "provider": meta["provider"],
         "source": source_name or "offline_fallback",
         "is_live": is_live,
         "cache_hit": False,
         "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
+        "fetched_at_cairo": cairo_str,
         "standings": standings,
         "upcoming_fixtures": upcoming,
         "recent_results": recent,
@@ -920,17 +1247,19 @@ def sync_espn_team_roster(
 
 
 def load_all_coach_clubs(store_clubs: Optional[dict[str, dict[str, Any]]] = None) -> dict[str, dict[str, Any]]:
-    """Merge cached full Egyptian Premier League clubs + curated dataset + live-synced store clubs."""
+    """Merge live 2026/27 Egyptian Premier League 365Scores squads + non-Egyptian dataset + active synced store clubs."""
     merged: dict[str, dict[str, Any]] = {}
 
+    # Keep only non-Egyptian international reference clubs from legacy static JSON so outdated 25/26 Egyptian squads never leak
     local = _load_local_clubs_json()
     for cid, c in local.items():
-        preset = EGYPTIAN_CLUB_PRESETS.get(cid, {})
+        if cid in EGYPTIAN_CLUB_PRESETS:
+            continue
         merged[cid] = {
             **c,
-            "stadium_ar": c.get("stadium_ar") or preset.get("stadium_ar", ""),
-            "city_ar": c.get("city_ar") or preset.get("city_ar", ""),
-            "league_id": c.get("league_id") or ("egy.1" if cid in EGYPTIAN_CLUB_PRESETS else "intl"),
+            "stadium_ar": c.get("stadium_ar") or "",
+            "city_ar": c.get("city_ar") or "",
+            "league_id": c.get("league_id") or "intl",
         }
 
     full_path = _full_egypt_cache_path()
@@ -938,7 +1267,7 @@ def load_all_coach_clubs(store_clubs: Optional[dict[str, dict[str, Any]]] = None
         try:
             full_data = json.loads(full_path.read_text(encoding="utf-8"))
             for cid, c in (full_data.get("clubs") or {}).items():
-                if c.get("players"):
+                if cid in EGYPTIAN_CLUB_PRESETS and c.get("players"):
                     merged[cid] = c
         except Exception:
             pass
@@ -947,6 +1276,7 @@ def load_all_coach_clubs(store_clubs: Optional[dict[str, dict[str, Any]]] = None
         if cid not in merged:
             merged[cid] = {
                 "club_id": cid,
+                "ts_365_id": meta.get("ts_365_id"),
                 "name_ar": meta["name_ar"],
                 "name_en": meta["name_en"],
                 "kit_hex": meta["kit_hex"],
@@ -954,12 +1284,17 @@ def load_all_coach_clubs(store_clubs: Optional[dict[str, dict[str, Any]]] = None
                 "city_ar": meta["city_ar"],
                 "league_id": "egy.1",
                 "season": "2026/2027",
-                "source": "Egyptian Premier League Registry (Click Sync for Full Squad)",
+                "source": "Egyptian Premier League 2026/27 Registry",
                 "players": [],
             }
 
     for cid, c in (store_clubs or {}).items():
-        if c.get("players"):
-            merged[cid] = c
+        if not c.get("players"):
+            continue
+        src = str(c.get("source") or "")
+        # Skip stale pre-V4 Wikipedia rosters for active Egyptian clubs so 365Scores 2026/27 live data always wins
+        if cid in EGYPTIAN_CLUB_PRESETS and "Wikipedia" in src:
+            continue
+        merged[cid] = c
 
     return merged

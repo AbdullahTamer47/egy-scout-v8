@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { CheckCircle2, Search, Shield, Sparkles, Swords, UserCheck } from "lucide-react";
+import { CheckCircle2, Search, Shield, Swords, UserCheck } from "lucide-react";
+import BedigitalBrandMark from "./BedigitalBrandMark";
 import { CoachClubListItem, CoachProfile, CoachRoleType } from "./coachTypes";
 
 interface Props {
@@ -92,19 +93,17 @@ export default function CoachOnboardingGate({
         className="w-full max-w-5xl rounded-3xl bg-white border border-slate-200 shadow-xl shadow-slate-900/5 overflow-hidden"
       >
         {/* Top Hero Banner */}
-        <div className="px-6 py-5 bg-gradient-to-l from-emerald-50 via-white to-sky-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-700">
-              <Sparkles className="w-5 h-5" />
-            </div>
+        <div className="px-6 py-5 bg-gradient-to-l from-[#E6F8F7] via-white to-[#F2F6F8] border-b border-[#D8E3EB] flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3.5">
+            <BedigitalBrandMark showWordmark={false} />
             <div>
-              <h1 className="text-lg font-extrabold text-slate-900">
+              <h1 className="text-lg font-extrabold text-[#0B1F3A]">
                 {isAr ? "EGY-SCOUT Coach Pro — بوابة المدير الفني والمدرب" : "EGY-SCOUT Coach Pro — Technical Staff Sign-In"}
               </h1>
-              <p className="text-xs text-slate-600">
+              <p className="text-xs text-[#5C6A7C]">
                 {isAr
-                  ? `قاعدة الدوري المصري الكاملة (${clubs.length} نادي مصري ودولي ببيانات وقوائم لاعبين حية 2026/2027)`
-                  : `Full Egyptian Premier League database (${clubs.length} clubs with live 2026/27 squads)`}
+                  ? `قاعدة الدوري المصري الممتاز الحية 2026/2027 (${clubs.length} نادٍ بقوائم وأسماء وأعمار محدثة تلقائياً)`
+                  : `Live Egyptian Premier League 2026/27 database (${clubs.length} auto-updated clubs)`}
               </p>
             </div>
           </div>

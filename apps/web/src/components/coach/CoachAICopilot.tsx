@@ -149,7 +149,7 @@ export default function CoachAICopilot({
         </div>
 
         {/* Quick Prompt Chips */}
-        <div className="px-3 py-2.5 bg-slate-50 border-b border-slate-200 flex gap-1.5 overflow-x-auto">
+        <div className="px-3 py-2.5 bg-[#F2F6F8] border-b border-[#D8E3EB] flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {quickChips.map((ch, idx) => (
             <button
               key={idx}

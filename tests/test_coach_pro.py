@@ -60,7 +60,7 @@ class TestCoachPro(unittest.TestCase):
     def test_full_egyptian_league_catalog_present(self) -> None:
         self.assertGreaterEqual(len(EGYPTIAN_CLUB_PRESETS), 20)
         clubs = load_all_coach_clubs()
-        for cid in ("al_ahly", "zamalek", "pyramids", "enppi", "al_masry", "ismaily"):
+        for cid in ("pyramids", "zamalek", "al_ahly", "ceramica", "enppi", "al_masry"):
             self.assertIn(cid, clubs)
             self.assertGreaterEqual(len(clubs[cid]["players"]), 11)
 
@@ -189,10 +189,26 @@ class TestCoachPro(unittest.TestCase):
         for lp in r_lp.json()["players"]:
             self.assertNotEqual(lp["nationality"], "EGY")
 
+        # V4: Multi-format small-sided tactical blueprints (5v5 & 7v7) with real Arabic player names
+        for tsize, form_code in [(5, "1-2-1"), (7, "2-3-1")]:
+            r_small = client.post(
+                "/api/coach/tactics/blueprint",
+                headers=hdrs,
+                json={"club_id": "al_ahly", "opponent_id": "zamalek", "team_size": tsize, "formation_code": form_code},
+            )
+            self.assertEqual(r_small.status_code, 200)
+            bdata = r_small.json()
+            self.assertEqual(len(bdata["nodes"]), tsize)
+            self.assertEqual(len(bdata["opponent_nodes"]), tsize)
+            self.assertEqual(set(bdata["phase_states"].keys()), {"possession", "attack", "defense"})
+            for nd in bdata["nodes"]:
+                self.assertTrue(nd.get("player_label"))
+                self.assertNotIn("[[", nd["player_label"])
+
     def test_zero_wikilink_leaks_and_wikidata_bio_coverage(self) -> None:
         clubs = load_all_coach_clubs()
         all_p = [p for c in clubs.values() for p in (c.get("players") or [])]
-        self.assertGreaterEqual(len(all_p), 600)
+        self.assertGreaterEqual(len(all_p), 700)
         for p in all_p:
             self.assertNotIn("[[", str(p.get("name_en") or ""))
             self.assertNotIn("[[", str(p.get("name_ar") or ""))

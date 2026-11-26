@@ -1190,8 +1190,10 @@ def _build_single_team_nodes_and_lines(
 
         assigned = matched_roster[idx] if idx < len(matched_roster) else None
         p_name = (
-            assigned.get("verified_name")
+            assigned.get("name_ar")
+            or assigned.get("verified_name")
             or assigned.get("player_name")
+            or assigned.get("name_en")
             or (f"#{assigned['jersey_number']}" if assigned and assigned.get("jersey_number") else nd["slot"])
         ) if assigned else nd["slot"]
 

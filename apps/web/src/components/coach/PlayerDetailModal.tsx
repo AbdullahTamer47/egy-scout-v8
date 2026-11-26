@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { AlertTriangle, Bot, CheckCircle2, ShieldAlert, X } from "lucide-react";
 import { CoachClubDetail, CoachPlayer, isLightHex } from "./coachTypes";
 
@@ -26,6 +26,7 @@ export default function PlayerDetailModal({ lang, player, club, onClose, onAskAi
   const isEligible = player.is_eligible_starter !== false;
   const safeStatus = player.status || "fit";
   const safeReadiness = player.readiness_pct ?? 100;
+  const [imgFailed, setImgFailed] = useState(false);
   const safeYc = player.yellow_cards ?? 0;
   const safeRc = player.red_cards ?? 0;
   const lightKit = isLightHex(club.kit_hex);
@@ -33,33 +34,34 @@ export default function PlayerDetailModal({ lang, player, club, onClose, onAskAi
   return (
     <div
       dir={isAr ? "rtl" : "ltr"}
-      className="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-[100] bg-[#0B1F3A]/45 backdrop-blur-sm flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg rounded-3xl bg-white border border-slate-200 shadow-2xl overflow-hidden text-slate-900"
+        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white border border-[#D8E3EB] shadow-2xl text-[#0B1F3A]"
       >
         {/* Clean Light Executive Header Banner */}
         <div
-          className="px-5 py-4 flex items-center justify-between gap-3 border-b border-slate-200"
+          className="px-5 py-4 flex items-center justify-between gap-3 border-b border-[#D8E3EB]"
           style={{
-            background: `linear-gradient(135deg, ${club.kit_hex || "#10B981"}1F 0%, #F8FAFC 65%, #FFFFFF 100%)`,
+            background: `linear-gradient(135deg, ${club.kit_hex || "#0FB5AE"}1F 0%, #F2F6F8 65%, #FFFFFF 100%)`,
           }}
         >
           <div className="flex items-center gap-3.5 min-w-0">
-            {player.photo_url ? (
+            {player.photo_url && !imgFailed ? (
               <img
                 src={player.photo_url}
                 alt={displayName}
-                className="w-18 h-18 rounded-2xl object-cover object-top border-2 border-emerald-500/40 bg-slate-100 shrink-0 shadow-sm"
+                onError={() => setImgFailed(true)}
+                className="w-16 h-16 rounded-2xl object-cover object-top border-2 border-[#0FB5AE]/50 bg-slate-100 shrink-0 shadow-sm"
               />
             ) : (
               <div
                 className={`w-16 h-16 rounded-2xl border-2 flex flex-col items-center justify-center font-extrabold shrink-0 shadow-2xs ${
-                  lightKit ? "border-slate-300 text-slate-900" : "border-white/70 text-white"
+                  lightKit ? "border-slate-300 text-[#0B1F3A]" : "border-white/70 text-white"
                 }`}
-                style={{ backgroundColor: club.kit_hex || "#059669" }}
+                style={{ backgroundColor: club.kit_hex || "#0D717A" }}
               >
                 <span className="text-lg leading-none">#{player.jersey_number}</span>
                 <span className={`text-[10px] mt-0.5 ${lightKit ? "text-slate-600" : "text-white/90"}`}>{player.position}</span>

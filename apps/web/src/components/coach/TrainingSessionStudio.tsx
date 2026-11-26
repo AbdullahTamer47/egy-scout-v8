@@ -89,42 +89,42 @@ export default function TrainingSessionStudio({
     const chart = echarts.init(el);
     const merged = MD_DAYS.map((d) => {
       const saved = sessions.find((s) => s.md_code === d.id);
-      const rpe = saved ? saved.target_rpe : d.rpe;
-      const au = saved ? saved.srpe_au : Math.round(d.dur * d.rpe);
-      return { id: d.id, rpe, au };
+      const rpe = saved ? saved.target_rpe : 0;
+      const au = saved ? saved.srpe_au : 0;
+      const refAu = Math.round(d.dur * d.rpe);
+      return { id: d.id, rpe, au, refAu };
     });
     chart.setOption({
       backgroundColor: "transparent",
       tooltip: {
         trigger: "axis",
         backgroundColor: "#FFFFFF",
-        borderColor: "#CBD5E1",
-        textStyle: { color: "#0F172A", fontSize: 11 },
+        borderColor: "#D8E3EB",
+        textStyle: { color: "#0B1F3A", fontSize: 11 },
       },
       grid: { left: 36, right: 32, top: 20, bottom: 24 },
-      xAxis: { type: "category", data: merged.map((m) => m.id), axisLabel: { color: "#475569", fontSize: 10 }, axisLine: { lineStyle: { color: "#CBD5E1" } } },
+      xAxis: { type: "category", data: merged.map((m) => m.id), axisLabel: { color: "#5C6A7C", fontSize: 10 }, axisLine: { lineStyle: { color: "#D8E3EB" } } },
       yAxis: [
-        { type: "value", name: "AU", nameTextStyle: { color: "#475569", fontSize: 10 }, axisLabel: { color: "#475569", fontSize: 10 }, splitLine: { lineStyle: { color: "#E2E8F0" } } },
-        { type: "value", name: "RPE", min: 0, max: 10, nameTextStyle: { color: "#0284C7", fontSize: 10 }, axisLabel: { color: "#0284C7", fontSize: 10 }, splitLine: { show: false } },
+        { type: "value", name: "AU", nameTextStyle: { color: "#5C6A7C", fontSize: 10 }, axisLabel: { color: "#5C6A7C", fontSize: 10 }, splitLine: { lineStyle: { color: "#EEF3F6" } } },
+        { type: "value", name: "RPE", min: 0, max: 10, nameTextStyle: { color: "#0D717A", fontSize: 10 }, axisLabel: { color: "#0D717A", fontSize: 10 }, splitLine: { show: false } },
       ],
       series: [
         {
-          name: "sRPE (AU)",
+          name: isAr ? "المسجل فعلياً (AU)" : "Logged (AU)",
           type: "bar",
           barWidth: "42%",
           data: merged.map((m) => ({
             value: m.au,
-            itemStyle: { borderRadius: [5, 5, 0, 0], color: m.rpe >= 8 ? "#EF4444" : m.rpe >= 6 ? "#F59E0B" : "#10B981" },
+            itemStyle: { borderRadius: [5, 5, 0, 0], color: m.rpe >= 8 ? "#EF4444" : m.rpe >= 6 ? "#E0A526" : "#0FB5AE" },
           })),
         },
         {
-          name: "RPE",
+          name: isAr ? "المرجع الإرشادي (UEFA)" : "UEFA Ref",
           type: "line",
-          yAxisIndex: 1,
           smooth: true,
-          data: merged.map((m) => m.rpe),
-          lineStyle: { color: "#0284C7", width: 2 },
-          itemStyle: { color: "#0284C7" },
+          symbol: "none",
+          data: merged.map((m) => m.refAu),
+          lineStyle: { color: "#0B1F3A", type: "dashed", width: 1.5, opacity: 0.45 },
         },
       ],
     });

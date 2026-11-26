@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="UTF-8" />
+  <title>bedigital · EGY-SCOUT Coach Pro Studio Stage</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;700&family=Noto+Kufi+Arabic:wght@700;800&family=Silkscreen:wght@400;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: #F2F6F8;
+      color: #0B1F3A;
+      font-family: 'IBM Plex Sans Arabic', 'Space Grotesk', system-ui, sans-serif;
+    }
+    .stage {
+      position: relative;
+      width: 1920px;
+      height: 1080px;
+      background: linear-gradient(135deg, #FFFFFF 0%, #F2F6F8 58%, #E9F4F5 100%);
+      overflow: hidden;
+    }
+    /* Subtle architectural dot grid */
+    .grid-bg {
+      position: absolute;
+      inset: 0;
+      background-image: radial-gradient(rgba(11, 31, 58, 0.065) 1.5px, transparent 1.5px);
+      background-size: 28px 28px;
+      pointer-events: none;
+    }
+    /* Header Chrome */
+    .top-bar {
+      position: absolute;
+      top: 38px;
+      left: 64px;
+      right: 64px;
+      height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 20;
+    }
+    .brand-lockup {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      direction: ltr;
+    }
+    .wordmark {
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700;
+      font-size: 28px;
+      letter-spacing: -0.03em;
+      color: #0B1F3A;
+    }
+    .wordmark span { color: #0D717A; }
+    .scene-tag {
+      font-family: 'Silkscreen', monospace;
+      font-size: 16px;
+      color: #0D717A;
+      background: #FFFFFF;
+      border: 2px solid #0B1F3A;
+      box-shadow: 5px 5px 0 #0FB5AE;
+      padding: 8px 18px;
+      letter-spacing: 0.06em;
+    }
+    /* Layout container */
+    .content-row {
+      position: absolute;
+      top: 126px;
+      left: 64px;
+      right: 64px;
+      bottom: 84px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 54px;
+    }
+    .content-row.rtl { flex-direction: row; direction: rtl; }
+    .content-row.ltr { flex-direction: row; direction: ltr; }
+
+    .copy-col {
+      width: 560px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+      z-index: 10;
+    }
+    .chapter-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      align-self: flex-start;
+      background: #0B1F3A;
+      color: #FFFFFF;
+      padding: 8px 16px;
+      font-family: 'Silkscreen', 'Space Grotesk', monospace;
+      font-size: 15px;
+      letter-spacing: 0.05em;
+      box-shadow: 5px 5px 0 #0FB5AE;
+    }
+    .nuqta-dot {
+      width: 11px;
+      height: 11px;
+      background: #E0A526;
+      transform: rotate(45deg);
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .headline {
+      font-family: 'Noto Kufi Arabic', 'Space Grotesk', sans-serif;
+      font-weight: 800;
+      font-size: 46px;
+      line-height: 1.32;
+      color: #0B1F3A;
+    }
+    .subline {
+      font-size: 24px;
+      line-height: 1.55;
+      color: #465466;
+      font-weight: 500;
+    }
+    .rule-bar {
+      width: 140px;
+      height: 6px;
+      background: #0FB5AE;
+    }
+
+    /* Elevated Paper White Product Screen Frame with Hard Offset Shadow */
+    .device-col {
+      position: relative;
+      flex: 1;
+      height: 770px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .browser-card {
+      position: relative;
+      width: 1180px;
+      height: 738px;
+      background: #FFFFFF;
+      border: 3px solid #0B1F3A;
+      box-shadow: 14px 14px 0 #0FB5AE;
+      overflow: hidden;
+    }
+    .browser-chrome {
+      height: 40px;
+      background: #F2F6F8;
+      border-bottom: 2px solid #0B1F3A;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      direction: ltr;
+    }
+    .chrome-dots { display: flex; gap: 8px; }
+    .chrome-dots i {
+      width: 11px; height: 11px; display: block;
+      background: #CBD5E1; border: 1.5px solid #0B1F3A;
+    }
+    .chrome-dots i:first-child { background: #0FB5AE; }
+    .chrome-url {
+      font-family: 'Space Grotesk', monospace;
+      font-size: 13px;
+      font-weight: 700;
+      color: #0D717A;
+      background: #FFFFFF;
+      border: 1.5px solid #D8E3EB;
+      padding: 3px 16px;
+    }
+    .viewport-wrap {
+      position: relative;
+      width: 100%;
+      height: 695px;
+      overflow: hidden;
+      background: #F2F6F8;
+    }
+    .screen-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: top center;
+      transform-origin: center center;
+    }
+
+    /* Animated crisp pointer cursor */
+    .cursor-pointer {
+      position: absolute;
+      width: 34px;
+      height: 34px;
+      z-index: 30;
+      pointer-events: none;
+      filter: drop-shadow(2px 4px 0 rgba(11,31,58,0.28));
+    }
+    .click-ring {
+      position: absolute;
+      width: 48px;
+      height: 48px;
+      border: 3px solid #E0A526;
+      background: rgba(224, 165, 38, 0.16);
+      transform: translate(-50%, -50%) scale(0);
+      opacity: 0;
+      z-index: 28;
+      pointer-events: none;
+    }
+
+    /* Centered Hero Intro / Outro Card */
+    .hero-center {
+      position: absolute;
+      inset: 120px 80px 96px 80px;
+      background: #FFFFFF;
+      border: 3px solid #0B1F3A;
+      box-shadow: 16px 16px 0 #0FB5AE;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 56px;
+      gap: 24px;
+      z-index: 15;
+    }
+    .hero-title {
+      font-family: 'Noto Kufi Arabic', 'Space Grotesk', sans-serif;
+      font-weight: 800;
+      font-size: 56px;
+      line-height: 1.3;
+      color: #0B1F3A;
+      max-width: 1180px;
+    }
+    .hero-sub {
+      font-size: 26px;
+      color: #465466;
+      max-width: 980px;
+      line-height: 1.5;
+    }
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      justify-content: center;
+      margin-top: 8px;
+    }
+    .feat-pill {
+      padding: 10px 22px;
+      background: #E6F8F7;
+      border: 2px solid #0B1F3A;
+      box-shadow: 4px 4px 0 #0FB5AE;
+      font-weight: 700;
+      font-size: 19px;
+      color: #0B1F3A;
+    }
+
+    /* Bottom Progress Rail */
+    .bottom-rail {
+      position: absolute;
+      bottom: 32px;
+      left: 64px;
+      right: 64px;
+      height: 10px;
+      background: #DDE7EE;
+      border: 1.5px solid #0B1F3A;
+      overflow: hidden;
+    }
+    .bottom-fill {
+      height: 100%;
+      background: #0FB5AE;
+      width: 0%;
+    }
+    /* Pixel Dissolve corner decoration */
+    .pixel-tail {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+      opacity: 0.85;
+    }
+  </style>
+</head>
+<body>
+  <div class="stage" id="stage">
+    <div class="grid-bg"></div>
+
+    <!-- Corner bedigital pixel dissolve -->
+    <svg class="pixel-tail" width="260" height="190" viewBox="0 0 260 190" fill="none">
+      <rect x="220" y="150" width="24" height="24" fill="#0FB5AE" fill-opacity="0.35"/>
+      <rect x="190" y="150" width="24" height="24" fill="#3FC4BE" fill-opacity="0.32"/>
+      <rect x="160" y="150" width="24" height="24" fill="#7BD6D3" fill-opacity="0.28"/>
+      <rect x="220" y="120" width="24" height="24" fill="#0FB5AE" fill-opacity="0.26"/>
+      <rect x="190" y="120" width="24" height="24" fill="#7BD6D3" fill-opacity="0.24"/>
+      <rect x="220" y="90" width="24" height="24" fill="#B7E9E7" fill-opacity="0.32"/>
+      <rect x="130" y="150" width="24" height="24" fill="#B7E9E7" fill-opacity="0.22"/>
+    </svg>
+
+    <div class="top-bar">
+      <div class="brand-lockup">
+        <svg width="44" height="44" viewBox="0 0 36 36" fill="none">
+          <rect x="4" y="6" width="29" height="21" rx="2" fill="#0FB5AE" fill-opacity="0.28"/>
+          <rect x="2" y="3" width="29" height="21" rx="2" fill="#FFFFFF" stroke="#0B1F3A" stroke-width="2.4"/>
+          <rect x="4.5" y="5.5" width="24" height="16" fill="#0B1F3A"/>
+          <rect x="6" y="7" width="4" height="2" fill="#0FB5AE"/>
+          <path d="M9.5 11.5V15.5H23.5V11.5" stroke="#FFFFFF" stroke-width="2.3" stroke-linecap="square"/>
+          <polygon id="top-nuqta" points="16.5,17 18.7,19.2 16.5,21.4 14.3,19.2" fill="#E0A526"/>
+          <rect x="13.5" y="24" width="6" height="4" fill="#0B1F3A"/>
+          <rect x="10" y="28" width="13" height="2.6" fill="#0B1F3A"/>
+        </svg>
+        <div class="wordmark">be<span>digital</span></div>
+      </div>
+      <div class="scene-tag" id="top-tag">EGY-SCOUT COACH PRO · 2026/27</div>
+    </div>
+
+    <!-- Split Feature Layout -->
+    <div class="content-row rtl" id="split-layout">
+      <div class="copy-col" id="copy-col">
+        <div class="chapter-chip" id="chapter-chip">
+          <span class="nuqta-dot"></span>
+          <span id="chip-text">01 · COACH PRO</span>
+        </div>
+        <div class="rule-bar"></div>
+        <h1 class="headline" id="headline"></h1>
+        <p class="subline" id="subline"></p>
+      </div>
+
+      <div class="device-col">
+        <div class="browser-card" id="browser-card">
+          <div class="browser-chrome">
+            <div class="chrome-dots"><i></i><i></i><i></i></div>
+            <div class="chrome-url" id="chrome-url">127.0.0.1:3000/coach · EGY-SCOUT Coach Pro (Certified)</div>
+            <div style="width:42px;"></div>
+          </div>
+          <div class="viewport-wrap">
+            <img class="screen-img" id="screen-img" src="" alt="" />
+            <div class="click-ring" id="click-ring"></div>
+            <svg class="cursor-pointer" id="cursor-svg" viewBox="0 0 24 24" fill="none">
+              <path d="M4 2L19 12.5L11.8 13.8L15 20.5L12.4 21.7L9.2 15L4 19.2V2Z" fill="#0B1F3A" stroke="#FFFFFF" stroke-width="1.8"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Full Hero Card for Intro / Outro -->
+    <div class="hero-center" id="hero-card" style="display:none;">
+      <svg id="hero-logo" width="110" height="110" viewBox="0 0 36 36" fill="none">
+        <rect x="4" y="6" width="29" height="21" rx="2" fill="#0FB5AE" fill-opacity="0.28"/>
+        <rect x="2" y="3" width="29" height="21" rx="2" fill="#FFFFFF" stroke="#0B1F3A" stroke-width="2.2"/>
+        <rect x="4.5" y="5.5" width="24" height="16" fill="#0B1F3A"/>
+        <rect id="hero-px-bar" x="6" y="7" width="4" height="2" fill="#0FB5AE"/>
+        <path id="hero-ba" d="M9.5 11.5V15.5H23.5V11.5" stroke="#FFFFFF" stroke-width="2.3" stroke-linecap="square"/>
+        <polygon id="hero-nuqta" points="16.5,17 19.2,19.7 16.5,22.4 13.8,19.7" fill="#E0A526"/>
+        <rect x="13.5" y="24" width="6" height="4" fill="#0B1F3A"/>
+        <rect x="10" y="28" width="13" height="2.6" fill="#0B1F3A"/>
+      </svg>
+      <div class="hero-title" id="hero-title"></div>
+      <div class="hero-sub" id="hero-sub"></div>
+      <div class="pill-row" id="hero-pills"></div>
+    </div>
+
+    <div class="bottom-rail">
+      <div class="bottom-fill" id="bottom-fill"></div>
+    </div>
+  </div>
+
+  <script>
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const easeOutCubic = (x) => 1 - Math.pow(1 - clamp(x, 0, 1), 3);
+    const easeInOut = (x) => {
+      const t = clamp(x, 0, 1);
+      return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    };
+
+    window.__loadedSrc = "";
+    window.renderFrame = async function ({
+      lang,
+      sceneIdx,
+      totalScenes,
+      scene,
+      localTime,
+      globalProgress,
+      imgDataUri,
+    }) {
+      const isAr = lang === "ar";
+      const split = document.getElementById("split-layout");
+      const hero = document.getElementById("hero-card");
+      const copyCol = document.getElementById("copy-col");
+      const browserCard = document.getElementById("browser-card");
+      const screenImg = document.getElementById("screen-img");
+      const cursor = document.getElementById("cursor-svg");
+      const clickRing = document.getElementById("click-ring");
+
+      document.getElementById("top-tag").textContent = scene.title_top;
+      document.getElementById("bottom-fill").style.width = `${clamp(globalProgress, 0, 1) * 100}%`;
+
+      const isHero = sceneIdx === 0 || sceneIdx === totalScenes - 1;
+      if (isHero) {
+        split.style.display = "none";
+        hero.style.display = "flex";
+        hero.setAttribute("dir", isAr ? "rtl" : "ltr");
+
+        const enter = easeOutCubic(localTime / 0.55);
+        hero.style.opacity = enter;
+        hero.style.transform = `translateY(${(1 - enter) * 24}px)`;
+
+        // Bedigital signature: 3 pixel build steps -> nuqta diamond lands last with crisp pulse
+        const nuqta = document.getElementById("hero-nuqta");
+        const ba = document.getElementById("hero-ba");
+        ba.style.opacity = localTime > 0.14 ? 1 : 0;
+        const nScale = localTime < 0.28 ? 0 : (localTime < 0.42 ? 1.32 : 1.0);
+        nuqta.style.transformOrigin = "16.5px 19.7px";
+        nuqta.style.transform = `scale(${nScale})`;
+
+        document.getElementById("hero-title").textContent = scene.headline;
+        document.getElementById("hero-sub").textContent = scene.sub;
+
+        const pills = isAr
+          ? ["بيانات 2026/2027 حية", "خطط 5×5 إلى 11×11", "3 حالات تكتيكية", "كشف الـ 20 + AI"]
+          : ["Live 2026/27 Data", "5v5 to 11v11 Boards", "3 Tactical Phases", "Admin + AI Copilot"];
+        document.getElementById("hero-pills").innerHTML = pills
+          .map((p, i) => {
+            const pShow = easeOutCubic((localTime - 0.35 - i * 0.08) / 0.3);
+            return `<div class="feat-pill" style="opacity:${pShow};transform:translateY(${(1-pShow)*12}px)">${p}</div>`;
+          })
+          .join("");
+        return;
+      }
+
+      // Split Feature Layout
+      hero.style.display = "none";
+      split.style.display = "flex";
+      split.className = `content-row ${isAr ? "rtl" : "ltr"}`;
+
+      const dur = Math.max(2.0, scene.duration_s || 6.0);
+      const uEnter = easeOutCubic(localTime / 0.48);
+      const uExit = localTime > dur - 0.35 ? easeOutCubic((dur - localTime) / 0.35) : 1.0;
+      const alpha = clamp(Math.min(uEnter, uExit), 0, 1);
+
+      document.getElementById("chip-text").textContent = `${String(sceneIdx + 1).padStart(2, "0")} · ${scene.title_top}`;
+      document.getElementById("headline").textContent = scene.headline;
+      document.getElementById("subline").textContent = scene.sub;
+      document.getElementById("chrome-url").textContent = scene.id.includes("beta")
+        ? "127.0.0.1:3000/ · EGY-SCOUT Full Video Studio (Beta)"
+        : "127.0.0.1:3000/coach · EGY-SCOUT Coach Pro (Certified Light)";
+
+      copyCol.style.opacity = alpha;
+      copyCol.style.transform = `translateY(${(1 - uEnter) * 20}px)`;
+
+      browserCard.style.opacity = alpha;
+      browserCard.style.transform = `translateY(${(1 - uEnter) * 18}px) scale(${0.97 + 0.03 * uEnter})`;
+
+      if (window.__loadedSrc !== imgDataUri) {
+        window.__loadedSrc = imgDataUri;
+        screenImg.src = imgDataUri;
+        await new Promise((r) => {
+          if (screenImg.complete) return r();
+          screenImg.onload = r;
+          screenImg.onerror = r;
+        });
+      }
+
+      // Gentle editorial zoom + pan across live UI capture
+      const panU = easeInOut(localTime / dur);
+      const zoom = 1.0 + 0.055 * panU;
+      const [sx, sy, ex, ey] = scene.cursor || [0.5, 0.5, 0.5, 0.5];
+      const cx = (sx + (ex - sx) * panU) * 1180;
+      const cy = (sy + (ey - sy) * panU) * 695;
+      screenImg.style.transformOrigin = `${ex * 100}% ${ey * 100}%`;
+      screenImg.style.transform = `scale(${zoom.toFixed(4)})`;
+
+      cursor.style.left = `${cx}px`;
+      cursor.style.top = `${cy}px`;
+
+      const clickT = (localTime - dur * 0.48) / 0.55;
+      if (clickT >= 0 && clickT <= 1) {
+        clickRing.style.left = `${cx}px`;
+        clickRing.style.top = `${cy}px`;
+        clickRing.style.opacity = String(1 - clickT);
+        clickRing.style.transform = `translate(-50%, -50%) scale(${0.3 + clickT * 1.15})`;
+      } else {
+        clickRing.style.opacity = "0";
+      }
+    };
+  </script>
+</body>
+</html>

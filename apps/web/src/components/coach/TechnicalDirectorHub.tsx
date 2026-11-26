@@ -120,10 +120,10 @@ export default function TechnicalDirectorHub({
             type="button"
             onClick={() => setSubView("egypt_scout")}
             className={`px-3.5 py-2 rounded-xl font-extrabold transition ${
-              subView === "egypt_scout" ? "bg-emerald-600 text-white shadow-2xs" : "bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100"
+              subView === "egypt_scout" ? "bg-[#0D717A] text-white shadow-2xs" : "bg-[#F2F6F8] text-[#0B1F3A] border border-[#D8E3EB] hover:bg-slate-100"
             }`}
           >
-            {isAr ? "كشاف كل لاعبي الدوري المصري (23 نادي / 691 لاعب)" : "All-Egypt League Scout (691 Players)"}
+            {isAr ? "كشاف كل لاعبي الدوري المصري 2026/27" : "All-Egypt League Scout 2026/27"}
           </button>
         </div>
 
@@ -149,7 +149,7 @@ export default function TechnicalDirectorHub({
               onChange={(e) => setScoutClubId(e.target.value)}
               className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-1.5 font-bold text-slate-800"
             >
-              <option value="ALL">{isAr ? "كل أندية الدوري المصري (23)" : "All Clubs"}</option>
+              <option value="ALL">{isAr ? `كل أندية الدوري (${clubs.length})` : `All Clubs (${clubs.length})`}</option>
               {clubs.map((c) => (
                 <option key={c.club_id} value={c.club_id}>
                   {c.name_ar} ({c.player_count})

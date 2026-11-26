@@ -3,7 +3,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowRightLeft,
+  Camera,
   Download,
+  Film,
+  Grid,
   Link2,
   Move,
   MoveUpRight,
@@ -26,6 +29,7 @@ import {
   EditableArrow,
   EditableZone,
   FreehandStroke,
+  getShortArabicName,
   isLightHex,
   PlayerTacticalLink,
   TacticalPhaseId,
@@ -39,15 +43,30 @@ interface Props {
   opponent: CoachClubDetail;
   defaultFormation: string;
   externalBlueprint?: ThreePhaseBlueprint | null;
+  onFormationChange?: (formation: string) => void;
 }
 
 type ToolMode = "drag" | "link_players" | "pass_arrow" | "run_arrow" | "press_arrow" | "zone" | "freehand";
 type DisplayMode = "both" | "team_a" | "team_b";
 
-const FORMATIONS = ["4-2-3-1", "4-3-3", "3-4-2-1", "3-2-4-1", "3-5-2", "4-4-2", "5-3-2"];
+const TEAM_SIZES = [5, 6, 7, 8, 9, 10, 11] as const;
+const SIZE_FORMATIONS: Record<number, string[]> = {
+  5: ["1-2-1", "2-2", "1-1-2"],
+  6: ["2-2-1", "2-1-2"],
+  7: ["2-3-1", "3-2-1"],
+  8: ["3-3-1", "2-3-2"],
+  9: ["3-3-2", "3-2-3"],
+  10: ["3-4-2", "4-3-2"],
+  11: ["4-2-3-1", "4-3-3", "3-4-2-1", "3-2-4-1", "3-5-2", "4-4-2", "5-3-2"],
+};
+const EDITABLE_SLOTS = [
+  "GK", "CB", "RCB", "LCB", "CCB", "RB", "LB", "RWB", "LWB",
+  "DM", "RDM", "LDM", "CDM", "CM", "RCM", "LCM", "CAM", "RAM", "LAM",
+  "RM", "LM", "RW", "LW", "ST", "RST", "LST", "FIX", "ALA", "PIV",
+];
 const PHASE_META: Array<{ id: TacticalPhaseId; ar: string; en: string; color: string }> = [
-  { id: "possession", ar: "1. في حالة الاستحواذ", en: "1. Possession", color: "#059669" },
-  { id: "attack", ar: "2. في حالة الهجوم", en: "2. Attacking", color: "#D97706" },
+  { id: "possession", ar: "1. في حالة الاستحواذ", en: "1. Possession", color: "#0D717A" },
+  { id: "attack", ar: "2. في حالة الهجوم", en: "2. Attacking", color: "#E0A526" },
   { id: "defense", ar: "3. قطع الكرة والدفاع", en: "3. Defense & Recovery", color: "#DC2626" },
 ];
 const PRESET_BUTTONS = [
@@ -82,8 +101,10 @@ export default function CoachTacticsStudio({
   opponent,
   defaultFormation,
   externalBlueprint = null,
+  onFormationChange,
 }: Props) {
   const isAr = lang === "ar";
+  const [teamSize, setTeamSize] = useState<number>(11);
   const [formA, setFormA] = useState(defaultFormation || "4-2-3-1");
   const [formB, setFormB] = useState("4-4-2");
   const [activePhase, setActivePhase] = useState<TacticalPhaseId>("possession");
@@ -92,11 +113,15 @@ export default function CoachTacticsStudio({
 
   const [tool, setTool] = useState<ToolMode>("drag");
   const [displayMode, setDisplayMode] = useState<DisplayMode>("both");
+  const [showChannelsGrid, setShowChannelsGrid] = useState<boolean>(true);
+  const [syncSlotAllPhases, setSyncSlotAllPhases] = useState<boolean>(true);
   const [selectedEl, setSelectedEl] = useState<SelectedElement>(null);
   const [linkPending, setLinkPending] = useState<{ team: "team_a" | "team_b"; slot: string } | null>(null);
   const [linkKind, setLinkKind] = useState<"pass" | "support" | "mark">("pass");
-  const [drawColor, setDrawColor] = useState("#FACC15");
+  const [drawColor, setDrawColor] = useState("#E0A526");
   const [liveFreehand, setLiveFreehand] = useState<Array<{ x: number; y: number }>>([]);
+  const [keyframes, setKeyframes] = useState<Array<{ nodesA: BlueprintNode[]; nodesB: BlueprintNode[] }>>([]);
+  const [playingKeyframes, setPlayingKeyframes] = useState(false);
 
   const [isMorphing, setIsMorphing] = useState(false);
   const [morphDisplay, setMorphDisplay] = useState<{ nodesA: BlueprintNode[]; nodesB: BlueprintNode[] } | null>(null);
@@ -113,7 +138,7 @@ export default function CoachTacticsStudio({
   const draftBoxRef = useRef<{ sx: number; sy: number; cx: number; cy: number } | null>(null);
   const freehandDraftRef = useRef<Array<{ x: number; y: number }> | null>(null);
 
-  const loadBlueprintFromApi = async (fA: string, fB: string, presetPrompt = "") => {
+  const loadBlueprintFromApi = async (fA: string, fB: string, presetPrompt = "", tSize = teamSize) => {
     try {
       const bp = await apiFetch<ThreePhaseBlueprint>(
         "/api/coach/tactics/blueprint",
@@ -122,6 +147,7 @@ export default function CoachTacticsStudio({
           body: JSON.stringify({
             club_id: club.club_id,
             opponent_id: opponent.club_id,
+            team_size: tSize,
             formation_code: fA,
             opponent_formation_code: fB,
             masterclass_prompt: presetPrompt,
@@ -134,11 +160,20 @@ export default function CoachTacticsStudio({
         setPhases(bp.phase_states);
         setFormA(bp.formation_code);
         if (bp.opponent_formation_code) setFormB(bp.opponent_formation_code);
+        if (bp.team_size) setTeamSize(bp.team_size);
         setSelectedEl(null);
         setUndoStack([]);
       }
     } catch {}
   };
+
+  useEffect(() => {
+    if (defaultFormation && teamSize === 11 && defaultFormation !== formA) {
+      setFormA(defaultFormation);
+      loadBlueprintFromApi(defaultFormation, formB, "", 11);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultFormation]);
 
   useEffect(() => {
     if (externalBlueprint?.phase_states) {
@@ -221,6 +256,37 @@ export default function CoachTacticsStudio({
     };
   }, [isMorphing, phases]);
 
+  // Custom Keyframe Sequencer Playback
+  useEffect(() => {
+    if (!playingKeyframes || keyframes.length < 2) return;
+    const segMs = 1350;
+    const startTs = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const totalSegs = keyframes.length - 1;
+      const elapsed = (now - startTs) % (totalSegs * segMs);
+      const seg = Math.floor(elapsed / segMs);
+      const u = (elapsed - seg * segMs) / segMs;
+      const ease = u * u * (3 - 2 * u);
+      const f0 = keyframes[seg];
+      const f1 = keyframes[seg + 1];
+      if (f0 && f1) {
+        const lerp = (a: BlueprintNode[], b: BlueprintNode[]) =>
+          a.map((n, i) => {
+            const t = b[i] || n;
+            return { ...n, x_m: n.x_m + (t.x_m - n.x_m) * ease, y_m: n.y_m + (t.y_m - n.y_m) * ease };
+          });
+        setMorphDisplay({ nodesA: lerp(f0.nodesA, f1.nodesA), nodesB: lerp(f0.nodesB, f1.nodesB) });
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      setMorphDisplay(null);
+    };
+  }, [playingKeyframes, keyframes]);
+
   const commitPhaseEdit = (mutator: (p: TacticalPhaseSnapshot) => TacticalPhaseSnapshot) => {
     if (!phases) return;
     setUndoStack((prev) => [...prev.slice(-24), JSON.parse(JSON.stringify(phases))]);
@@ -282,6 +348,31 @@ export default function CoachTacticsStudio({
     const sixH = ph * (18.32 / 68);
     ctx.strokeRect(pad, (H - sixH) / 2, sixW, sixH);
     ctx.strokeRect(W - pad - sixW, (H - sixH) / 2, sixW, sixH);
+
+    // 5-Channel Positional Play Grid (Half-spaces + Zone 14 corridors + Vertical Thirds)
+    if (showChannelsGrid) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,255,255,0.28)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 6]);
+      [13.84, 24.5, 43.5, 54.16].forEach((ym) => {
+        const pL = toPx(0, ym);
+        const pR = toPx(105, ym);
+        ctx.beginPath();
+        ctx.moveTo(pL.x, pL.y);
+        ctx.lineTo(pR.x, pR.y);
+        ctx.stroke();
+      });
+      [35.0, 70.0].forEach((xm) => {
+        const pT = toPx(xm, 0);
+        const pB = toPx(xm, 68);
+        ctx.beginPath();
+        ctx.moveTo(pT.x, pT.y);
+        ctx.lineTo(pB.x, pB.y);
+        ctx.stroke();
+      });
+      ctx.restore();
+    }
 
     // Custom / Tactical Zones
     currentPhase.custom_zones.forEach((z, idx) => {
@@ -401,39 +492,52 @@ export default function CoachTacticsStudio({
         const darkInk = n.slot === "GK" || lightKit;
         ctx.save();
         if (isSel || isPendingLink) {
-          ctx.strokeStyle = isPendingLink ? "#38BDF8" : "#FACC15";
+          ctx.strokeStyle = isPendingLink ? "#0FB5AE" : "#E0A526";
           ctx.lineWidth = 3.2;
           ctx.beginPath();
           ctx.arc(pt.x, pt.y, 19, 0, Math.PI * 2);
           ctx.stroke();
         }
-        ctx.fillStyle = n.slot === "GK" ? "#FACC15" : hex;
+        ctx.fillStyle = n.slot === "GK" ? "#E0A526" : hex;
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, 14, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = darkInk ? "#0F172A" : "#FFFFFF";
+        ctx.strokeStyle = darkInk ? "#0B1F3A" : "#FFFFFF";
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        ctx.fillStyle = darkInk ? "#0F172A" : "#FFFFFF";
+        ctx.fillStyle = darkInk ? "#0B1F3A" : "#FFFFFF";
         ctx.font = "bold 10.5px sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(String(n.jersey_number || n.slot), pt.x, pt.y);
 
-        const nm = (n.player_label || n.slot).split(" ").slice(-1)[0];
-        ctx.fillStyle = "rgba(15,23,42,0.88)";
-        ctx.fillRect(pt.x - 28, pt.y + 15, 56, 13);
+        // Editable position tag pill above circle
+        const slotTxt = String(n.slot || "").slice(0, 6);
+        ctx.font = "bold 8.5px sans-serif";
+        const sw = Math.max(24, ctx.measureText(slotTxt).width + 8);
+        ctx.fillStyle = team === "team_a" ? "#0B1F3A" : "#FFFFFF";
+        ctx.fillRect(pt.x - sw / 2, pt.y - 26, sw, 11);
+        ctx.fillStyle = team === "team_a" ? "#0FB5AE" : "#0B1F3A";
+        ctx.fillText(slotTxt, pt.x, pt.y - 20.5);
+
+        // Full 2-word clear Arabic player name pill below circle
+        const rawNm = (n.player_label || n.slot).trim();
+        const words = rawNm.split(/\s+/).filter(Boolean);
+        const fullNm = words.length <= 2 ? rawNm : `${words[0]} ${words[words.length - 1]}`;
+        ctx.font = "bold 9.5px sans-serif";
+        const nw = Math.max(46, Math.min(118, ctx.measureText(fullNm).width + 12));
+        ctx.fillStyle = "rgba(11, 31, 58, 0.9)";
+        ctx.fillRect(pt.x - nw / 2, pt.y + 15, nw, 15);
         ctx.fillStyle = "#FFFFFF";
-        ctx.font = "bold 9px sans-serif";
-        ctx.fillText(`${n.slot} ${nm}`.slice(0, 12), pt.x, pt.y + 21.5);
+        ctx.fillText(fullNm, pt.x, pt.y + 22.5);
         ctx.restore();
       });
     };
 
     if (displayMode !== "team_b") drawPlayers(nodesA, "team_a", club.kit_hex || "#DC2626");
     if (displayMode !== "team_a") drawPlayers(nodesB, "team_b", opponent.kit_hex || "#0284C7");
-  }, [currentPhase, morphDisplay, displayMode, selectedEl, linkPending, club.kit_hex, opponent.kit_hex, liveFreehand, drawColor]);
+  }, [currentPhase, morphDisplay, displayMode, showChannelsGrid, selectedEl, linkPending, club.kit_hex, opponent.kit_hex, liveFreehand, drawColor]);
 
   const toMetersFromEvent = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const cvs = cvsRef.current!;
@@ -756,15 +860,71 @@ export default function CoachTacticsStudio({
     if (selectedEl?.kind !== "node") return;
     const pool = selectedEl.team === "team_a" ? club.players : opponent.players;
     const pl = pool.find((x) => x.jersey_number === jerseyNum);
-    if (!pl) return;
-    commitPhaseEdit((p) => {
-      const list = selectedEl.team === "team_a" ? p.nodes : p.opponent_nodes;
-      list[selectedEl.index] = {
-        ...list[selectedEl.index],
-        jersey_number: pl.jersey_number,
-        player_label: isAr ? pl.name_ar || pl.name_en : pl.name_en,
-      };
-      return p;
+    if (!pl || !phases) return;
+    setUndoStack((prev) => [...prev.slice(-24), JSON.parse(JSON.stringify(phases))]);
+    const targetKeys: TacticalPhaseId[] = syncSlotAllPhases ? ["possession", "attack", "defense"] : [activePhase];
+    setPhases((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev };
+      for (const pk of targetKeys) {
+        const ph = clonePhase(next[pk]);
+        const list = selectedEl.team === "team_a" ? ph.nodes : ph.opponent_nodes;
+        if (list[selectedEl.index]) {
+          list[selectedEl.index] = {
+            ...list[selectedEl.index],
+            jersey_number: pl.jersey_number,
+            player_label: getShortArabicName(pl),
+          };
+        }
+        next[pk] = ph;
+      }
+      return next;
+    });
+  };
+
+  const updateSelectedPlayerMeta = (patch: { slot?: string; role_ar?: string }) => {
+    if (selectedEl?.kind !== "node" || !phases) return;
+    setUndoStack((prev) => [...prev.slice(-24), JSON.parse(JSON.stringify(phases))]);
+    const targetKeys: TacticalPhaseId[] = syncSlotAllPhases ? ["possession", "attack", "defense"] : [activePhase];
+    setPhases((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev };
+      for (const pk of targetKeys) {
+        const ph = clonePhase(next[pk]);
+        const list = selectedEl.team === "team_a" ? ph.nodes : ph.opponent_nodes;
+        const oldSlot = list[selectedEl.index]?.slot;
+        if (list[selectedEl.index]) {
+          list[selectedEl.index] = {
+            ...list[selectedEl.index],
+            ...(patch.slot !== undefined ? { slot: patch.slot.toUpperCase() } : {}),
+            ...(patch.role_ar !== undefined ? { role_ar: patch.role_ar } : {}),
+          };
+          // Keep arrows & custom links anchored cleanly when slot name changes!
+          if (patch.slot && oldSlot && patch.slot.toUpperCase() !== oldSlot) {
+            const newSl = patch.slot.toUpperCase();
+            if (selectedEl.team === "team_a") {
+              ph.passing_arrows = ph.passing_arrows.map((a) => ({
+                ...a,
+                from_slot: a.from_slot === oldSlot ? newSl : a.from_slot,
+                to_slot: a.to_slot === oldSlot ? newSl : a.to_slot,
+              }));
+            } else {
+              ph.opponent_passing_arrows = ph.opponent_passing_arrows.map((a) => ({
+                ...a,
+                from_slot: a.from_slot === oldSlot ? newSl : a.from_slot,
+                to_slot: a.to_slot === oldSlot ? newSl : a.to_slot,
+              }));
+            }
+            ph.custom_links = ph.custom_links.map((lk) => ({
+              ...lk,
+              fromSlot: lk.fromTeam === selectedEl.team && lk.fromSlot === oldSlot ? newSl : lk.fromSlot,
+              toSlot: lk.toTeam === selectedEl.team && lk.toSlot === oldSlot ? newSl : lk.toSlot,
+            }));
+          }
+        }
+        next[pk] = ph;
+      }
+      return next;
     });
   };
 
@@ -815,6 +975,7 @@ export default function CoachTacticsStudio({
   };
 
   const fitPlayers = club.players.filter((p) => p.is_eligible_starter);
+  const activeFormationsList = SIZE_FORMATIONS[teamSize] || SIZE_FORMATIONS[11];
   const selectedNodeObj =
     selectedEl?.kind === "node" && currentPhase
       ? (selectedEl.team === "team_a" ? currentPhase.nodes : currentPhase.opponent_nodes)[selectedEl.index]
@@ -822,8 +983,109 @@ export default function CoachTacticsStudio({
 
   const selectedMeta = getSelectedLabelAndColor();
 
+  const handleTeamSizeChange = (nextSize: number) => {
+    const allowed = SIZE_FORMATIONS[nextSize] || SIZE_FORMATIONS[11];
+    const nextFA = allowed[0];
+    const nextFB = allowed[Math.min(1, allowed.length - 1)] || allowed[0];
+    setTeamSize(nextSize);
+    setFormA(nextFA);
+    setFormB(nextFB);
+    setIsMorphing(false);
+    setPlayingKeyframes(false);
+    setKeyframes([]);
+    loadBlueprintFromApi(nextFA, nextFB, "", nextSize);
+  };
+
+  const captureKeyframe = () => {
+    if (!currentPhase) return;
+    setKeyframes((prev) => [
+      ...prev,
+      {
+        nodesA: JSON.parse(JSON.stringify(currentPhase.nodes)),
+        nodesB: JSON.parse(JSON.stringify(currentPhase.opponent_nodes)),
+      },
+    ]);
+  };
+
   return (
     <div dir={isAr ? "rtl" : "ltr"} className="space-y-3">
+      {/* Row 0: Multi-Format Team Size Bar (5v5 .. 11v11) */}
+      <div className="studio-panel p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-extrabold text-[#0B1F3A] px-1">
+            {isAr ? "مقاس السبورة التكتيكية:" : "Match Format:"}
+          </span>
+          {TEAM_SIZES.map((sz) => (
+            <button
+              key={sz}
+              type="button"
+              onClick={() => handleTeamSizeChange(sz)}
+              className={`px-2.5 py-1 rounded-lg font-extrabold border transition ${
+                teamSize === sz
+                  ? "bg-[#0B1F3A] text-white border-[#0B1F3A] shadow-2xs"
+                  : "bg-[#F2F6F8] text-[#5C6A7C] border-[#D8E3EB] hover:border-[#0FB5AE] hover:text-[#0B1F3A]"
+              }`}
+            >
+              {sz}×{sz}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setShowChannelsGrid((v) => !v)}
+            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold border transition ${
+              showChannelsGrid
+                ? "bg-[#E6F8F7] text-[#0D717A] border-[#0FB5AE]/50"
+                : "bg-[#F2F6F8] text-[#5C6A7C] border-[#D8E3EB]"
+            }`}
+          >
+            <Grid className="w-3.5 h-3.5" />
+            <span>{isAr ? "شبكة المساحات" : "5-Channels Grid"}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={captureKeyframe}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#F2F6F8] hover:bg-[#E6F8F7] border border-[#D8E3EB] text-[#0B1F3A] font-bold"
+          >
+            <Camera className="w-3.5 h-3.5 text-[#0D717A]" />
+            <span>{isAr ? `+ لقطة (${keyframes.length})` : `+ Keyframe (${keyframes.length})`}</span>
+          </button>
+
+          {keyframes.length >= 2 && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMorphing(false);
+                  setPlayingKeyframes((v) => !v);
+                }}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-extrabold border ${
+                  playingKeyframes
+                    ? "bg-[#E0A526] text-[#0B1F3A] border-[#E0A526]"
+                    : "bg-[#0D717A] text-white border-[#0D717A]"
+                }`}
+              >
+                <Film className="w-3.5 h-3.5" />
+                <span>{playingKeyframes ? (isAr ? "إيقاف" : "Stop") : isAr ? "تشغيل السيناريو" : "Play Playbook"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPlayingKeyframes(false);
+                  setKeyframes([]);
+                }}
+                className="px-2 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 font-bold"
+              >
+                {isAr ? "مسح" : "Clear"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
       {/* Compact Row 1: 3 Tactical Phase Tabs + Morph Animation + Formations + Presets */}
       <div className="studio-panel p-3 space-y-2.5 text-xs">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -837,16 +1099,17 @@ export default function CoachTacticsStudio({
                   type="button"
                   onClick={() => {
                     setIsMorphing(false);
+                    setPlayingKeyframes(false);
                     setActivePhase(pm.id);
                     setSelectedEl(null);
                   }}
                   className={`px-3 py-1.5 rounded-xl font-extrabold border transition flex items-center gap-1.5 ${
                     isAct
-                      ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
-                      : "bg-slate-50 text-slate-700 border-slate-200 hover:border-slate-300"
+                      ? "bg-[#0D717A] text-white border-[#0D717A] shadow-xs"
+                      : "bg-[#F2F6F8] text-[#0B1F3A] border-[#D8E3EB] hover:border-[#0FB5AE]"
                   }`}
                 >
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: isAct ? "#FFFFFF" : pm.color }} />
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: isAct ? "#E0A526" : pm.color }} />
                   <span>{isAr ? pm.ar : pm.en}</span>
                 </button>
               );
@@ -854,11 +1117,14 @@ export default function CoachTacticsStudio({
 
             <button
               type="button"
-              onClick={() => setIsMorphing((v) => !v)}
+              onClick={() => {
+                setPlayingKeyframes(false);
+                setIsMorphing((v) => !v);
+              }}
               className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-xl font-extrabold border transition ${
                 isMorphing
-                  ? "bg-amber-500 text-white border-amber-500 shadow-xs"
-                  : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
+                  ? "bg-[#E0A526] text-[#0B1F3A] border-[#E0A526] shadow-xs"
+                  : "bg-amber-50 text-amber-900 border-[#E0A526]/40 hover:bg-amber-100"
               }`}
             >
               {isMorphing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
@@ -872,12 +1138,16 @@ export default function CoachTacticsStudio({
               value={formA}
               aria-label="Your Formation"
               onChange={(e) => {
-                setFormA(e.target.value);
-                loadBlueprintFromApi(e.target.value, formB);
+                const nextF = e.target.value;
+                setFormA(nextF);
+                loadBlueprintFromApi(nextF, formB, "", teamSize);
+                if (teamSize === 11 && onFormationChange) {
+                  onFormationChange(nextF);
+                }
               }}
-              className="rounded-xl bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 font-extrabold text-emerald-800"
+              className="rounded-xl bg-[#E6F8F7] border border-[#0FB5AE]/50 px-2.5 py-1.5 font-extrabold text-[#0D717A]"
             >
-              {FORMATIONS.map((f) => (
+              {activeFormationsList.map((f) => (
                 <option key={f} value={f}>{club.name_ar}: {f}</option>
               ))}
             </select>
@@ -886,20 +1156,20 @@ export default function CoachTacticsStudio({
               aria-label="Opponent Formation"
               onChange={(e) => {
                 setFormB(e.target.value);
-                loadBlueprintFromApi(formA, e.target.value);
+                loadBlueprintFromApi(formA, e.target.value, "", teamSize);
               }}
-              className="rounded-xl bg-sky-50 border border-sky-200 px-2.5 py-1.5 font-extrabold text-sky-800"
+              className="rounded-xl bg-[#F2F6F8] border border-[#D8E3EB] px-2.5 py-1.5 font-extrabold text-[#0B1F3A]"
             >
-              {FORMATIONS.map((f) => (
+              {activeFormationsList.map((f) => (
                 <option key={f} value={f}>{opponent.name_ar}: {f}</option>
               ))}
             </select>
-            {PRESET_BUTTONS.map((pr) => (
+            {teamSize === 11 && PRESET_BUTTONS.map((pr) => (
               <button
                 key={pr.label}
                 type="button"
-                onClick={() => loadBlueprintFromApi(formA, formB, pr.prompt)}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-emerald-400 text-[11px] font-bold text-slate-700"
+                onClick={() => loadBlueprintFromApi(formA, formB, pr.prompt, 11)}
+                className="px-2.5 py-1.5 rounded-xl bg-[#F2F6F8] border border-[#D8E3EB] hover:border-[#0FB5AE] text-[11px] font-bold text-[#0B1F3A]"
               >
                 {pr.label}
               </button>
@@ -962,7 +1232,7 @@ export default function CoachTacticsStudio({
           <div className="flex flex-wrap items-center gap-1.5">
             {(
               [
-                ["both", "11v11"],
+                ["both", `${teamSize}v${teamSize}`],
                 ["team_a", club.name_ar],
                 ["team_b", opponent.name_ar],
               ] as Array<[DisplayMode, string]>
@@ -972,16 +1242,16 @@ export default function CoachTacticsStudio({
                 type="button"
                 onClick={() => setDisplayMode(dm)}
                 className={`px-2 py-1 rounded-lg text-[11px] font-bold ${
-                  displayMode === dm ? "bg-sky-600 text-white" : "bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100"
+                  displayMode === dm ? "bg-[#0D717A] text-white" : "bg-[#F2F6F8] text-[#0B1F3A] border border-[#D8E3EB] hover:bg-slate-100"
                 }`}
               >
                 {lbl}
               </button>
             ))}
-            <button type="button" onClick={handleUndo} disabled={undoStack.length === 0} className="p-1.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 disabled:opacity-35" title={isAr ? "تراجع" : "Undo"}>
+            <button type="button" onClick={handleUndo} disabled={undoStack.length === 0} className="p-1.5 rounded-lg bg-[#F2F6F8] border border-[#D8E3EB] text-[#0B1F3A] disabled:opacity-35" title={isAr ? "تراجع" : "Undo"}>
               <Undo2 className="w-3.5 h-3.5" />
             </button>
-            <button type="button" onClick={() => loadBlueprintFromApi(formA, formB)} className="p-1.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-700" title={isAr ? "إعادة ضبط" : "Reset"}>
+            <button type="button" onClick={() => loadBlueprintFromApi(formA, formB, "", teamSize)} className="p-1.5 rounded-lg bg-[#F2F6F8] border border-[#D8E3EB] text-[#0B1F3A]" title={isAr ? "إعادة ضبط" : "Reset"}>
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
             <button type="button" onClick={exportPng} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 font-bold hover:border-emerald-400">
@@ -1062,21 +1332,70 @@ export default function CoachTacticsStudio({
             </div>
 
             {selectedNodeObj && selectedEl?.kind === "node" ? (
-              <div className="space-y-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-                <div className="font-extrabold text-emerald-700">
+              <div className="space-y-2.5 p-2.5 rounded-xl bg-[#F2F6F8] border border-[#D8E3EB]">
+                <div className="font-extrabold text-[#0D717A]">
                   #{selectedNodeObj.jersey_number} {selectedNodeObj.player_label} ({selectedNodeObj.slot})
                 </div>
-                <div className="text-[11px] text-slate-600">
+                <div className="text-[11px] text-[#5C6A7C]">
                   {selectedNodeObj.role_ar} • X={selectedNodeObj.x_m}m, Y={selectedNodeObj.y_m}m
                 </div>
-                <label className="block text-[11px] font-bold text-slate-700 pt-1">
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-[#0B1F3A] mb-1">
+                      {isAr ? "المركز التكتيكي:" : "Tactical Position:"}
+                    </label>
+                    <select
+                      value={EDITABLE_SLOTS.includes(selectedNodeObj.slot) ? selectedNodeObj.slot : "CUSTOM"}
+                      aria-label="Edit Tactical Position"
+                      onChange={(e) => {
+                        if (e.target.value !== "CUSTOM") updateSelectedPlayerMeta({ slot: e.target.value });
+                      }}
+                      className="w-full rounded-lg bg-white border border-[#D8E3EB] px-2 py-1 text-[11px] font-extrabold text-[#0B1F3A]"
+                    >
+                      {EDITABLE_SLOTS.map((sl) => (
+                        <option key={sl} value={sl}>{sl}</option>
+                      ))}
+                      {!EDITABLE_SLOTS.includes(selectedNodeObj.slot) && (
+                        <option value="CUSTOM">{selectedNodeObj.slot}</option>
+                      )}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-[#0B1F3A] mb-1">
+                      {isAr ? "رمز مخصص:" : "Custom Code:"}
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={8}
+                      value={selectedNodeObj.slot}
+                      onChange={(e) => updateSelectedPlayerMeta({ slot: e.target.value })}
+                      className="w-full rounded-lg bg-white border border-[#D8E3EB] px-2 py-1 text-[11px] font-extrabold text-[#0D717A] outline-none focus:border-[#0FB5AE]"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-[#0B1F3A] mb-1">
+                    {isAr ? "المهمة / الدور التكتيكي للاعب:" : "Player Tactical Duty:"}
+                  </label>
+                  <input
+                    type="text"
+                    value={selectedNodeObj.role_ar || ""}
+                    onChange={(e) => updateSelectedPlayerMeta({ role_ar: e.target.value })}
+                    placeholder={isAr ? "مثال: ظهير عكسي / جناح مقلوب..." : "Custom role..."}
+                    className="w-full rounded-lg bg-white border border-[#D8E3EB] px-2 py-1 text-[11px] text-[#0B1F3A] outline-none focus:border-[#0FB5AE]"
+                  />
+                </div>
+
+                <label className="block text-[11px] font-bold text-[#0B1F3A] pt-1">
                   {isAr ? "تبديل بلاعب آخر من القائمة:" : "Swap with Squad Player:"}
                 </label>
                 <select
                   value={selectedNodeObj.jersey_number || ""}
                   onChange={(e) => swapSelectedPlayer(Number(e.target.value))}
                   aria-label="Swap Player"
-                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900"
+                  className="w-full rounded-lg bg-white border border-[#D8E3EB] px-2.5 py-1.5 text-xs text-[#0B1F3A]"
                 >
                   {(selectedEl.team === "team_a" ? fitPlayers : opponent.players).map((p) => (
                     <option key={p.jersey_number} value={p.jersey_number}>
@@ -1084,6 +1403,16 @@ export default function CoachTacticsStudio({
                     </option>
                   ))}
                 </select>
+
+                <label className="flex items-center gap-1.5 text-[10px] font-bold text-[#0D717A] pt-1 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={syncSlotAllPhases}
+                    onChange={(e) => setSyncSlotAllPhases(e.target.checked)}
+                    className="accent-[#0D717A]"
+                  />
+                  <span>{isAr ? "تطبيق التعديل على الحالات الـ 3 تلقائياً" : "Apply edit across all 3 phases"}</span>
+                </label>
               </div>
             ) : selectedEl && selectedMeta ? (
               <div className="space-y-2.5 p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-800">
