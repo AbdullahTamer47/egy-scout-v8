@@ -13,6 +13,7 @@ import json
 import os
 import re
 import socket
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -55,9 +56,9 @@ def _load_groq_key(api_key: Optional[str] = None) -> str:
 
 def build_jersey_contact_sheet(
     crops_by_tid: dict[int, np.ndarray],
-    max_tiles: int = 16,
-    tile_w: int = 144,
-    tile_h: int = 180,
+    max_tiles: int = 8,
+    tile_w: int = 224,
+    tile_h: int = 272,
 ) -> tuple[Optional[np.ndarray], list[int]]:
     """Build a crisp 4-column CLAHE-enhanced labeled contact sheet mapping slot #1..N -> track_id."""
     valid_items: list[tuple[int, np.ndarray]] = []
@@ -73,7 +74,7 @@ def build_jersey_contact_sheet(
     cols = min(4, n)
     rows = int(np.ceil(n / cols))
     sheet = np.full((rows * tile_h, cols * tile_w, 3), 18, dtype=np.uint8)
-    clahe = cv2.createCLAHE(clipLimit=2.4, tileGridSize=(4, 4))
+    clahe = cv2.createCLAHE(clipLimit=2.6, tileGridSize=(4, 4))
 
     for idx, (_, crop) in enumerate(valid_items):
         r_idx = idx // cols
@@ -83,16 +84,16 @@ def build_jersey_contact_sheet(
 
         inner_w = tile_w - 16
         inner_h = tile_h - 36
-        resized = cv2.resize(crop, (inner_w, inner_h), interpolation=cv2.INTER_CUBIC)
+        resized = cv2.resize(crop, (inner_w, inner_h), interpolation=cv2.INTER_LANCZOS4)
         lab = cv2.cvtColor(resized, cv2.COLOR_BGR2LAB)
         l_ch, a_ch, b_ch = cv2.split(lab)
         enh = cv2.cvtColor(cv2.merge([clahe.apply(l_ch), a_ch, b_ch]), cv2.COLOR_LAB2BGR)
         blur = cv2.GaussianBlur(enh, (0, 0), 1.0)
-        enh = cv2.addWeighted(enh, 1.35, blur, -0.35, 0)
+        enh = cv2.addWeighted(enh, 1.45, blur, -0.45, 0)
 
         sheet[y0 + 28 : y0 + 28 + inner_h, x0 + 8 : x0 + 8 + inner_w] = enh
         cv2.rectangle(sheet, (x0 + 2, y0 + 2), (x0 + tile_w - 3, y0 + tile_h - 3), (65, 85, 110), 1)
-        cv2.rectangle(sheet, (x0 + 4, y0 + 4), (x0 + 58, y0 + 24), (16, 185, 129), -1)
+        cv2.rectangle(sheet, (x0 + 4, y0 + 4), (x0 + 62, y0 + 24), (16, 185, 129), -1)
         cv2.putText(
             sheet,
             f"#{idx + 1}",
@@ -111,9 +112,9 @@ def _call_groq_vision_json(
     prompt_text: str,
     api_key: str,
     max_tokens: int = 350,
-    timeout_s: int = 12,
+    timeout_s: int = 16,
 ) -> Optional[dict[str, Any]]:
-    ok, buf = cv2.imencode(".jpg", image_bgr, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    ok, buf = cv2.imencode(".jpg", image_bgr, [cv2.IMWRITE_JPEG_QUALITY, 92])
     if not ok:
         return None
     b64 = base64.b64encode(buf.tobytes()).decode("ascii")
@@ -131,28 +132,34 @@ def _call_groq_vision_json(
         "temperature": 0.05,
         "max_tokens": max_tokens,
     }
-    req = urllib.request.Request(
-        "https://api.groq.com/openai/v1/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "User-Agent": "EGY-SCOUT-CloudVision/10.5",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            raw = json.loads(resp.read().decode("utf-8"))
-        content = str(raw["choices"][0]["message"]["content"]).strip()
+    for attempt in range(2):
+        req = urllib.request.Request(
+            "https://api.groq.com/openai/v1/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "EGY-SCOUT-CloudVision/10.8",
+            },
+            method="POST",
+        )
         try:
-            return json.loads(content)
+            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                raw = json.loads(resp.read().decode("utf-8"))
+            content = str(raw["choices"][0]["message"]["content"]).strip()
+            try:
+                return json.loads(content)
+            except Exception:
+                m = re.search(r"\{[\s\S]*\}", content)
+                if m:
+                    return json.loads(m.group(0))
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429 and attempt == 0:
+                time.sleep(1.5)
+                continue
+            return None
         except Exception:
-            m = re.search(r"\{[\s\S]*\}", content)
-            if m:
-                return json.loads(m.group(0))
-    except Exception:
-        return None
+            return None
     return None
 
 
@@ -160,37 +167,103 @@ def groq_vision_read_jerseys(
     crops_by_tid: dict[int, np.ndarray],
     api_key: Optional[str] = None,
 ) -> dict[int, tuple[int, float]]:
-    """Read clearly visible jersey numbers across <=16 player crops in one fast Groq Cloud Vision call."""
+    """Read clearly visible jersey numbers across batched 8-tile sheets via Groq Cloud Vision."""
     key = _load_groq_key(api_key)
     if not key or not crops_by_tid:
         return {}
-    sheet, tids_order = build_jersey_contact_sheet(crops_by_tid, max_tiles=16)
-    if sheet is None or not tids_order:
+    items = list(crops_by_tid.items())
+    out: dict[int, tuple[int, float]] = {}
+    for start in range(0, len(items), 8):
+        chunk = dict(items[start : start + 8])
+        sheet, tids_order = build_jersey_contact_sheet(chunk, max_tiles=8)
+        if sheet is None or not tids_order:
+            continue
+        prompt = (
+            f"You are inspecting {len(tids_order)} numbered football player jersey upper-body crops labeled #1 through #{len(tids_order)}. "
+            "ONLY report a jersey number (1-99) if digits on the shirt are clearly readable; return null for blurry/obscured shirts. "
+            'Return ONLY JSON matching {"jerseys": {"1": 22, "3": null}} using keys "1".."N".'
+        )
+        parsed = _call_groq_vision_json(sheet, prompt, api_key=key, max_tokens=280)
+        if not isinstance(parsed, dict):
+            continue
+        jmap = parsed.get("jerseys") if isinstance(parsed.get("jerseys"), dict) else parsed
+        for idx, tid in enumerate(tids_order, start=1):
+            val = jmap.get(str(idx)) if isinstance(jmap, dict) else None
+            if isinstance(val, dict):
+                val = val.get("number")
+            if val is None:
+                continue
+            try:
+                num = int(val)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= num <= 99:
+                out[int(tid)] = (num, 0.86)
+        if start + 8 < len(items):
+            time.sleep(0.4)
+    return out
+
+
+def groq_vision_read_multi_crops(
+    multi_crops_by_tid: dict[int, list[np.ndarray]],
+    api_key: Optional[str] = None,
+) -> dict[int, tuple[int, float]]:
+    """Inspect up to 3 distinct-frame upper-body crops per track_id via Groq Cloud Vision and vote."""
+    key = _load_groq_key(api_key)
+    if not key or not multi_crops_by_tid:
         return {}
 
-    prompt = (
-        f"You are inspecting {len(tids_order)} numbered football player jersey torso crops labeled #1 through #{len(tids_order)}. "
-        "ONLY report a jersey number (1-99) if digits are clearly readable on the shirt; do NOT guess blurry crops. "
-        'Return ONLY JSON matching {"jerseys": {"1": 22, "3": null}} using keys "1".."N".'
-    )
-    parsed = _call_groq_vision_json(sheet, prompt, api_key=key, max_tokens=280)
-    if not isinstance(parsed, dict):
+    slots: list[tuple[int, int, np.ndarray]] = []
+    for tid, clist in multi_crops_by_tid.items():
+        for c_idx, crop in enumerate(clist[:3]):
+            if crop is not None and crop.size > 0:
+                slots.append((int(tid), c_idx, crop))
+    if not slots:
         return {}
-    jmap = parsed.get("jerseys") if isinstance(parsed.get("jerseys"), dict) else parsed
-    out: dict[int, tuple[int, float]] = {}
-    for idx, tid in enumerate(tids_order, start=1):
-        val = jmap.get(str(idx)) if isinstance(jmap, dict) else None
-        if isinstance(val, dict):
-            val = val.get("number")
-        if val is None:
+
+    votes: dict[int, list[int]] = {}
+    for start in range(0, len(slots), 8):
+        batch = slots[start : start + 8]
+        chunk_dict = {i: item[2] for i, item in enumerate(batch)}
+        sheet, order = build_jersey_contact_sheet(chunk_dict, max_tiles=8)
+        if sheet is None or not order:
             continue
-        try:
-            num = int(val)
-        except (TypeError, ValueError):
+        prompt = (
+            f"You are inspecting {len(order)} football player upper-body crops labeled #1 through #{len(order)}. "
+            "Report a jersey number (1-99) ONLY if digits printed on the jersey chest/back are clearly readable; return null if unsure. "
+            'Return ONLY JSON matching {"jerseys": {"1": 22, "2": null}}.'
+        )
+        parsed = _call_groq_vision_json(sheet, prompt, api_key=key, max_tokens=280)
+        if not isinstance(parsed, dict):
             continue
-        if 1 <= num <= 99:
-            out[int(tid)] = (num, 0.86)
-    return out
+        jmap = parsed.get("jerseys") if isinstance(parsed.get("jerseys"), dict) else parsed
+        for slot_idx, virtual_key in enumerate(order, start=1):
+            val = jmap.get(str(slot_idx)) if isinstance(jmap, dict) else None
+            if isinstance(val, dict):
+                val = val.get("number")
+            if val is None:
+                continue
+            try:
+                num = int(val)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= num <= 99:
+                real_tid = batch[virtual_key][0]
+                votes.setdefault(real_tid, []).append(num)
+        if start + 8 < len(slots):
+            time.sleep(0.6)
+
+    resolved: dict[int, tuple[int, float]] = {}
+    for tid, nums in votes.items():
+        counts: dict[int, int] = {}
+        for n in nums:
+            counts[n] = counts.get(n, 0) + 1
+        top_n, top_cnt = max(counts.items(), key=lambda kv: kv[1])
+        if top_cnt >= 2:
+            resolved[tid] = (top_n, 0.92)
+        elif len(nums) == 1:
+            resolved[tid] = (top_n, 0.84)
+    return resolved
 
 
 def groq_vision_read_scoreboard(

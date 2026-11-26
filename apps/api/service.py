@@ -1490,14 +1490,21 @@ class ScoutV8Service:
             display_label = r_ar or f"{team_ar} • T{base_id}"
             display_label_en = r_en or f"{team_en} • T{base_id}"
             verified_name = r_ar if verified else None
+        elif jersey_number is not None and float(entry.get("parquet_jersey_conf") or 0.0) >= 0.70:
+            identity_source = "ocr_verified"
+            verified = True
+            pos_ar = pos_label.get("ar", "لاعب")
+            pos_code = pos_label.get("code", "PL")
+            display_label = f"{team_ar} #{jersey_number} • {pos_ar}"
+            display_label_en = f"{team_en} #{jersey_number} • {pos_code}"
+            verified_name = f"{team_ar} #{jersey_number}"
         else:
             identity_source = "unverified"
             verified = False
             pos_ar = pos_label.get("ar", "لاعب")
             pos_code = pos_label.get("code", "PL")
-            j_prefix = f"#{jersey_number} • " if jersey_number else ""
-            display_label = f"{team_ar} • {j_prefix}{pos_ar} (T{base_id})"
-            display_label_en = f"{team_en} • {j_prefix}{pos_code} (T{base_id})"
+            display_label = f"{team_ar} • {pos_ar} (T{base_id})"
+            display_label_en = f"{team_en} • {pos_code} (T{base_id})"
             verified_name = None
 
         photo_path = self._player_photo_path(tenant_id, match_id, tid)
@@ -1719,6 +1726,45 @@ class ScoutV8Service:
         self._player_card_pool_cache.clear()
         return {"card": self.get_player_card(tenant_id, mid, track_id)}
 
+    def reanalyze_match_online(self, tenant_id: str, match_id: str) -> dict[str, Any]:
+        """Re-run full YOLO1280 + Shield Rescue + Online Groq Cloud Vision OCR and refresh cached parquet."""
+        mid = self._validate_id(match_id)
+        meta = self._get_match_meta(mid)
+        if meta.get("is_custom"):
+            _, v8_df, _, kit_c, fps_c, extra_c = ingest_clip_with_football_yolo(
+                video_path=meta["video_path"],
+                run_id=mid,
+                max_sample_frames=120,
+                stride=2,
+                team_a_name=meta.get("team_a_name_ar", meta["team_a_name"]),
+                team_b_name=meta.get("team_b_name_ar", meta["team_b_name"]),
+                run_jersey_ocr=True,
+            )
+            write_tracking_parquet(v8_df, meta["v8_parquet_path"])
+            m_out = extra_c
+        else:
+            v8_df, m_out = refine_match_locally(
+                match_id=mid,
+                video_path=meta["video_path"],
+                legacy_parquet_path=meta["telemetry_path"],
+                run_ocr=True,
+                run_sahi_ball=True,
+                run_scoreboard_ocr=True,
+            )
+            pq_cache = self.data_paths.outputs / "v8_4_parquet" / f"{mid}_v8.parquet"
+            meta_json = self.data_paths.outputs / "v8_4_parquet" / f"{mid}_meta.json"
+            write_tracking_parquet(v8_df, pq_cache)
+            meta_json.parent.mkdir(parents=True, exist_ok=True)
+            meta_json.write_text(json.dumps(m_out, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._match_json_meta[mid] = m_out
+        self._v8_cache[mid] = v8_df
+        self._player_card_pool_cache.clear()
+        return {
+            "match_id": mid,
+            "jerseys_detected": m_out.get("jerseys_detected", {}),
+            "players_rows": int(v8_df["role"].isin(["player", "goalkeeper"]).sum()),
+        }
+
     def get_player_card(self, tenant_id: str, match_id: str, track_id: int) -> dict[str, Any]:
         mid = self._validate_id(match_id)
         pool = self._compute_match_card_pool(mid, consolidate=True)
@@ -1859,9 +1905,14 @@ class ScoutV8Service:
 
         # Identify calibrated frames so pixel interpolation NEVER bridges across close-ups or shot cuts
         valid = v8_df[v8_df["role"].isin(["player", "goalkeeper", "referee", "assistant_referee"])].copy()
+        valid = valid.sort_values(["track_id", "frame_id"])
+        for col_xy in ("x_m", "y_m"):
+            valid[col_xy] = valid.groupby("track_id", sort=False)[col_xy].transform(
+                lambda s: s.interpolate(method="linear", limit=12, limit_area="inside")
+            )
         cal_fid_set: set[int] = set()
         for fid, grp in valid.groupby("frame_id", sort=False):
-            if int((grp["x_m"].notna() & grp["y_m"].notna()).sum()) >= 4:
+            if int((grp["x_m"].notna() & grp["y_m"].notna()).sum()) >= 3:
                 cal_fid_set.add(int(fid))
 
         obs_uv_fids = sorted(raw_ball_uv.keys())

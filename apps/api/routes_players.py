@@ -270,6 +270,20 @@ def api_assign_track_identity(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.post("/api/matches/{match_id}/reanalyze-online")
+def api_reanalyze_match_online(
+    match_id: str,
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    _require_photo_write(ctx)
+    from apps.api.main import service
+
+    try:
+        return service.reanalyze_match_online(ctx.tenant_id, match_id)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.post("/api/plans/pass-probabilities")
 def api_compute_pass_probabilities(
     payload: dict[str, Any],

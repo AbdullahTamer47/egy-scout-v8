@@ -239,7 +239,7 @@ function interpolateTimeline(
     prevIds.add(a.track_id);
     const b = nextById.get(a.track_id);
     if (!b) {
-      if (u < 0.65) out.push(a);
+      if (u < 0.88) out.push(a);
       continue;
     }
     if (Math.hypot(b.x_m - a.x_m, b.y_m - a.y_m) > 6.5) {
@@ -261,7 +261,7 @@ function interpolateTimeline(
       ],
     });
   }
-  if (u >= 0.35) {
+  if (u >= 0.12) {
     for (const b of next.players) {
       if (!prevIds.has(b.track_id)) out.push(b);
     }
@@ -291,7 +291,7 @@ function interpolateTimeline(
   }
 
   const chosenMeta = u < 0.5 ? prev : next;
-  if (out.length < 4 && (prev.calibrated || next.calibrated)) {
+  if (out.length < 2 && (prev.calibrated || next.calibrated)) {
     const fb = u < 0.5 && prev.calibrated ? prev : next;
     return {
       calibrated: fb.calibrated,
@@ -304,7 +304,7 @@ function interpolateTimeline(
   }
 
   return {
-    calibrated: out.length >= 4,
+    calibrated: out.length >= 2,
     players: out,
     ball: interpBall,
     ballCarrierId: chosenMeta.ball_carrier_id ?? null,
@@ -569,6 +569,7 @@ export default function BroadcastStudioScreen({
   const [showDossier, setShowDossier] = useState(false);
   const [momentState, setMomentState] = useState<MomentStatePayload | null>(null);
   const [blueprintFormation, setBlueprintFormation] = useState<string>("4-2-3-1");
+  const [isHoveringPlayer, setIsHoveringPlayer] = useState(false);
   const hlsRef = useRef<Hls | null>(null);
 
   const enableGopHlsStream = async () => {
@@ -1553,16 +1554,29 @@ export default function BroadcastStudioScreen({
     };
   };
 
-  const hitPlayerAtVideo = (vx: number, vy: number, teamFilter?: string) =>
-    activePlayersRef.current.find(
-      (p) =>
-        (!teamFilter || p.team === teamFilter) &&
-        (p.role === "player" || p.role === "goalkeeper") &&
-        vx >= p.bbox[0] - 18 &&
-        vx <= p.bbox[2] + 18 &&
-        vy >= p.bbox[1] - 12 &&
-        vy <= p.bbox[3] + 22
-    );
+  const hitPlayerAtVideo = (vx: number, vy: number, teamFilter?: string) => {
+    let best: RenderPlayer | undefined = undefined;
+    let bestDist = Infinity;
+    for (const p of activePlayersRef.current) {
+      if (teamFilter && p.team !== teamFilter) continue;
+      if (p.role !== "player" && p.role !== "goalkeeper") continue;
+      if (
+        vx >= p.bbox[0] - 24 &&
+        vx <= p.bbox[2] + 24 &&
+        vy >= p.bbox[1] - 18 &&
+        vy <= p.bbox[3] + 26
+      ) {
+        const cx = (p.bbox[0] + p.bbox[2]) * 0.5;
+        const cy = (p.bbox[1] + p.bbox[3]) * 0.5;
+        const d = Math.hypot(vx - cx, vy - cy);
+        if (d < bestDist) {
+          bestDist = d;
+          best = p;
+        }
+      }
+    }
+    return best;
+  };
 
   const handleVideoMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!mainCanvasRef.current || !data) return;
@@ -1620,6 +1634,11 @@ export default function BroadcastStudioScreen({
   const handleVideoMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!mainCanvasRef.current) return;
     const { vx, vy } = canvasToVideoCoords(e);
+
+    if (!draggingVideoGhostRef.current && !dragDrawStartRef.current) {
+      const hovered = Boolean(hitPlayerAtVideo(vx, vy));
+      if (hovered !== isHoveringPlayer) setIsHoveringPlayer(hovered);
+    }
 
     if (dragDrawStartRef.current && (tool === "arrow" || tool === "tape" || tool === "zone")) {
       const { vx: sx, vy: sy } = dragDrawStartRef.current;
@@ -2071,8 +2090,10 @@ export default function BroadcastStudioScreen({
                 setActiveDraft(null);
               }}
               className={`w-full aspect-video object-contain bg-black block ${
-                tool === "ghost"
-                  ? "cursor-grab active:cursor-grabbing"
+                isHoveringPlayer
+                  ? tool === "ghost"
+                    ? "cursor-grab active:cursor-grabbing"
+                    : "cursor-pointer"
                   : tool === "spotlight" || tool === "chain"
                   ? "cursor-pointer"
                   : "cursor-crosshair"

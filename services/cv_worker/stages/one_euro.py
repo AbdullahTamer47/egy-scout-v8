@@ -84,7 +84,7 @@ def smooth_tracks_one_euro(
                 sx[i] = float(np.clip(fx(ts[i], xs[i]), 0.0, 105.0))
                 sy[i] = float(np.clip(fy(ts[i], ys[i]), 0.0, 68.0))
 
-        out.loc[valid.index, "x_m"] = np.round(sx, 3)
-        out.loc[valid.index, "y_m"] = np.round(sy, 3)
+        out.loc[valid.index, "x_m"] = np.round(sx, 3).astype(out["x_m"].dtype)
+        out.loc[valid.index, "y_m"] = np.round(sy, 3).astype(out["y_m"].dtype)
 
     return out

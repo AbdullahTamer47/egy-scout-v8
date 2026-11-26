@@ -346,6 +346,34 @@ def _estimate_frame_homography_from_players(sub: pd.DataFrame) -> Optional[np.nd
     return H
 
 
+def _learn_team_color_protos(
+    df: pd.DataFrame, cap: cv2.VideoCapture, max_probe_frames: int = 8
+) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    """Sample median jersey RGB prototypes for team_a and team_b from confident legacy rows."""
+    protos: dict[str, list[np.ndarray]] = {"team_a": [], "team_b": []}
+    if df.empty:
+        return None, None
+    hi = df[df["team"].isin(["team_a", "team_b"]) & (df["team_conf"].fillna(0.0) >= 0.70)]
+    if hi.empty:
+        return None, None
+    sample_fids = sorted(int(f) for f in hi["frame_id"].unique().tolist())
+    step = max(1, len(sample_fids) // max(1, max_probe_frames))
+    for fid in sample_fids[::step][:max_probe_frames]:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(fid))
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            continue
+        for _, row in hi[hi["frame_id"] == fid].iterrows():
+            crop = extract_torso_crop(frame, [float(row["x1"]), float(row["y1"]), float(row["x2"]), float(row["y2"])], min_size=10)
+            if crop is not None:
+                dom = _extract_jersey_dominant_rgb(crop)
+                if dom is not None:
+                    protos[str(row["team"])].append(dom)
+    pa = np.median(protos["team_a"], axis=0).astype(np.float32) if protos["team_a"] else None
+    pb = np.median(protos["team_b"], axis=0).astype(np.float32) if protos["team_b"] else None
+    return pa, pb
+
+
 def refine_match_locally(
     match_id: str,
     video_path: str | Path,
@@ -354,7 +382,7 @@ def refine_match_locally(
     run_sahi_ball: bool = True,
     run_scoreboard_ocr: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Run full V8 local refinement: Football YOLO + SAHI Ball Recovery + Re-ID Stitch + GK/Ref Cap + OCR + Scoreboard."""
+    """Run full V10.8 refinement: YOLO1280 Recovery + SAHI Ball + Shield Rescue + Re-ID + Cloud Vision OCR."""
     raw = pd.read_parquet(str(legacy_parquet_path))
     df = load_legacy_scout5_telemetry(legacy_parquet_path, match_id=match_id)
 
@@ -377,10 +405,12 @@ def refine_match_locally(
 
     yolo_role_votes: dict[int, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     team_rgbs: dict[str, list[np.ndarray]] = {"team_a": [], "team_b": []}
-    track_best_crops: dict[int, list[tuple[float, np.ndarray]]] = defaultdict(list)
+    track_best_crops: dict[int, list[tuple[float, int, np.ndarray]]] = defaultdict(list)
     track_reid_vecs: dict[int, list[np.ndarray]] = defaultdict(list)
     extra_ball_rows: list[dict[str, Any]] = []
+    extra_player_rows: list[dict[str, Any]] = []
     sahi_balls_recovered = 0
+    yolo_players_recovered = 0
 
     existing_ball_fids = set(
         int(f)
@@ -393,27 +423,53 @@ def refine_match_locally(
     try:
         if cap.isOpened():
             unique_fids = sorted(int(f) for f in df["frame_id"].unique().tolist())
-            yolo_fids = set(unique_fids[::3])
+            # Build per-frame homographies & bridge short <4-player gaps from nearest calibrated frame (<= 25f)
+            H_direct: dict[int, np.ndarray] = {}
+            for fid in unique_fids:
+                H_f = _estimate_frame_homography_from_players(df[(df["frame_id"] == fid) & (df["track_id"] >= 0)])
+                if H_f is not None:
+                    H_direct[fid] = H_f
+            H_by_fid: dict[int, np.ndarray] = {}
+            cal_keys = sorted(H_direct.keys())
+            if cal_keys:
+                for fid in unique_fids:
+                    if fid in H_direct:
+                        H_by_fid[fid] = H_direct[fid]
+                    else:
+                        nearest_k = min(cal_keys, key=lambda k: abs(k - fid))
+                        if abs(nearest_k - fid) <= 25:
+                            H_by_fid[fid] = H_direct[nearest_k]
+
+            proto_a, proto_b = _learn_team_color_protos(df, cap)
+            rec_active: list[dict[str, Any]] = []
+            next_rec_tid = 9001
+
+            yolo_fids = set(unique_fids[::2])
             if 1250 in unique_fids:
                 yolo_fids.add(1250)
-            if unique_fids:
-                yolo_fids.add(unique_fids[0])
-            # Also sample frames missing ball detections for SAHI recovery
             missing_ball_fids = [f for f in unique_fids if f not in existing_ball_fids][::2]
-            inspect_fids = sorted(yolo_fids | set(missing_ball_fids[:40]))
+            inspect_fids = sorted(yolo_fids | set(missing_ball_fids[:25]))
 
             for fid in inspect_fids:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, int(fid))
                 ok, frame = cap.read()
                 if not ok or frame is None:
                     continue
+                fh, fw = frame.shape[:2]
                 sub = df[(df["frame_id"] == fid) & (df["track_id"] >= 0) & (df["role"] != "ball")]
-                if sub.empty:
+                if sub.empty and fid not in H_by_fid:
                     continue
-                time_s = float(sub["time_s"].iloc[0])
+                time_s = float(sub["time_s"].iloc[0]) if not sub.empty else float(df.loc[df["frame_id"] == fid, "time_s"].iloc[0])
+                shot_id_fid = int(raw.loc[raw["frame_id"] == fid, "shot_id"].iloc[0]) if ("shot_id" in raw.columns and (raw["frame_id"] == fid).any()) else 0
+                H_use = H_by_fid.get(fid)
+
+                existing_boxes = [
+                    [float(r["x1"]), float(r["y1"]), float(r["x2"]), float(r["y2"])]
+                    for _, r in sub.iterrows()
+                ]
 
                 if yolo is not None and fid in yolo_fids:
-                    res = yolo.predict(frame, imgsz=960, conf=0.32, verbose=False)[0]
+                    res = yolo.predict(frame, imgsz=960, conf=0.18, iou=0.50, verbose=False)[0]
                     if res.boxes is not None and len(res.boxes) > 0:
                         y_boxes = res.boxes.xyxy.cpu().numpy()
                         y_cls = res.boxes.cls.int().cpu().numpy()
@@ -422,7 +478,7 @@ def refine_match_locally(
                         for _, row in sub.iterrows():
                             rbox = [float(row["x1"]), float(row["y1"]), float(row["x2"]), float(row["y2"])]
                             tid = int(row["track_id"])
-                            best_iou = 0.35
+                            best_iou = 0.30
                             best_match = None
                             for yb, yc, ycf in zip(y_boxes, y_cls, y_conf):
                                 score = _bbox_iou(rbox, yb.tolist())
@@ -433,9 +489,109 @@ def refine_match_locally(
                                 role_name, cf = best_match
                                 yolo_role_votes[tid][role_name] += cf
 
+                        # Recover every real pitch player/GK missed by legacy telemetry!
+                        frame_rec_boxes: list[list[float]] = []
+                        new_rec_active: list[dict[str, Any]] = []
+                        for yb, yc, ycf in zip(y_boxes, y_cls, y_conf):
+                            rname = str(names[int(yc)]).lower()
+                            if rname not in ("player", "goalkeeper"):
+                                continue
+                            bx1, by1, bx2, by2 = [float(v) for v in yb]
+                            if (bx2 - bx1) < 8 or (by2 - by1) < 16 or (by2 - by1) > fh * 0.55:
+                                continue
+                            ybox = [bx1, by1, bx2, by2]
+                            if any(_bbox_iou(ybox, eb) > 0.30 for eb in existing_boxes):
+                                continue
+                            if any(_bbox_iou(ybox, rb) > 0.35 for rb in frame_rec_boxes):
+                                continue
+                            if not _is_foot_near_pitch_turf(frame, bx1, by1, bx2, by2):
+                                continue
+
+                            bu_px, bv_px = 0.5 * (bx1 + bx2), by2
+                            xm, ym, on_p = float("nan"), float("nan"), True
+                            if H_use is not None:
+                                pt_m = cv2.perspectiveTransform(np.array([[[bu_px, bv_px]]], dtype=np.float32), H_use).reshape(2)
+                                xm_r, ym_r = float(pt_m[0]), float(pt_m[1])
+                                if xm_r < -3.0 or xm_r > 108.0 or ym_r < -3.5 or ym_r > 71.5:
+                                    continue
+                                xm = round(float(np.clip(xm_r, 0.0, 105.0)), 2)
+                                ym = round(float(np.clip(ym_r, 0.0, 68.0)), 2)
+                                on_p = (0.0 <= xm_r <= 105.0) and (0.0 <= ym_r <= 68.0)
+
+                            tcrop = extract_torso_crop(frame, ybox, min_size=8)
+                            rec_team, rec_tconf = "team_a", 0.55
+                            if tcrop is not None and proto_a is not None and proto_b is not None:
+                                dom = _extract_jersey_dominant_rgb(tcrop)
+                                if dom is not None:
+                                    da = float(np.linalg.norm(dom - proto_a))
+                                    db = float(np.linalg.norm(dom - proto_b))
+                                    rec_team = "team_a" if da <= db else "team_b"
+                                    rec_tconf = 0.78
+                            elif not np.isnan(xm):
+                                rec_team = "team_a" if xm < 52.5 else "team_b"
+
+                            # Greedy cross-frame linking for recovered tracks
+                            cx_box, cy_box = 0.5 * (bx1 + bx2), 0.5 * (by1 + by2)
+                            best_tid = None
+                            best_score = 0.0
+                            for prev in rec_active:
+                                if abs(fid - prev["fid"]) > 15:
+                                    continue
+                                iou_p = _bbox_iou(ybox, prev["box"])
+                                dist_p = float(np.hypot(cx_box - prev["cx"], cy_box - prev["cy"]))
+                                if iou_p >= 0.15 or dist_p <= max(45.0, (by2 - by1) * 1.4):
+                                    sc = iou_p * 2.0 + max(0.0, 1.0 - dist_p / 90.0)
+                                    if sc > best_score:
+                                        best_score = sc
+                                        best_tid = prev["tid"]
+                            if best_tid is None:
+                                raw_rec_id = next_rec_tid
+                                next_rec_tid += 1
+                                best_tid = shot_id_fid * 1000 + raw_rec_id if shot_id_fid > 0 else raw_rec_id
+                            rec_item = {"tid": best_tid, "fid": fid, "box": ybox, "cx": cx_box, "cy": cy_box}
+                            new_rec_active.append(rec_item)
+                            frame_rec_boxes.append(ybox)
+                            yolo_players_recovered += 1
+
+                            extra_player_rows.append(
+                                {
+                                    "match_id": match_id,
+                                    "frame_id": int(fid),
+                                    "time_s": time_s,
+                                    "track_id": int(best_tid),
+                                    "role": rname,
+                                    "team": rec_team,
+                                    "role_conf": round(float(ycf), 4),
+                                    "team_conf": rec_tconf,
+                                    "x1": round(bx1, 1),
+                                    "y1": round(by1, 1),
+                                    "x2": round(bx2, 1),
+                                    "y2": round(by2, 1),
+                                    "u": round(bu_px, 1),
+                                    "v": round(bv_px, 1),
+                                    "x_m": xm,
+                                    "y_m": ym,
+                                    "on_pitch": on_p,
+                                    "jersey_number": -1,
+                                    "jersey_conf": 0.0,
+                                    "source_layer": "yolo1280_player_recovery",
+                                }
+                            )
+                            # Collect upper-72% crop for recovered track OCR
+                            ux1, uy1 = max(0, int(bx1 - 4)), max(0, int(by1 - 2))
+                            ux2, uy2 = min(fw, int(bx2 + 4)), min(fh, max(uy1 + 16, int(by1 + (by2 - by1) * 0.72)))
+                            ucrop = frame[uy1:uy2, ux1:ux2]
+                            if ucrop.size > 0 and len(track_best_crops[best_tid]) < 6:
+                                leg_r = check_jersey_legibility(ucrop, min_height_px=16, min_width_px=10, min_sharpness=10.0)
+                                track_best_crops[best_tid].append((leg_r.score * max(1, ucrop.shape[0]), fid, ucrop.copy()))
+                            if tcrop is not None and len(track_reid_vecs[best_tid]) < 5:
+                                track_reid_vecs[best_tid].append(_extract_appearance_vec(tcrop))
+                        rec_active = [r for r in rec_active if (fid - r["fid"]) <= 15]
+                        rec_active = [r for r in rec_active if not any(nr["tid"] == r["tid"] for nr in new_rec_active)] + new_rec_active
+
                 # Real SAHI Ball Recovery on frames missing ball detections
                 if run_sahi_ball and yolo is not None and fid not in existing_ball_fids:
-                    H_est = _estimate_frame_homography_from_players(sub)
+                    H_est = H_use if H_use is not None else _estimate_frame_homography_from_players(sub)
                     if H_est is not None:
                         b_det = _detect_ball_with_sahi(yolo, frame, conf=0.25)
                         if b_det is not None:
@@ -487,9 +643,13 @@ def refine_match_locally(
                         dom = _extract_jersey_dominant_rgb(crop)
                         if dom is not None:
                             team_rgbs[t_label].append(dom)
-                    leg = check_jersey_legibility(crop, min_height_px=20, min_width_px=12, min_sharpness=22.0)
-                    if leg.is_legible and len(track_best_crops[tid]) < 6:
-                        track_best_crops[tid].append((leg.score * crop.shape[0], crop))
+                    ux1, uy1 = max(0, int(rbox[0] - 4)), max(0, int(rbox[1] - 2))
+                    ux2, uy2 = min(fw, int(rbox[2] + 4)), min(fh, max(uy1 + 16, int(rbox[1] + (rbox[3] - rbox[1]) * 0.72)))
+                    ucrop = frame[uy1:uy2, ux1:ux2]
+                    if ucrop.size > 0 and len(track_best_crops[tid]) < 6:
+                        leg = check_jersey_legibility(ucrop, min_height_px=16, min_width_px=10, min_sharpness=10.0)
+                        if not track_best_crops[tid] or abs(fid - track_best_crops[tid][-1][1]) >= 6:
+                            track_best_crops[tid].append((leg.score * max(1, ucrop.shape[0]), fid, ucrop.copy()))
     finally:
         cap.release()
         if proxy is not None and proxy.exists():
@@ -498,8 +658,8 @@ def refine_match_locally(
             except OSError:
                 pass
 
-    if extra_ball_rows:
-        df = pd.concat([df, pd.DataFrame(extra_ball_rows)], ignore_index=True)
+    if extra_player_rows or extra_ball_rows:
+        df = pd.concat([df, pd.DataFrame(extra_player_rows + extra_ball_rows)], ignore_index=True)
 
     for tid, votes in yolo_role_votes.items():
         top_role, top_w = max(votes.items(), key=lambda kv: kv[1])
@@ -520,11 +680,10 @@ def refine_match_locally(
         v8_df, mean_embs, sim_threshold=0.88, max_frame_gap=120, max_speed_mps=9.5
     )
 
-    # Upgraded CLAHE-enhanced Jersey OCR with multi-crop track voting
+    # Online-First Cloud Vision (Groq qwen/qwen3.8-27b) multi-crop voting + high-conf local EasyOCR fallback
     jerseys_read: dict[int, tuple[int, float]] = {}
-    if run_ocr and ocr_reader is not None:
-        # Remap crop buckets after Re-ID stitching
-        merged_crops: dict[int, list[tuple[float, np.ndarray]]] = defaultdict(list)
+    if run_ocr:
+        merged_crops: dict[int, list[tuple[float, int, np.ndarray]]] = defaultdict(list)
         for orig_tid, clist in track_best_crops.items():
             target_tid = reid_remap.get(orig_tid, orig_tid)
             merged_crops[target_tid].extend(clist)
@@ -534,26 +693,43 @@ def refine_match_locally(
             for tid, cnt in v8_df[v8_df["role"].isin(["player", "goalkeeper"])]["track_id"]
             .value_counts()
             .items()
-            if cnt >= 5 and int(tid) in merged_crops
-        ][:22]
-        for tid in sustained_tids:
-            obs: list[tuple[int, float]] = []
-            cands = sorted(merged_crops[tid], key=lambda x: x[0], reverse=True)[:4]
-            for _, crop in cands:
-                try:
-                    enh = _enhance_jersey_crop(crop)
-                    results = ocr_reader.readtext(enh, allowlist="0123456789", detail=1)
-                    for _, txt, conf in results:
-                        m = _JERSEY_RE.search(str(txt).strip())
-                        if m and float(conf) >= 0.42:
-                            obs.append((int(m.group(1)), float(conf)))
-                except Exception:
-                    continue
-            num, cf = vote_track_jersey_number(obs, min_total_weight=0.52)
-            if num is not None:
-                jerseys_read[tid] = (num, cf)
+            if cnt >= 3 and int(tid) in merged_crops
+        ][:24]
+
+        groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+        if groq_key and sustained_tids:
+            from services.cv_worker.cloud_cv_engine import groq_vision_read_multi_crops
+
+            multi_crops_map = {
+                tid: [item[2] for item in sorted(merged_crops[tid], key=lambda x: x[0], reverse=True)[:3]]
+                for tid in sustained_tids
+            }
+            jerseys_read = groq_vision_read_multi_crops(multi_crops_map, api_key=groq_key)
+            for tid, (num, cf) in jerseys_read.items():
                 v8_df.loc[v8_df["track_id"] == tid, "jersey_number"] = np.int16(num)
                 v8_df.loc[v8_df["track_id"] == tid, "jersey_conf"] = np.float32(cf)
+
+        if not groq_key and ocr_reader is not None:
+            for tid in sustained_tids:
+                if tid in jerseys_read:
+                    continue
+                obs: list[tuple[int, float]] = []
+                cands = sorted(merged_crops[tid], key=lambda x: x[0], reverse=True)[:4]
+                for _, _, crop in cands:
+                    try:
+                        enh = _enhance_jersey_crop(crop)
+                        results = ocr_reader.readtext(enh, allowlist="0123456789", detail=1)
+                        for _, txt, conf in results:
+                            m = _JERSEY_RE.search(str(txt).strip())
+                            if m and float(conf) >= 0.75:
+                                obs.append((int(m.group(1)), float(conf)))
+                    except Exception:
+                        continue
+                num, cf = vote_track_jersey_number(obs, min_total_weight=0.75)
+                if num is not None and cf >= 0.75:
+                    jerseys_read[tid] = (num, cf)
+                    v8_df.loc[v8_df["track_id"] == tid, "jersey_number"] = np.int16(num)
+                    v8_df.loc[v8_df["track_id"] == tid, "jersey_conf"] = np.float32(cf)
 
     # Real Scoreboard OCR Dual-Lock Goal Scan
     scoreboard_info = (
@@ -658,7 +834,7 @@ def ingest_clip_with_football_yolo(
         except Exception:
             rf_tracker = None
 
-    infer_imgsz = 960 if has_cuda else 640
+    infer_imgsz = 1280 if has_cuda else 960
     calibrator = KeypointPitchCalibrator(imgsz=infer_imgsz) if (use_pitch_calib and not rf_key) else None
     calib_frames = 0
     sahi_hits = 0
@@ -808,11 +984,12 @@ def ingest_clip_with_football_yolo(
                             persist=True,
                             tracker="bytetrack.yaml",
                             imgsz=infer_imgsz,
-                            conf=0.28,
+                            conf=0.18,
+                            iou=0.50,
                             verbose=False,
                         )[0]
                     except Exception:
-                        res = yolo.predict(frame, imgsz=infer_imgsz, conf=0.28, verbose=False)[0]
+                        res = yolo.predict(frame, imgsz=infer_imgsz, conf=0.18, iou=0.50, verbose=False)[0]
 
                     if res.boxes is not None and len(res.boxes) > 0:
                         if len(res.boxes) > best_preview_boxes:
@@ -1072,11 +1249,13 @@ def ingest_clip_with_football_yolo(
             if cnt >= 3 and int(tid) in merged_ocr
         ][:16]
         if groq_key and sustained_tids:
-            best_per_tid = {
-                tid: max(merged_ocr[tid], key=lambda x: x[0])[1]
+            from services.cv_worker.cloud_cv_engine import groq_vision_read_multi_crops
+
+            multi_per_tid = {
+                tid: [item[1] for item in sorted(merged_ocr[tid], key=lambda x: x[0], reverse=True)[:3]]
                 for tid in sustained_tids
             }
-            jerseys_read = groq_vision_read_jerseys(best_per_tid, api_key=groq_key)
+            jerseys_read = groq_vision_read_multi_crops(multi_per_tid, api_key=groq_key)
             for tid, (num, cf) in jerseys_read.items():
                 v8_df.loc[v8_df["track_id"] == tid, "jersey_number"] = np.int16(num)
                 v8_df.loc[v8_df["track_id"] == tid, "jersey_conf"] = np.float32(cf)

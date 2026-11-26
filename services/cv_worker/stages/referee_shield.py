@@ -570,6 +570,7 @@ class ZeroRefereeLeakShield:
         bot_ar_candidates: list[tuple[float, int, Any]] = []
         left_gk_candidates: list[tuple[float, int, Any, str]] = []
         right_gk_candidates: list[tuple[float, int, Any, str]] = []
+        fallback_team_by_tid: dict[int, tuple[str, float]] = {}
 
         for track_id, idxs in out.groupby("track_id").groups.items():
             tid = int(track_id)
@@ -578,6 +579,18 @@ class ZeroRefereeLeakShield:
             grp = out.loc[idxs]
             if (grp["role"] == "ball").all():
                 continue
+
+            # Save fallback team assignment for non-promoted candidates with clear kit evidence (>= 0.45)
+            fb_scores: dict[str, float] = defaultdict(float)
+            for _, r_fb in grp.iterrows():
+                t_fb = str(r_fb["team"])
+                if t_fb in ("team_a", "team_b"):
+                    fb_scores[t_fb] += max(0.05, float(r_fb["team_conf"]))
+            if fb_scores:
+                fb_best = max(fb_scores.items(), key=lambda kv: kv[1])[0]
+                fb_mean_conf = float(grp.loc[grp["team"] == fb_best, "team_conf"].mean())
+                if fb_mean_conf >= 0.45:
+                    fallback_team_by_tid[tid] = (fb_best, round(fb_mean_conf, 4))
 
             # Touchline persistence -> assistant referee candidate
             cal_mask = grp["y_m"].notna()
@@ -688,7 +701,7 @@ class ZeroRefereeLeakShield:
                 out.loc[idxs, "source_layer"] = "layer4_temporal_vote"
                 continue
 
-            if enforce_min_frames and len(grp) < min_sampled_rows and float(grp["team_conf"].mean()) < 0.72:
+            if enforce_min_frames and len(grp) < min_sampled_rows and float(grp["team_conf"].mean()) < 0.45:
                 out.loc[idxs, "role"] = "unassigned"
                 out.loc[idxs, "team"] = "none"
                 out.loc[idxs, "role_conf"] = float(locked_role_conf)
@@ -719,7 +732,7 @@ class ZeroRefereeLeakShield:
             source_layer: str,
             is_ar: bool = False,
             max_segments: Optional[int] = None,
-        ) -> None:
+        ) -> set[int]:
             cands.sort(key=lambda x: x[0], reverse=True)
             used_frames: set[int] = set()
             promoted: list[tuple[int, int, Any, set[int]]] = []
@@ -733,8 +746,9 @@ class ZeroRefereeLeakShield:
                 used_frames.update(fids)
 
             if not promoted:
-                return
+                return set()
 
+            promoted_tids: set[int] = {tid for _, tid, _, _ in promoted}
             canonical_tid = min(promoted, key=lambda x: (x[0], x[1]))[1]
             for _, _, idxs, _ in promoted:
                 out.loc[idxs, "role"] = role_name
@@ -750,25 +764,45 @@ class ZeroRefereeLeakShield:
                 existing = out.loc[out["track_id"] == canonical_tid]
                 if not existing["frame_id"].isin(fids).any() and bool((existing["role"] == role_name).all()):
                     out.loc[idxs, "track_id"] = np.int32(canonical_tid)
+            return promoted_tids
 
-        _promote_and_stitch(
-            main_ref_candidates,
-            role_name="referee",
-            source_layer="layer4_verified_main_referee",
-            is_ar=False,
+        promoted_official_tids: set[int] = set()
+        promoted_official_tids.update(
+            _promote_and_stitch(
+                main_ref_candidates,
+                role_name="referee",
+                source_layer="layer4_verified_main_referee",
+                is_ar=False,
+            )
         )
-        _promote_and_stitch(
-            top_ar_candidates,
-            role_name="assistant_referee",
-            source_layer="layer4_verified_touchline_ar",
-            is_ar=True,
+        promoted_official_tids.update(
+            _promote_and_stitch(
+                top_ar_candidates,
+                role_name="assistant_referee",
+                source_layer="layer4_verified_touchline_ar",
+                is_ar=True,
+            )
         )
-        _promote_and_stitch(
-            bot_ar_candidates,
-            role_name="assistant_referee",
-            source_layer="layer4_verified_touchline_ar",
-            is_ar=True,
+        promoted_official_tids.update(
+            _promote_and_stitch(
+                bot_ar_candidates,
+                role_name="assistant_referee",
+                source_layer="layer4_verified_touchline_ar",
+                is_ar=True,
+            )
         )
+
+        # Rescue leftover unpromoted official candidates that have strong player kit evidence
+        for _, cand_tid, cand_idxs in main_ref_candidates + top_ar_candidates + bot_ar_candidates:
+            if cand_tid in promoted_official_tids or cand_tid not in fallback_team_by_tid:
+                continue
+            fb_team, fb_conf = fallback_team_by_tid[cand_tid]
+            out.loc[cand_idxs, "role"] = "player"
+            out.loc[cand_idxs, "team"] = fb_team
+            out.loc[cand_idxs, "team_conf"] = fb_conf
+            out.loc[cand_idxs, "role_conf"] = 0.78
+            out.loc[cand_idxs, "on_pitch"] = True
+            out.loc[cand_idxs, "source_layer"] = "layer4_rescued_player"
 
         # Canonical stitching of Goalkeepers: strictly max 1 left-end GK + max 1 right-end GK (<= 2 per match!)
         def _promote_and_stitch_gk(cands: list[tuple[float, int, Any, str]]) -> None:
