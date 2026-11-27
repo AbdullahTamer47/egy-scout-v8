@@ -66,11 +66,13 @@ export default function CoachDashboardHome({
     const chart = echarts.init(el);
     // Real-only logged training sessions (0 AU for unlogged days) + UEFA Periodization reference line
     const mergedData = WEEK_SLOTS.map((slot) => {
-      const saved = overview.training_sessions.find((s) => s.md_code === slot.md);
+      const daySess = overview.training_sessions.filter((s) => s.md_code === slot.md);
+      const totalAu = daySess.reduce((acc, s) => acc + Number(s.srpe_au || 0), 0);
+      const maxRpe = daySess.length > 0 ? Math.max(...daySess.map((s) => Number(s.target_rpe || 0))) : 0;
       return {
         md: slot.md,
-        au: saved ? saved.srpe_au : 0,
-        rpe: saved ? saved.target_rpe : 0,
+        au: totalAu,
+        rpe: maxRpe,
         refAu: slot.refAu,
       };
     });

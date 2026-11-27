@@ -13,6 +13,7 @@ from packages.coach_engine.director_admin import (
     build_official_matchday_sheet,
     build_squad_depth_report,
 )
+from packages.coach_engine.live_research import research_player_live
 from packages.coach_engine.training_planner import generate_custom_session_plan
 from packages.tactics_engine.moment_analyzer import (
     build_formation_blueprint,
@@ -453,41 +454,73 @@ def _build_grounded_context_summary(
     def _fmt_bio(p: dict[str, Any]) -> str:
         bits = [str(p.get("position") or "")]
         if p.get("age"):
-            bits.append(f"{p['age']} سنة")
+            bits.append(f"{p['age']}س")
         if p.get("height_cm"):
-            bits.append(f"{p['height_cm']} سم")
-        return ", ".join(b for b in bits if b)
+            bits.append(f"{p['height_cm']}سم")
+        if p.get("yellow_cards"):
+            bits.append(f"إنذارات:{p['yellow_cards']}")
+        return "، ".join(b for b in bits if b)
 
+    # Send ALL eligible players grouped concisely so the AI never misses forwards/attackers!
     club_lines = [
-        f"- #{p.get('jersey_number')} {p.get('name_ar') or p.get('name_en')} ({_fmt_bio(p)}, جاهزية {p.get('readiness_pct', 100)}%, إنذارات={p.get('yellow_cards', 0)})"
-        for p in fit_p[:18]
+        f"#{p.get('jersey_number')} {p.get('name_ar') or p.get('name_en')} ({_fmt_bio(p)}, جاهز {p.get('readiness_pct', 100)}%)"
+        for p in fit_p[:45]
     ]
     unavail_lines = [
         f"- #{p.get('jersey_number')} {p.get('name_ar') or p.get('name_en')} ({p.get('position')}) -> {p.get('block_reason_ar')}"
         for p in unavail
     ]
     opp_lines = [
-        f"- #{p.get('jersey_number')} {p.get('name_ar') or p.get('name_en')} ({_fmt_bio(p)})"
-        for p in opp_players[:15]
+        f"#{p.get('jersey_number')} {p.get('name_ar') or p.get('name_en')} ({_fmt_bio(p)})"
+        for p in opp_players[:28]
     ]
 
     club_st = next((s for s in standings if club.get("name_en", "").lower() in str(s.get("team_name", "")).lower()), None)
     opp_st = next((s for s in standings if opponent.get("name_en", "").lower() in str(s.get("team_name", "")).lower()), None)
     st_text = ""
     if club_st or opp_st:
-        c_str = f"{club.get('name_ar')}: مركز {club_st['rank']} ({club_st['points']} نقطة من {club_st['played']} مباريات، له {club_st['gf']} وعليه {club_st['ga']})" if club_st else ""
-        o_str = f"{opponent.get('name_ar')}: مركز {opp_st['rank']} ({opp_st['points']} نقطة من {opp_st['played']} مباريات، له {opp_st['gf']} وعليه {opp_st['ga']})" if opp_st else ""
+        c_str = f"{club.get('name_ar')}: مركز {club_st['rank']} ({club_st['points']} نقطة من {club_st['played']} م، له {club_st['gf']} وعليه {club_st['ga']})" if club_st else ""
+        o_str = f"{opponent.get('name_ar')}: مركز {opp_st['rank']} ({opp_st['points']} نقطة من {opp_st['played']} م، له {opp_st['gf']} وعليه {opp_st['ga']})" if opp_st else ""
         st_text = f"\nالترتيب الحي: {c_str} | {o_str}"
+
+    opp_header = (
+        f"المنافس: {opponent.get('name_ar')} ({opponent.get('name_en')})"
+        if opponent.get("club_id") not in (None, "", "none")
+        else "المنافس: لم يتم تحديد خصم محدد بعد"
+    )
 
     return (
         f"المدرب: {coach_name} ({coach_role})\n"
-        f"الفريق: {club.get('name_ar')} ({club.get('name_en')}) | التشكيل: {formation_code}\n"
-        f"المنافس: {opponent.get('name_ar')} ({opponent.get('name_en')}){st_text}\n"
-        f"اللاعبون الجاهزون ({len(fit_p)}):\n" + "\n".join(club_lines) + "\n"
-        + (f"المستبعدون للإصابة/الإيقاف ({len(unavail)}):\n" + "\n".join(unavail_lines) + "\n" if unavail_lines else "لا يوجد مستبعدون حالياً.\n")
+        f"الفريق: {club.get('name_ar')} ({club.get('name_en')}) | التشكيل الأساسي: {formation_code}\n"
+        f"{opp_header}{st_text}\n"
+        f"كامل قائمة اللاعبين الجاهزين ({len(fit_p)} لاعباً — مكتملة):\n" + " | ".join(club_lines) + "\n"
+        + (f"المستبعدون للإصابة/الإيقاف ({len(unavail)}):\n" + "\n".join(unavail_lines) + "\n" if unavail_lines else "لا يوجد مستبعدون.\n")
         + (f"مهددون بالإيقاف (إنذاران): {', '.join(str(p.get('name_ar')) for p in warned)}\n" if warned else "")
-        + f"أبرز لاعبي المنافس ({len(opp_players)}):\n" + "\n".join(opp_lines)
+        + (f"قائمة المنافس ({len(opp_players)}): " + " | ".join(opp_lines) if opp_lines else "")
     )
+
+
+def _format_player_dossier_text(dossier: dict[str, Any], formation_code: str = "4-2-3-1") -> str:
+    tp = dossier.get("tactical_profile") or {}
+    stats = dossier.get("season_stats") or {}
+    parts = [
+        f"اللاعب: {dossier.get('name_ar')} ({dossier.get('name_en')})",
+        f"النادي: {dossier.get('club_name_ar')} | القميص: #{dossier.get('jersey_number') or '-'}",
+        f"المركز الفعلي الموثق: {dossier.get('position_label_ar')} ({dossier.get('position_code')})",
+        f"العمر: {dossier.get('age') or 'غير مسجل'} سنة | الطول: {dossier.get('height_cm') or 'غير مسجل'} سم | الجنسية: {dossier.get('nationality_ar') or '-'}",
+        f"المراكز والوظائف الأنسب له: {'، '.join(tp.get('best_roles_ar') or [])}",
+        f"توظيفه في 3-4-2-1: {tp.get('fit_3421') or ''}",
+        f"توظيفه في {formation_code}: {tp.get('fit_4231') or ''}",
+    ]
+    if stats.get("competitions"):
+        parts.append(f"إحصائيات موسم {stats.get('season_name', '2026/27')}: " + " ؛ ".join(stats["competitions"]))
+    if dossier.get("national_team_stats"):
+        parts.append(f"المشاركات الدولية: {dossier['national_team_stats']}")
+    if dossier.get("injury"):
+        parts.append(f"حالة الإصابة الحية: {dossier['injury']}")
+    if dossier.get("highlights"):
+        parts.append("أرقام مميزة: " + " | ".join(dossier["highlights"]))
+    return "\n".join(parts)
 
 
 def run_coach_copilot_chat(
@@ -505,8 +538,10 @@ def run_coach_copilot_chat(
     opponent_formation_code: str = "4-4-2",
     tactical_mode: str = "balanced",
     opponent_tactical_mode: str = "balanced",
+    target_player: Optional[dict[str, Any]] = None,
+    target_club: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    """Execute deterministic Coach Pro action (with 3 tactical phases) + grounded Groq LLM coaching response."""
+    """Execute Coach Pro action OR Live Search-First Player/Team Research + full grounded Groq LLM coaching response."""
     q = (question or "").strip()
     low = q.lower()
     fit_players = [p for p in evaluated_players if p.get("is_eligible_starter", True)]
@@ -518,33 +553,52 @@ def run_coach_copilot_chat(
     ai_matchday_sheet: Optional[dict[str, Any]] = None
     structured_cards: list[dict[str, Any]] = []
     follow_ups = [
-        f"ارسم خطة 3-4-2-1 لـ {club.get('name_ar')} ضد {opponent.get('name_ar')}",
-        f"صمم وحدة تدريبية MD-2 لمواجهة {opponent.get('name_ar')}",
+        f"ارسم خطة 3-4-2-1 لـ {club.get('name_ar')}",
+        "صمم وحدة تدريبية MD-2 للضغط العالي والتحولات",
         "جهز كشف المباراة الرسمي مع استبعاد المصابين والموقوفين",
-        f"اكتب خطاب غرفة الملابس قبل مواجهة {opponent.get('name_ar')}",
+        f"حلل التشكيل الأنسب وأبرز نقاط القوة في {club.get('name_ar')}",
     ]
 
-    want_tactics = any(
+    # Always run live search BEFORE deciding if this is a player-focused inquiry
+    is_player_query = bool(target_player) or any(
         kw in low
         for kw in (
-            "خطة", "تكتيك", "تشكيل", "ارسم", "رسم", "ألونسو", "الونسو",
-            "جوارديولا", "كلوب", "إنزاجي", "انزاجي", "3-4-2-1", "3421",
-            "4-3-3", "433", "4-2-3-1", "4231", "3-5-2", "352", "4-4-2", "5-3-2", "tactic", "formation",
+            "توظيف", "توضيف", "مركز", "احطه", "أحطه", "فين", "الاعبه", "العبه", "الالعبه",
+            "مميزات", "عيوب", "نقاط", "لاعب", "دور", "اداء", "أداء", "تطوير",
+            "role", "deploy", "position", "strengths", "weaknesses", "profile",
+        )
+    )
+    researched_player: Optional[dict[str, Any]] = None
+    if is_player_query:
+        researched_player = research_player_live(
+            question=q,
+            club=club,
+            opponent=opponent,
+            target_player=target_player,
+            target_club=target_club,
+            history=history,
+        )
+
+    want_tactics = (not target_player) and any(
+        kw in low
+        for kw in (
+            "ارسم", "رسم", "خطة 3", "خطة 4", "خطة 5", "تكتيك", "تشكيل الفريق",
+            "3-4-2-1", "3421", "4-3-3", "433", "4-2-3-1", "4231", "3-5-2", "352", "4-4-2", "5-3-2", "3-2-4-1", "tactic", "formation",
         )
     )
     want_training = any(
         kw in low
-        for kw in ("تمرين", "تدريب", "وحدة", "أحمال", "روندو", "بدني", "md-", "md+", "drill", "training", "session")
+        for kw in ("صمم وحدة", "وحدة تدريبية", "حصة تدريب", "روندو", "md-", "md+", "build session", "training session")
     )
     want_matchday = any(
         kw in low
-        for kw in ("كشف", "قائمة", "اسكور", "اسكور شيت", "موقوف", "مصاب", "إصابات", "إنذار", "البدلاء", "matchday", "lineup", "sheet")
+        for kw in ("كشف المباراة", "اسكور شيت", "matchday", "lineup sheet")
     )
 
     resolved_form = _detect_formation_code(q, formation_code)
     preset = match_masterclass_preset(q)
 
-    if want_tactics or preset:
+    if (want_tactics or preset) and not researched_player:
         action_executed = "apply_tactics"
         if preset:
             resolved_form = preset["formation_code"]
@@ -621,7 +675,7 @@ def run_coach_copilot_chat(
     ctx_block = _build_grounded_context_summary(
         coach_name=coach_name,
         coach_role=coach_role,
-        club=club,
+        club=target_club or club,
         opponent=opponent,
         evaluated_players=evaluated_players,
         opp_players=opp_players,
@@ -629,26 +683,38 @@ def run_coach_copilot_chat(
         formation_code=resolved_form,
     )
 
+    research_block = ""
+    if researched_player:
+        research_block = (
+            "\n\n=== ملف اللاعب الموثّق من البحث الحي قبل الإجابة (365Scores 2026/27) ===\n"
+            + _format_player_dossier_text(researched_player, formation_code=resolved_form)
+        )
+
     api_key = _resolve_groq_key()
     answer_text = ""
-    engine_used = "coach_pro_deterministic"
-    chosen_model = "llama-3.3-70b-versatile" if model == "auto" else model
+    engine_used = "coach_pro_grounded"
+    primary_model = "llama-3.3-70b-versatile" if model == "auto" else model
+    candidate_models = list(dict.fromkeys([primary_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]))
 
     if api_key:
         system_prompt = (
-            "أنت المساعد الذكي الرئيسي في EGY-SCOUT Coach Pro (مساعد المدير الفني والمدير الإداري).\n"
+            "أنت الخبير التكتيكي ومساعد المدرب الذكي في EGY-SCOUT Coach Pro.\n"
             "قواعد صارمة:\n"
-            "1. خاطب المدرب باسمه بأسلوب احترافي عملي باللغة العربية.\n"
-            "2. اعتمد حصراً على قائمة اللاعبين الجاهزين والمستبعدين والأعمار والأطوال والترتيب الحي في البيانات المرفقة. يُمنع منعاً باتاً اختراع أي أسماء أو أرقام.\n"
-            "3. عند رسم خطة تكتيكية، وضّح دور الفريقين في الحالات الثلاث: الاستحواذ، الهجوم والاختراق، وقطع الكرة والدفاع.\n\n"
-            f"البيانات الحية الموثّقة الآن:\n{ctx_block}"
+            "1. اعتمد على البحث الحي وبيانات القائمة الكاملة المرفقة، ولا تخترع أي رقم أو إحصائية غير موجودة.\n"
+            "2. إذا سأل المدرب عن لاعب معين (توظيفه، مركزه، مميزاته وعيوبه، أو كيف يدربه): أجب فوراً بتحليل مباشر ومنظم يشمل:\n"
+            "   - المركز الأساسي والبديل بناءً على البيانات الحية الموثقة.\n"
+            "   - أين تضعه بالضبط في التشكيل المطلوب وما أدواره في الحالات الثلاث (الاستحواذ / الهجوم / الدفاع).\n"
+            "   - المميزات ونقاط الانتباه المستخلصة من مركزه الفعلي وأرقامه الموثقة وأسلوب لعبه، مع الإشارة بوضوح لما هو غير متوفر إن وُجد.\n"
+            "   - توصية تدريبية عملية خاصة به.\n"
+            "3. أكمل إجابتك للنهاية بشكل واضح ومختصر ومفيد دون قطع الجمل.\n\n"
+            f"البيانات الحية الموثّقة الآن:\n{ctx_block}{research_block}"
         )
         msgs: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
-        for h in (history or [])[-4:]:
+        for h in (history or [])[-10:]:
             if h.get("role") in ("user", "assistant") and h.get("content"):
-                msgs.append({"role": h["role"], "content": str(h["content"])[:500]})
+                msgs.append({"role": h["role"], "content": str(h["content"])[:900]})
         action_note = (
-            f"\n[تم رسم خطة {resolved_form} بالحالات الثلاث (الاستحواذ / الهجوم / الدفاع وقطع الكرة) لـ {len(fit_players)} لاعب جاهز واستبعاد {len(unavail)} لاعب.]"
+            f"\n[تم رسم خطة {resolved_form} بالحالات الثلاث لـ {len(fit_players)} لاعب جاهز.]"
             if ai_blueprint
             else f"\n[تم توليد وحدة تدريبية {ai_training_session['md_code']} بحمل {ai_training_session['srpe_au']} AU.]"
             if ai_training_session
@@ -658,52 +724,64 @@ def run_coach_copilot_chat(
         )
         msgs.append({"role": "user", "content": q + action_note})
 
-        try:
-            r = httpx.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": chosen_model, "messages": msgs, "temperature": 0.25, "max_tokens": 800},
-                timeout=16.0,
-            )
-            if r.status_code == 200:
-                answer_text = str(r.json()["choices"][0]["message"]["content"]).strip()
-                engine_used = f"groq_live:{chosen_model}"
-        except Exception:
-            answer_text = ""
+        for m_id in candidate_models:
+            try:
+                r = httpx.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={"model": m_id, "messages": msgs, "temperature": 0.2, "max_tokens": 1800},
+                    timeout=22.0,
+                )
+                if r.status_code == 200:
+                    answer_text = str(r.json()["choices"][0]["message"]["content"]).strip()
+                    if answer_text:
+                        engine_used = f"groq_live:{m_id}"
+                        break
+            except Exception:
+                continue
 
     if not answer_text:
         greet = f"مرحباً كابتن **{coach_name}**"
-        excl_txt = (
-            f"\n- **تنبيه إداري:** تم استبعاد {len(unavail)} لاعب تلقائياً ({', '.join(str(p.get('name_ar')) for p in unavail[:4])})."
-            if unavail
-            else "\n- جميع لاعبي القائمة جاهزون طبياً وانضباطياً."
-        )
-        if ai_blueprint:
+        if researched_player:
+            tp = researched_player.get("tactical_profile") or {}
+            stats = researched_player.get("season_stats") or {}
+            comp_str = " | ".join(stats.get("competitions") or []) or "قيد التحديث من البطولة الحالية"
+            answer_text = (
+                f"{greet} — **تقرير البحث الحي وتوظيف اللاعب: {researched_player.get('name_ar')}** ({researched_player.get('club_name_ar')}):\n\n"
+                f"1. **البيانات والمركز الموثق (`365Scores 2026/27`):**\n"
+                f"- القميص: `#{researched_player.get('jersey_number') or '-'}` | المركز الأصلي: **{researched_player.get('position_label_ar')} ({researched_player.get('position_code')})**\n"
+                f"- العمر: {researched_player.get('age') or '-'} سنة | الطول: {researched_player.get('height_cm') or '-'} سم | الجاهزية: **{researched_player.get('readiness_pct', 100)}%**\n"
+                f"- إحصائيات 2026/27: {comp_str}\n\n"
+                f"2. **أين تضعه وما المراكز التي يلعب بها؟**\n"
+                f"- **المراكز المناسبة:** {'، '.join(tp.get('best_roles_ar') or [])}\n"
+                f"- **في خطة 3-4-2-1:** {tp.get('fit_3421') or ''}\n"
+                f"- **في خطة {resolved_form}:** {tp.get('fit_4231') or ''}\n\n"
+                f"3. **التوصية التدريبية:** ركّز له في حصص `MD-3` و`MD-2` على التحولات في مساحته الأساسية وسرعة التمرير التقدمي."
+            )
+        elif ai_blueprint:
             starters_preview = "، ".join(
-                f"#{n.get('jersey_number', '')} {n.get('player_name', n.get('slot'))} ({n.get('slot')})"
+                f"#{n.get('jersey_number', '')} {n.get('player_label', n.get('slot'))} ({n.get('slot')})"
                 for n in ai_blueprint.get("nodes", [])[:6]
             )
             answer_text = (
-                f"{greet} — تم رسم وتطبيق خطة **{resolved_form}** لـ **{club.get('name_ar')}** ضد **{opponent.get('name_ar')}** بالحالات التكتيكية الثلاث (الاستحواذ / الهجوم / الدفاع وقطع الكرة).{excl_txt}\n"
-                f"- **التشكيل الأساسي:** {starters_preview}\n"
-                f"- يمكنك سحب أي لاعب، ربط اللاعبين بأسهم مخصصة، التبديل بين الحالات الثلاث، أو تعديل الخطة بحرية مباشرةً على الملعب."
+                f"{greet} — تم رسم وتطبيق خطة **{resolved_form}** لـ **{club.get('name_ar')}** بالحالات التكتيكية الثلاث.\n"
+                f"- **أبرز الأساسيين:** {starters_preview}"
             )
         elif ai_training_session:
             answer_text = (
-                f"{greet} — تم تجهيز وتطبيق وحدة **{ai_training_session['title_ar']}** على لوحة التدريب.\n"
-                f"- **المدة:** {ai_training_session['duration_min']} دقيقة | **الشدة:** RPE {ai_training_session['target_rpe']} | **الحمل:** `{ai_training_session['srpe_au']} AU`."
+                f"{greet} — تم تجهيز وحدة **{ai_training_session['title_ar']}** على لوحة التدريب (`{ai_training_session['srpe_au']} AU`)."
             )
         elif ai_matchday_sheet:
             answer_text = (
-                f"{greet} — تم إعداد **كشف المباراة الرسمي** لمواجهة **{opponent.get('name_ar')}** ({len(ai_matchday_sheet['starters'])} أساسيين + {len(ai_matchday_sheet['substitutes'])} بدلاء).{excl_txt}"
+                f"{greet} — تم إعداد كشف المباراة الرسمي ({len(ai_matchday_sheet['starters'])} أساسيين + {len(ai_matchday_sheet['substitutes'])} بدلاء)."
             )
         else:
             depth = build_squad_depth_report(evaluated_players, formation_code=resolved_form)
             alerts = "\n- ".join(depth["shortage_alerts_ar"][:3]) or "تغطية جميع المراكز الأساسية مكتملة."
             answer_text = (
-                f"{greet} — موقف **{club.get('name_ar')}** قبل مواجهة **{opponent.get('name_ar')}** ({resolved_form}):\n"
-                f"- **الجاهزون:** {len(fit_players)} لاعباً | **المستبعدون:** {len(unavail)} لاعبين.\n"
-                f"- **ملخص المدير الفني:** {alerts}"
+                f"{greet} — ملخص **{club.get('name_ar')}** ({resolved_form}):\n"
+                f"- الجاهزون: {len(fit_players)} لاعباً | المستبعدون: {len(unavail)} لاعبين.\n"
+                f"- تنبيهات العمق: {alerts}"
             )
 
     return {
@@ -713,6 +791,8 @@ def run_coach_copilot_chat(
         "ai_drawing_blueprint": ai_blueprint,
         "ai_training_session": ai_training_session,
         "ai_matchday_sheet": ai_matchday_sheet,
+        "researched_player": researched_player,
+        "research_sources": (researched_player or {}).get("sources") or [],
         "structured_cards": structured_cards,
         "follow_up_questions": follow_ups,
     }

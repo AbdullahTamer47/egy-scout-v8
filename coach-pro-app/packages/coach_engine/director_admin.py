@@ -45,10 +45,23 @@ class CoachProStore:
                     coach_name TEXT NOT NULL,
                     coach_role TEXT NOT NULL DEFAULT 'head_coach',
                     club_id TEXT NOT NULL DEFAULT 'al_ahly',
-                    opponent_id TEXT NOT NULL DEFAULT 'zamalek',
+                    opponent_id TEXT NOT NULL DEFAULT '',
                     formation TEXT NOT NULL DEFAULT '4-2-3-1',
+                    league_id TEXT NOT NULL DEFAULT 'egy.1',
                     updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS coach_tactical_plans (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    club_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    formation_a TEXT NOT NULL,
+                    formation_b TEXT NOT NULL DEFAULT '4-4-2',
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_plans_tenant_club ON coach_tactical_plans(tenant_id, club_id);
 
                 CREATE TABLE IF NOT EXISTS club_rosters (
                     tenant_id TEXT NOT NULL,
@@ -99,6 +112,11 @@ class CoachProStore:
                 """
             )
 
+        with self._connect() as conn:
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(coach_profiles)").fetchall()}
+            if "league_id" not in cols:
+                conn.execute("ALTER TABLE coach_profiles ADD COLUMN league_id TEXT NOT NULL DEFAULT 'egy.1'")
+
     def get_coach_profile(self, tenant_id: str) -> Optional[dict[str, Any]]:
         with self._connect() as conn:
             row = conn.execute(
@@ -113,8 +131,9 @@ class CoachProStore:
         coach_name: str,
         coach_role: str = "head_coach",
         club_id: str = "al_ahly",
-        opponent_id: str = "zamalek",
+        opponent_id: str = "",
         formation: str = "4-2-3-1",
+        league_id: str = "egy.1",
     ) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         clean_name = (coach_name or "").strip()[:80]
@@ -123,19 +142,73 @@ class CoachProStore:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO coach_profiles (tenant_id, coach_name, coach_role, club_id, opponent_id, formation, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO coach_profiles (tenant_id, coach_name, coach_role, club_id, opponent_id, formation, league_id, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(tenant_id) DO UPDATE SET
                     coach_name = excluded.coach_name,
                     coach_role = excluded.coach_role,
                     club_id = excluded.club_id,
                     opponent_id = excluded.opponent_id,
                     formation = excluded.formation,
+                    league_id = excluded.league_id,
                     updated_at = excluded.updated_at
                 """,
-                (tenant_id, clean_name, coach_role, club_id, opponent_id, formation, now),
+                (tenant_id, clean_name, coach_role, club_id, opponent_id or "", formation, league_id or "egy.1", now),
             )
         return self.get_coach_profile(tenant_id) or {}
+
+    def save_tactical_plan(self, tenant_id: str, club_id: str, plan_payload: dict[str, Any]) -> dict[str, Any]:
+        pid = str(plan_payload.get("plan_id") or plan_payload.get("id") or f"plan_{uuid.uuid4().hex[:10]}")
+        now = datetime.now(timezone.utc).isoformat()
+        stored = {**plan_payload, "plan_id": pid, "club_id": club_id, "updated_at": now}
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO coach_tactical_plans (id, tenant_id, club_id, name, formation_a, formation_b, payload_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    club_id = excluded.club_id,
+                    name = excluded.name,
+                    formation_a = excluded.formation_a,
+                    formation_b = excluded.formation_b,
+                    payload_json = excluded.payload_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    pid,
+                    tenant_id,
+                    club_id,
+                    str(plan_payload.get("name") or f"{club_id} ({plan_payload.get('formation_a', '4-2-3-1')})"),
+                    str(plan_payload.get("formation_a") or "4-2-3-1"),
+                    str(plan_payload.get("formation_b") or "4-4-2"),
+                    json.dumps(stored, ensure_ascii=False),
+                    now,
+                ),
+            )
+        return stored
+
+    def list_tactical_plans(self, tenant_id: str, club_id: Optional[str] = None) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            if club_id:
+                rows = conn.execute(
+                    "SELECT id, payload_json FROM coach_tactical_plans WHERE tenant_id = ? AND club_id = ? ORDER BY updated_at DESC LIMIT 30",
+                    (tenant_id, club_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, payload_json FROM coach_tactical_plans WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT 30",
+                    (tenant_id,),
+                ).fetchall()
+        out = []
+        for r in rows:
+            item = json.loads(r["payload_json"])
+            item["plan_id"] = r["id"]
+            out.append(item)
+        return out
+
+    def delete_tactical_plan(self, tenant_id: str, plan_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM coach_tactical_plans WHERE tenant_id = ? AND id = ?", (tenant_id, plan_id))
 
     def save_club_roster(self, tenant_id: str, club_id: str, club_payload: dict[str, Any]) -> None:
         now = datetime.now(timezone.utc).isoformat()

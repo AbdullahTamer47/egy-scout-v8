@@ -3,9 +3,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowRightLeft,
+  Bot,
   Camera,
   Download,
   Film,
+  FolderOpen,
   Grid,
   Link2,
   Move,
@@ -15,23 +17,29 @@ import {
   Play,
   RotateCcw,
   Save,
+  Search,
   Shield,
   Sparkles,
   Square,
   Swords,
   Trash2,
   Undo2,
+  Users,
+  X,
   Zap,
 } from "lucide-react";
 import { apiFetch, BlueprintNode, MathValidationResult } from "@/lib/api";
+import { deleteLocalPlan, loadSavedPlans, saveLocalPlan } from "@/lib/coachStorage";
 import {
   CoachClubDetail,
+  CoachPlayer,
   EditableArrow,
   EditableZone,
   FreehandStroke,
   getShortArabicName,
   isLightHex,
   PlayerTacticalLink,
+  SavedTacticalPlan,
   TacticalPhaseId,
   TacticalPhaseSnapshot,
   ThreePhaseBlueprint,
@@ -44,9 +52,11 @@ interface Props {
   defaultFormation: string;
   externalBlueprint?: ThreePhaseBlueprint | null;
   onFormationChange?: (formation: string) => void;
+  onOpenOpponentPicker?: () => void;
+  onAskAiAboutPlayer?: (player: CoachPlayer, ownerClub: CoachClubDetail) => void;
 }
 
-type ToolMode = "drag" | "link_players" | "pass_arrow" | "run_arrow" | "press_arrow" | "zone" | "freehand";
+type ToolMode = "drag" | "swap_players" | "link_players" | "pass_arrow" | "run_arrow" | "press_arrow" | "zone" | "freehand";
 type DisplayMode = "both" | "team_a" | "team_b";
 
 const TEAM_SIZES = [5, 6, 7, 8, 9, 10, 11] as const;
@@ -102,6 +112,8 @@ export default function CoachTacticsStudio({
   defaultFormation,
   externalBlueprint = null,
   onFormationChange,
+  onOpenOpponentPicker,
+  onAskAiAboutPlayer,
 }: Props) {
   const isAr = lang === "ar";
   const [teamSize, setTeamSize] = useState<number>(11);
@@ -112,6 +124,12 @@ export default function CoachTacticsStudio({
   const [undoStack, setUndoStack] = useState<Record<TacticalPhaseId, TacticalPhaseSnapshot>[]>([]);
 
   const [tool, setTool] = useState<ToolMode>("drag");
+  const [swapPending, setSwapPending] = useState<{ team: "team_a" | "team_b"; index: number; label: string } | null>(null);
+  const [swapModalOpen, setSwapModalOpen] = useState(false);
+  const [swapSearch, setSwapSearch] = useState("");
+  const [swapPosTab, setSwapPosTab] = useState<"ALL" | "GK" | "DEF" | "MID" | "ATT">("ALL");
+  const [savedPlans, setSavedPlans] = useState<SavedTacticalPlan[]>([]);
+  const [plansDrawerOpen, setPlansDrawerOpen] = useState(false);
   const [displayMode, setDisplayMode] = useState<DisplayMode>("both");
   const [showChannelsGrid, setShowChannelsGrid] = useState<boolean>(true);
   const [syncSlotAllPhases, setSyncSlotAllPhases] = useState<boolean>(true);
@@ -586,6 +604,44 @@ export default function CoachTacticsStudio({
     const { x_m, y_m } = toMetersFromEvent(e);
     const hitN = hitPlayer(x_m, y_m);
 
+    if (tool === "swap_players") {
+      if (hitN) {
+        if (!swapPending) {
+          setSwapPending({ team: hitN.team, index: hitN.index, label: `#${hitN.node.jersey_number || ""} ${hitN.node.player_label}` });
+          setSelectedEl({ kind: "node", team: hitN.team, index: hitN.index });
+        } else if (swapPending.team === hitN.team && swapPending.index !== hitN.index && phases) {
+          setUndoStack((prev) => [...prev.slice(-24), JSON.parse(JSON.stringify(phases))]);
+          const targetKeys: TacticalPhaseId[] = syncSlotAllPhases ? ["possession", "attack", "defense"] : [activePhase];
+          const idx1 = swapPending.index;
+          const idx2 = hitN.index;
+          const teamKey = hitN.team;
+          setPhases((prev) => {
+            if (!prev) return prev;
+            const next = { ...prev };
+            for (const pk of targetKeys) {
+              const ph = clonePhase(next[pk]);
+              const list = teamKey === "team_a" ? ph.nodes : ph.opponent_nodes;
+              if (list[idx1] && list[idx2]) {
+                const aLbl = list[idx1].player_label;
+                const aNum = list[idx1].jersey_number;
+                list[idx1] = { ...list[idx1], player_label: list[idx2].player_label, jersey_number: list[idx2].jersey_number };
+                list[idx2] = { ...list[idx2], player_label: aLbl, jersey_number: aNum };
+              }
+              next[pk] = ph;
+            }
+            return next;
+          });
+          setSavingMsg(isAr ? `✓ تم تبديل اللاعبين على الملعب بنجاح` : "✓ Swapped players on pitch");
+          setTimeout(() => setSavingMsg(null), 2500);
+          setSwapPending(null);
+        } else {
+          setSwapPending({ team: hitN.team, index: hitN.index, label: `#${hitN.node.jersey_number || ""} ${hitN.node.player_label}` });
+          setSelectedEl({ kind: "node", team: hitN.team, index: hitN.index });
+        }
+      }
+      return;
+    }
+
     if (tool === "link_players") {
       if (hitN) {
         if (!linkPending) {
@@ -869,9 +925,19 @@ export default function CoachTacticsStudio({
       for (const pk of targetKeys) {
         const ph = clonePhase(next[pk]);
         const list = selectedEl.team === "team_a" ? ph.nodes : ph.opponent_nodes;
-        if (list[selectedEl.index]) {
+        const curNode = list[selectedEl.index];
+        if (curNode) {
+          // Smart swap: if picked player is already on pitch in another slot, exchange them cleanly
+          const existingIdx = list.findIndex((n, idx) => idx !== selectedEl.index && n.jersey_number === pl.jersey_number);
+          if (existingIdx !== -1) {
+            list[existingIdx] = {
+              ...list[existingIdx],
+              jersey_number: curNode.jersey_number,
+              player_label: curNode.player_label,
+            };
+          }
           list[selectedEl.index] = {
-            ...list[selectedEl.index],
+            ...curNode,
             jersey_number: pl.jersey_number,
             player_label: getShortArabicName(pl),
           };
@@ -880,6 +946,9 @@ export default function CoachTacticsStudio({
       }
       return next;
     });
+    setSwapModalOpen(false);
+    setSavingMsg(isAr ? `✓ تم إشراك #${pl.jersey_number} ${pl.name_ar}` : `✓ Assigned #${pl.jersey_number} ${pl.name_en}`);
+    setTimeout(() => setSavingMsg(null), 2500);
   };
 
   const updateSelectedPlayerMeta = (patch: { slot?: string; role_ar?: string }) => {
@@ -928,27 +997,80 @@ export default function CoachTacticsStudio({
     });
   };
 
+  useEffect(() => {
+    setSavedPlans(loadSavedPlans(club.club_id));
+    apiFetch<{ plans: SavedTacticalPlan[] }>(`/api/coach/plans?club_id=${encodeURIComponent(club.club_id)}`)
+      .then((res) => {
+        if (Array.isArray(res.plans) && res.plans.length > 0) {
+          setSavedPlans(res.plans);
+          for (const p of res.plans) saveLocalPlan(club.club_id, p);
+        }
+      })
+      .catch(() => {});
+  }, [club.club_id]);
+
   const saveAllPhases = async () => {
     if (!phases) return;
-    await apiFetch(
-      "/api/plans",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          match_id: `${club.club_id}_vs_${opponent.club_id}`,
-          name: `${club.name_ar} (${formA}) × ${opponent.name_ar} — 3 حالات`,
-          formation_a: formA,
-          formation_b: formB,
-          phases,
-          lineHeight,
-          pressingStyle,
-        }),
-      },
-      "club_demo_egypt",
-      "coach"
-    );
-    setSavingMsg(isAr ? "تم حفظ الحالات التكتيكية الـ 3 والتعديلات في قاعدة البيانات ✓" : "Saved all 3 phases ✓");
-    setTimeout(() => setSavingMsg(null), 3500);
+    const planId = `plan_${club.club_id}_${formA}_${Date.now()}`;
+    const oppTag = opponent.club_id === "none" ? "" : ` × ${opponent.name_ar}`;
+    const newPlan: SavedTacticalPlan = {
+      plan_id: planId,
+      club_id: club.club_id,
+      name: `${club.name_ar} (${formA})${oppTag} — 3 حالات`,
+      formation_a: formA,
+      formation_b: formB,
+      phases,
+      lineHeight,
+      pressingStyle,
+      updated_at: new Date().toISOString(),
+    };
+    const nextList = saveLocalPlan(club.club_id, newPlan);
+    setSavedPlans(nextList);
+    try {
+      const res = await apiFetch<{ plans?: SavedTacticalPlan[] }>(
+        "/api/coach/plans",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            plan_id: planId,
+            club_id: club.club_id,
+            match_id: `${club.club_id}_vs_${opponent.club_id}`,
+            name: newPlan.name,
+            formation_a: formA,
+            formation_b: formB,
+            phases,
+            lineHeight,
+            pressingStyle,
+          }),
+        },
+        "club_demo_egypt",
+        "coach"
+      );
+      if (Array.isArray(res.plans) && res.plans.length > 0) {
+        setSavedPlans(res.plans);
+      }
+      setSavingMsg(isAr ? "✓ تم حفظ الحالات التكتيكية الـ 3 بنجاح في السجل السحابي والمحلي" : "✓ Saved all 3 tactical phases");
+    } catch {
+      setSavingMsg(isAr ? "✓ تم حفظ الخطة بنجاح محلياً على جهازك" : "✓ Saved locally");
+    }
+    setTimeout(() => setSavingMsg(null), 4000);
+  };
+
+  const handleLoadSavedPlan = (sp: SavedTacticalPlan) => {
+    setFormA(sp.formation_a || formA);
+    setFormB(sp.formation_b || formB);
+    if (sp.lineHeight) setLineHeight(sp.lineHeight);
+    if (sp.pressingStyle) setPressingStyle(sp.pressingStyle);
+    setPhases(sp.phases);
+    setPlansDrawerOpen(false);
+    setSavingMsg(isAr ? `✓ تم تحميل خطة: ${sp.name}` : `✓ Loaded ${sp.name}`);
+    setTimeout(() => setSavingMsg(null), 3000);
+  };
+
+  const handleDeleteSavedPlan = async (pid: string) => {
+    const next = deleteLocalPlan(club.club_id, pid);
+    setSavedPlans(next);
+    apiFetch(`/api/coach/plans/${encodeURIComponent(pid)}?club_id=${encodeURIComponent(club.club_id)}`, { method: "DELETE" }).catch(() => {});
   };
 
   const exportPng = () => {
@@ -1183,6 +1305,7 @@ export default function CoachTacticsStudio({
             {(
               [
                 ["drag", isAr ? "سحب / تحديد" : "Drag / Select", <Move key="m" className="w-3.5 h-3.5" />],
+                ["swap_players", isAr ? "تبديل مباشر" : "Swap 2 Players", <ArrowRightLeft key="sw" className="w-3.5 h-3.5" />],
                 ["link_players", isAr ? "ربط لاعبين" : "Link Players", <Link2 key="l" className="w-3.5 h-3.5" />],
                 ["pass_arrow", isAr ? "سهم تمرير" : "Pass Arrow", <MoveUpRight key="p" className="w-3.5 h-3.5" />],
                 ["run_arrow", isAr ? "سهم تحرك" : "Run Arrow", <Zap key="r" className="w-3.5 h-3.5" />],
@@ -1197,6 +1320,7 @@ export default function CoachTacticsStudio({
                 onClick={() => {
                   setTool(id);
                   setLinkPending(null);
+                  setSwapPending(null);
                 }}
                 className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl font-bold transition ${
                   tool === id ? "bg-emerald-600 text-white shadow-2xs" : "bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100"
@@ -1258,12 +1382,77 @@ export default function CoachTacticsStudio({
               <Download className="w-3.5 h-3.5 text-emerald-600" />
               <span>PNG</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setPlansDrawerOpen((v) => !v)}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 font-bold hover:border-[#0FB5AE]"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-[#0D717A]" />
+              <span>{isAr ? `المحفوظة (${savedPlans.length})` : `Saved (${savedPlans.length})`}</span>
+            </button>
+            {opponent.club_id === "none" && onOpenOpponentPicker && (
+              <button
+                type="button"
+                onClick={onOpenOpponentPicker}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-sky-50 border border-sky-200 text-sky-800 font-extrabold hover:bg-sky-100"
+              >
+                <span>{isAr ? "+ اختر الخصم" : "+ Pick Opponent"}</span>
+              </button>
+            )}
             <button type="button" onClick={saveAllPhases} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold shadow-2xs">
               <Save className="w-3.5 h-3.5" />
-              <span>{isAr ? "حفظ الـ 3 حالات" : "Save All"}</span>
+              <span>{isAr ? "حفظ الخطة والـ 3 حالات" : "Save Plan"}</span>
             </button>
           </div>
         </div>
+
+        {tool === "swap_players" && (
+          <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-bold flex items-center justify-between gap-2">
+            <span>
+              {swapPending
+                ? isAr ? `اختر اللاعب الثاني للتبديل مباشرةً مع (${swapPending.label})` : `Tap second player to swap with ${swapPending.label}`
+                : isAr ? "اضغط على اللاعب الأول على الملعب ثم اللاعب الثاني لتبديل أماكنهما فوراً" : "Tap first player on pitch then second player to swap"}
+            </span>
+            {swapPending && (
+              <button type="button" onClick={() => setSwapPending(null)} className="text-[11px] underline">
+                {isAr ? "إلغاء" : "Cancel"}
+              </button>
+            )}
+          </div>
+        )}
+
+        {plansDrawerOpen && (
+          <div className="p-3 rounded-2xl bg-[#F2F6F8] border border-[#D8E3EB] space-y-2">
+            <div className="flex items-center justify-between font-extrabold text-[#0B1F3A]">
+              <span>{isAr ? `الخطط التكتيكية المحفوظة (${savedPlans.length})` : `Saved Plans (${savedPlans.length})`}</span>
+              <button type="button" onClick={() => setPlansDrawerOpen(false)} className="text-xs text-slate-500 underline">
+                {isAr ? "إغلاق" : "Close"}
+              </button>
+            </div>
+            {savedPlans.length === 0 ? (
+              <div className="text-slate-500 text-xs">{isAr ? "لم يتم حفظ خطط بعد — اضغط «حفظ الخطة والـ 3 حالات»." : "No saved plans yet."}</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {savedPlans.map((sp) => (
+                  <div key={sp.plan_id} className="p-2.5 rounded-xl bg-white border border-slate-200 flex items-center justify-between gap-2">
+                    <button type="button" onClick={() => handleLoadSavedPlan(sp)} className="text-start min-w-0 flex-1 hover:text-[#0D717A]">
+                      <div className="font-extrabold text-slate-900 truncate">{sp.name}</div>
+                      <div className="text-[10px] text-slate-500">{sp.formation_a} • {sp.updated_at?.slice(0, 10)}</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSavedPlan(sp.plan_id)}
+                      className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600"
+                      title={isAr ? "حذف" : "Delete"}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {savingMsg && <div className="p-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold">{savingMsg}</div>}
       </div>
@@ -1390,20 +1579,36 @@ export default function CoachTacticsStudio({
                 </div>
 
                 <label className="block text-[11px] font-bold text-[#0B1F3A] pt-1">
-                  {isAr ? "تبديل بلاعب آخر من القائمة:" : "Swap with Squad Player:"}
+                  {isAr ? "تبديل بلاعب آخر من القائمة (بالصور والمركز):" : "Swap with Squad Player:"}
                 </label>
-                <select
-                  value={selectedNodeObj.jersey_number || ""}
-                  onChange={(e) => swapSelectedPlayer(Number(e.target.value))}
-                  aria-label="Swap Player"
-                  className="w-full rounded-lg bg-white border border-[#D8E3EB] px-2.5 py-1.5 text-xs text-[#0B1F3A]"
-                >
-                  {(selectedEl.team === "team_a" ? fitPlayers : opponent.players).map((p) => (
-                    <option key={p.jersey_number} value={p.jersey_number}>
-                      #{p.jersey_number} {p.name_ar} ({p.position})
-                    </option>
-                  ))}
-                </select>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSwapSearch("");
+                      setSwapPosTab("ALL");
+                      setSwapModalOpen(true);
+                    }}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-[#0D717A] hover:bg-[#0B5E66] text-white font-extrabold shadow-2xs"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>{isAr ? "تبديل من القائمة بالصور" : "Visual Squad Swap"}</span>
+                  </button>
+                  {selectedEl?.team === "team_a" && onAskAiAboutPlayer && (() => {
+                    const matched = club.players.find((pl) => pl.jersey_number === selectedNodeObj.jersey_number);
+                    if (!matched) return null;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => onAskAiAboutPlayer(matched, club)}
+                        className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-extrabold"
+                      >
+                        <Bot className="w-3.5 h-3.5" />
+                        <span>{isAr ? "توظيفه بالـ AI" : "AI Role"}</span>
+                      </button>
+                    );
+                  })()}
+                </div>
 
                 <label className="flex items-center gap-1.5 text-[10px] font-bold text-[#0D717A] pt-1 cursor-pointer">
                   <input
@@ -1538,6 +1743,140 @@ export default function CoachTacticsStudio({
           </div>
         </div>
       </div>
+
+      {/* Visual Photo-Based Squad Swap Modal */}
+      {swapModalOpen && selectedEl?.kind === "node" && selectedNodeObj && (
+        <div
+          dir={isAr ? "rtl" : "ltr"}
+          className="fixed inset-0 z-[100] bg-[#0B1F3A]/45 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4"
+          onClick={() => setSwapModalOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-2xl max-h-[86dvh] bg-white rounded-3xl border border-[#D8E3EB] shadow-2xl flex flex-col overflow-hidden"
+          >
+            <div className="px-5 py-3.5 bg-[#F2F6F8] border-b border-[#D8E3EB] flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-extrabold text-[#0B1F3A]">
+                  {isAr
+                    ? `اختر البديل لمركز (${selectedNodeObj.slot}) — بدلاً من #${selectedNodeObj.jersey_number} ${selectedNodeObj.player_label}`
+                    : `Replace #${selectedNodeObj.jersey_number} ${selectedNodeObj.player_label} (${selectedNodeObj.slot})`}
+                </h3>
+                <p className="text-[11px] text-[#5C6A7C]">
+                  {isAr ? "اختيار لاعب موجود داخل الملعب سيبدّل مكانهما تلقائياً" : "Selecting an on-pitch player cleanly swaps their slots"}
+                </p>
+              </div>
+              <button type="button" onClick={() => setSwapModalOpen(false)} aria-label="Close" className="p-2 rounded-xl hover:bg-slate-200 text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3 overflow-y-auto">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative flex-1 min-w-[180px]">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute top-2.5 start-3" />
+                  <input
+                    type="text"
+                    value={swapSearch}
+                    onChange={(e) => setSwapSearch(e.target.value)}
+                    placeholder={isAr ? "ابحث باسم اللاعب أو رقمه..." : "Search name or jersey..."}
+                    className="w-full rounded-xl bg-slate-50 border border-slate-200 ps-8 pe-3 py-1.5 text-xs outline-none focus:border-[#0FB5AE] focus:bg-white"
+                  />
+                </div>
+                <div className="flex gap-1 text-[11px]">
+                  {(
+                    [
+                      ["ALL", isAr ? "الكل" : "All"],
+                      ["GK", isAr ? "حراس" : "GK"],
+                      ["DEF", isAr ? "دفاع" : "DEF"],
+                      ["MID", isAr ? "وسط" : "MID"],
+                      ["ATT", isAr ? "هجوم" : "ATT"],
+                    ] as const
+                  ).map(([id, lbl]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setSwapPosTab(id)}
+                      className={`px-2.5 py-1 rounded-lg font-extrabold ${
+                        swapPosTab === id ? "bg-[#0D717A] text-white" : "bg-slate-100 text-slate-700"
+                      }`}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {(() => {
+                  const pool = selectedEl.team === "team_a" ? club.players : opponent.players;
+                  const onPitchNums = new Set(
+                    (selectedEl.team === "team_a" ? currentPhase?.nodes || [] : currentPhase?.opponent_nodes || []).map((n) => n.jersey_number)
+                  );
+                  const q = swapSearch.trim().toLowerCase();
+                  return pool
+                    .filter((pl) => {
+                      const up = pl.position.toUpperCase();
+                      if (swapPosTab === "GK" && !up.includes("GK")) return false;
+                      if (swapPosTab === "DEF" && !/(CB|RB|LB|WB)/.test(up)) return false;
+                      if (swapPosTab === "MID" && !/(DM|CM|AM|RM|LM)/.test(up)) return false;
+                      if (swapPosTab === "ATT" && !/(ST|CF|RW|LW)/.test(up)) return false;
+                      if (!q) return true;
+                      return (
+                        pl.name_ar.toLowerCase().includes(q) ||
+                        pl.name_en.toLowerCase().includes(q) ||
+                        String(pl.jersey_number) === q
+                      );
+                    })
+                    .map((pl) => {
+                      const isOnPitch = onPitchNums.has(pl.jersey_number);
+                      const isCur = pl.jersey_number === selectedNodeObj.jersey_number;
+                      const blocked = !pl.is_eligible_starter;
+                      return (
+                        <button
+                          key={pl.jersey_number}
+                          type="button"
+                          disabled={isCur || blocked}
+                          onClick={() => swapSelectedPlayer(pl.jersey_number)}
+                          className={`p-2.5 rounded-2xl border text-start flex items-center gap-3 transition ${
+                            isCur
+                              ? "bg-emerald-50 border-emerald-400 opacity-75"
+                              : blocked
+                                ? "bg-rose-50/70 border-rose-200 opacity-60 cursor-not-allowed"
+                                : "bg-white border-slate-200 hover:border-[#0FB5AE] hover:bg-[#F7FBFE]"
+                          }`}
+                        >
+                          {pl.photo_url ? (
+                            <img src={pl.photo_url} alt={pl.name_ar} className="w-10 h-10 rounded-xl object-cover object-top border border-slate-200 shrink-0 bg-slate-100" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-xl bg-[#0D717A] text-white font-extrabold flex items-center justify-center shrink-0">
+                              #{pl.jersey_number}
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="font-extrabold text-xs text-slate-900 truncate">
+                              #{pl.jersey_number} {isAr ? pl.name_ar : pl.name_en}
+                            </div>
+                            <div className="text-[10px] text-slate-500 flex items-center gap-1.5">
+                              <span className="font-bold text-[#0D717A]">{pl.position}</span>
+                              {pl.age && <span>• {pl.age}س</span>}
+                              {blocked && <span className="text-rose-600 font-bold">• {pl.block_reason_ar}</span>}
+                            </div>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold shrink-0 ${
+                            isCur ? "bg-emerald-600 text-white" : isOnPitch ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700"
+                          }`}>
+                            {isCur ? (isAr ? "الحالي" : "Current") : isOnPitch ? (isAr ? "في الملعب" : "On Pitch") : isAr ? "دكة" : "Bench"}
+                          </span>
+                        </button>
+                      );
+                    });
+                })()}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

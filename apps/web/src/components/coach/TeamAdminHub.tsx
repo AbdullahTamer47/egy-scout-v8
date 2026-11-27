@@ -2,7 +2,8 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeftRight, CheckSquare, ClipboardList, Globe, Printer, ShieldAlert, Square, Upload } from "lucide-react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, API_BASE } from "@/lib/api";
+import { saveLocalAdminStatus } from "@/lib/coachStorage";
 import { CoachClubDetail, CoachPlayer, ForeignQuotaSummary, MatchdaySheetPayload, SquadDepthReport } from "./coachTypes";
 
 interface Props {
@@ -107,6 +108,7 @@ export default function TeamAdminHub({
 
   const updatePlayerStatus = async (p: CoachPlayer, patch: Partial<CoachPlayer>) => {
     setUpdatingJersey(p.jersey_number);
+    saveLocalAdminStatus(club.club_id, p.jersey_number, patch);
     try {
       const res = await apiFetch<{
         club: CoachClubDetail;
@@ -133,6 +135,11 @@ export default function TeamAdminHub({
         "coach"
       );
       onAdminUpdated(res.club, res.squad_depth, res.matchday_sheet);
+      setMsg(
+        isAr
+          ? `✓ تم حفظ حالة ${p.name_ar} في القائمة وكشف المباراة`
+          : `✓ Saved ${p.name_en} status`
+      );
     } finally {
       setUpdatingJersey(null);
     }
@@ -329,7 +336,7 @@ export default function TeamAdminHub({
                 </div>
               </div>
               <a
-                href={`http://127.0.0.1:8080/api/coach/admin/matchday-sheet/print?club_id=${encodeURIComponent(
+                href={`${API_BASE}/api/coach/admin/matchday-sheet/print?club_id=${encodeURIComponent(
                   club.club_id
                 )}&opponent_id=${encodeURIComponent(opponent.club_id)}&formation=${encodeURIComponent(formation)}`}
                 target="_blank"

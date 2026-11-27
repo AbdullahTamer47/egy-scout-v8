@@ -13,6 +13,10 @@ import {
   SquadDepthReport,
 } from "./coachTypes";
 
+import { COACH_LEAGUES as TD_COACH_LEAGUES } from "./coachTypes";
+import { Sparkles as TdSparkles, ShieldPlus as TdShieldPlus } from "lucide-react";
+import { loadCachedLeagueClubs as tdLoadCachedClubs, saveCachedLeagueClubs as tdSaveCachedClubs } from "@/lib/coachStorage";
+
 interface Props {
   lang: "ar" | "en";
   club: CoachClubDetail;
@@ -21,6 +25,9 @@ interface Props {
   squadDepth: SquadDepthReport;
   standings: LiveStandingRow[];
   onSelectPlayer: (player: CoachPlayer, ownerClub: CoachClubDetail) => void;
+  onAskAiAboutPlayer?: (player: CoachPlayer, ownerClub?: CoachClubDetail) => void;
+  onAskAiAboutClub?: (targetClub: CoachClubDetail) => void;
+  onOpenOpponentPicker?: () => void;
 }
 
 export default function TechnicalDirectorHub({
@@ -31,6 +38,9 @@ export default function TechnicalDirectorHub({
   squadDepth,
   standings,
   onSelectPlayer,
+  onAskAiAboutPlayer,
+  onAskAiAboutClub,
+  onOpenOpponentPicker,
 }: Props) {
   const isAr = lang === "ar";
   const [subView, setSubView] = useState<"club_depth" | "egypt_scout">("club_depth");
@@ -47,6 +57,29 @@ export default function TechnicalDirectorHub({
   const [loadingScout, setLoadingScout] = useState(false);
   const [comparePair, setComparePair] = useState<LeaguePlayerSearchItem[]>([]);
 
+  const [scoutLeague, setScoutLeague] = useState<string>(club.league_id || "egy.1");
+  const [scoutClubs, setScoutClubs] = useState<CoachClubListItem[]>(clubs);
+
+  useEffect(() => {
+    if (subView !== "egypt_scout") return;
+    const cached = tdLoadCachedClubs(scoutLeague);
+    if (cached && cached.length > 0) setScoutClubs(cached);
+    apiFetch<{ clubs: CoachClubListItem[] }>(
+      `/api/coach/clubs?league=${encodeURIComponent(scoutLeague)}`,
+      {},
+      "club_demo_egypt",
+      "coach"
+    )
+      .then((res) => {
+        const list = res.clubs || [];
+        if (list.length > 0) {
+          setScoutClubs(list);
+          tdSaveCachedClubs(scoutLeague, list);
+        }
+      })
+      .catch(() => {});
+  }, [subView, scoutLeague]);
+
   useEffect(() => {
     if (subView !== "egypt_scout") return;
     let alive = true;
@@ -55,6 +88,7 @@ export default function TechnicalDirectorHub({
       q: query,
       position: posFilter,
       club_id: scoutClubId,
+      league: scoutLeague,
       nationality_type: scoutNat,
       limit: "90",
     });
@@ -71,7 +105,7 @@ export default function TechnicalDirectorHub({
     return () => {
       alive = false;
     };
-  }, [subView, query, posFilter, scoutClubId, scoutNat, scoutMaxAge, scoutMinHt]);
+  }, [subView, query, posFilter, scoutClubId, scoutLeague, scoutNat, scoutMaxAge, scoutMinHt]);
 
   const activeClub = viewTeam === "club" ? club : opponent;
   const filteredPlayers = useMemo(() => {
@@ -240,6 +274,63 @@ export default function TechnicalDirectorHub({
           )}
 
           {/* Scout Grid */}
+          <div className="rounded-2xl border border-[#D8E3EB] bg-slate-50/80 p-2.5 space-y-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-[11px] font-extrabold text-[#0B1F3A]">
+                {isAr ? "كشاف الدوريات الـ 8 الحية (تحديث 2026/27 — تحميل تدريجي للنادي)" : "Live 8-League Player Scout (Progressive Club Loading)"}
+              </span>
+              <span className="text-[10px] font-bold text-[#0D717A]">
+                {isAr ? `${scoutClubs.length} نادٍ متاح` : `${scoutClubs.length} clubs ready`}
+              </span>
+            </div>
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              {TD_COACH_LEAGUES.map((lg) => (
+                <button
+                  key={lg.id}
+                  type="button"
+                  onClick={() => {
+                    setScoutLeague(lg.id);
+                    setScoutClubId("ALL");
+                  }}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-extrabold whitespace-nowrap border transition ${
+                    scoutLeague === lg.id
+                      ? "bg-[#0D717A] text-white border-[#0D717A]"
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                  }`}
+                >
+                  <img src={lg.logo} alt="" className="w-3.5 h-3.5 object-contain" />
+                  <span>{isAr ? lg.ar : lg.en}</span>
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              <button
+                type="button"
+                onClick={() => setScoutClubId("ALL")}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold whitespace-nowrap border ${
+                  scoutClubId === "ALL" ? "bg-[#0B1F3A] text-white border-[#0B1F3A]" : "bg-white text-slate-600 border-slate-200"
+                }`}
+              >
+                {isAr ? "كل الأندية المحمّلة" : "All Loaded Clubs"}
+              </button>
+              {scoutClubs.map((sc) => (
+                <button
+                  key={sc.club_id}
+                  type="button"
+                  onClick={() => setScoutClubId(sc.club_id)}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap border transition ${
+                    scoutClubId === sc.club_id
+                      ? "bg-sky-600 text-white border-sky-600"
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-sky-50"
+                  }`}
+                >
+                  {sc.logo_url && <img src={sc.logo_url} alt="" className="w-3.5 h-3.5 object-contain" />}
+                  <span>{isAr ? sc.name_ar : sc.name_en}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 text-xs">
             {scoutResults.map((p) => {
               const isCmp = comparePair.some((x) => x.club_id === p.club_id && x.jersey_number === p.jersey_number);
@@ -297,6 +388,26 @@ export default function TechnicalDirectorHub({
                     <span>{p.nationality_flag} {p.nationality_ar || p.nationality}</span>
                     <span>{p.age ? `${p.age}س` : "-"} • {p.height_cm ? `${p.height_cm}سم` : "-"}</span>
                   </div>
+                  {onAskAiAboutPlayer && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAskAiAboutPlayer(p, {
+                          club_id: p.club_id,
+                          name_ar: p.club_name_ar,
+                          name_en: p.club_name_en,
+                          kit_hex: p.club_kit_hex,
+                          league_id: scoutLeague,
+                          players: [],
+                        });
+                      }}
+                      className="mt-1.5 w-full inline-flex items-center justify-center gap-1 py-1.5 rounded-lg bg-[#E6F8F7] hover:bg-[#0D717A] text-[#0D717A] hover:text-white border border-[#0FB5AE]/40 text-[10px] font-extrabold transition"
+                    >
+                      <TdSparkles className="w-3 h-3" />
+                      {isAr ? "توظيف بالـ AI" : "AI Role Analysis"}
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -374,9 +485,33 @@ export default function TechnicalDirectorHub({
             </div>
 
             <div className="xl:col-span-5 studio-panel p-4 space-y-3 text-xs">
-              <h3 className="text-sm font-extrabold text-slate-900">
-                {isAr ? "تحليل المواجهة المباشرة (البيانات الحية)" : "Head-to-Head Live Club Profile"}
-              </h3>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h3 className="text-sm font-extrabold text-slate-900">
+                  {isAr ? "تحليل المواجهة المباشرة (البيانات الحية)" : "Head-to-Head Live Club Profile"}
+                </h3>
+                <div className="flex items-center gap-1.5">
+                  {onAskAiAboutClub && (
+                    <button
+                      type="button"
+                      onClick={() => onAskAiAboutClub(club)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#E6F8F7] border border-[#0FB5AE]/40 text-[#0D717A] text-[10px] font-extrabold hover:bg-[#0D717A] hover:text-white transition"
+                    >
+                      <TdSparkles className="w-3 h-3" />
+                      {isAr ? "تحليل الفريق بالـ AI" : "AI Club Audit"}
+                    </button>
+                  )}
+                  {onOpenOpponentPicker && (
+                    <button
+                      type="button"
+                      onClick={onOpenOpponentPicker}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 text-[10px] font-extrabold hover:bg-sky-600 hover:text-white transition"
+                    >
+                      <TdShieldPlus className="w-3 h-3" />
+                      {opponent.club_id === "none" ? (isAr ? "اختر الخصم" : "Pick Opponent") : (isAr ? "تغيير الخصم" : "Change Opponent")}
+                    </button>
+                  )}
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 {[
                   { c: club, st: clubStanding, tag: isAr ? "فريقك" : "Your Club", accent: "border-emerald-200 bg-emerald-50/70" },
@@ -449,15 +584,18 @@ export default function TechnicalDirectorHub({
               {filteredPlayers.map((p) => {
                 const lk = isLightHex(activeClub.kit_hex);
                 return (
-                  <button
+                  <div
                     key={`${activeClub.club_id}-${p.jersey_number}`}
-                    type="button"
-                    onClick={() => onSelectPlayer(p, activeClub)}
-                    className={`p-3 rounded-2xl border text-start transition hover:shadow-sm ${
+                    className={`rounded-2xl border flex flex-col justify-between transition hover:shadow-sm ${
                       p.is_eligible_starter
                         ? "bg-slate-50 border-slate-200 hover:border-emerald-400 hover:bg-white"
                         : "bg-rose-50/70 border-rose-200 hover:border-rose-400"
                     }`}
+                  >
+                  <button
+                    type="button"
+                    onClick={() => onSelectPlayer(p, activeClub)}
+                    className="p-3 text-start w-full"
                   >
                     <div className="flex items-center justify-between gap-2">
                       {p.photo_url ? (
@@ -492,6 +630,19 @@ export default function TechnicalDirectorHub({
                       <div className="mt-1 text-[10px] font-bold text-rose-600 truncate">{p.block_reason_ar}</div>
                     )}
                   </button>
+                  {onAskAiAboutPlayer && (
+                    <div className="px-2.5 pb-2">
+                      <button
+                        type="button"
+                        onClick={() => onAskAiAboutPlayer(p, activeClub)}
+                        className="w-full inline-flex items-center justify-center gap-1 py-1 rounded-lg bg-[#E6F8F7] hover:bg-[#0D717A] text-[#0D717A] hover:text-white border border-[#0FB5AE]/30 text-[10px] font-extrabold transition"
+                      >
+                        <TdSparkles className="w-3 h-3" />
+                        {isAr ? "اسأل الـ AI عن توظيفه" : "Ask AI Role"}
+                      </button>
+                    </div>
+                  )}
+                </div>
                 );
               })}
             </div>

@@ -2,9 +2,10 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import * as echarts from "echarts";
-import { Flame, Pause, Play, Plus, Printer, RotateCcw, Save, Trash2 } from "lucide-react";
-import { apiFetch } from "@/lib/api";
-import { CoachClubDetail, DrillSetup, isLightHex, TrainingSessionPlan } from "./coachTypes";
+import { Activity, Bot, Flame, Pause, Play, Plus, Printer, RotateCcw, Save, Search, Trash2 } from "lucide-react";
+import { API_BASE, apiFetch } from "@/lib/api";
+import { saveLocalSessions } from "@/lib/coachStorage";
+import { CoachClubDetail, CoachPlayer, DrillSetup, isLightHex, TrainingSessionPlan } from "./coachTypes";
 
 interface Props {
   lang: "ar" | "en";
@@ -15,6 +16,7 @@ interface Props {
   activeSession?: TrainingSessionPlan | null;
   onSessionUpdated: (sess: TrainingSessionPlan, all: TrainingSessionPlan[], safety: Props["weeklySafety"]) => void;
   onSessionsDeleted: (all: TrainingSessionPlan[], safety: Props["weeklySafety"]) => void;
+  onAskAiAboutPlayer?: (player: CoachPlayer, ownerClub: CoachClubDetail, customQuestion?: string) => void;
 }
 
 const MD_DAYS = [
@@ -38,6 +40,7 @@ export default function TrainingSessionStudio({
   activeSession = null,
   onSessionUpdated,
   onSessionsDeleted,
+  onAskAiAboutPlayer,
 }: Props) {
   const isAr = lang === "ar";
   const [drills, setDrills] = useState<DrillSetup[]>([]);
@@ -47,6 +50,10 @@ export default function TrainingSessionStudio({
   const [durationMin, setDurationMin] = useState(75);
   const [targetRpe, setTargetRpe] = useState(7.0);
   const [generating, setGenerating] = useState(false);
+  const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [aiPlayerSearch, setAiPlayerSearch] = useState("");
+  const [aiTargetPlayer, setAiTargetPlayer] = useState<CoachPlayer | null>(club.players[0] || null);
+  const [aiCustomPrompt, setAiCustomPrompt] = useState("");
 
   const [currentSession, setCurrentSession] = useState<TrainingSessionPlan | null>(activeSession || sessions[0] || null);
   const [tool, setTool] = useState<CanvasTool>("move");
@@ -88,9 +95,9 @@ export default function TrainingSessionStudio({
     if (!el) return;
     const chart = echarts.init(el);
     const merged = MD_DAYS.map((d) => {
-      const saved = sessions.find((s) => s.md_code === d.id);
-      const rpe = saved ? saved.target_rpe : 0;
-      const au = saved ? saved.srpe_au : 0;
+      const daySessions = sessions.filter((s) => s.md_code === d.id);
+      const au = daySessions.reduce((acc, s) => acc + Number(s.srpe_au || 0), 0);
+      const rpe = daySessions.length > 0 ? Math.max(...daySessions.map((s) => Number(s.target_rpe || 0))) : 0;
       const refAu = Math.round(d.dur * d.rpe);
       return { id: d.id, rpe, au, refAu };
     });
@@ -180,6 +187,19 @@ export default function TrainingSessionStudio({
     if (s.drill_setup) applyDrillTemplate(s.drill_setup);
   };
 
+  const computeSafetyFromList = (list: TrainingSessionPlan[]): Props["weeklySafety"] => {
+    const totalAu = Math.round(list.reduce((acc, s) => acc + Number(s.srpe_au || 0), 0));
+    const warnings: string[] = [];
+    const md1 = list.filter((s) => s.md_code === "MD-1").reduce((a, b) => a + Number(b.srpe_au || 0), 0);
+    if (totalAu > 3200) warnings.push(`حمل أسبوعي مرتفع (${totalAu} AU) — يُنصح بتقنين دقائق اللاعبين الأساسيين لتجنب الإجهاد.`);
+    if (md1 > 280) warnings.push(`تنبيه MD-1: حمل ما قبل المباراة (${md1} AU) مرتفع؛ خفّض المدة أو الشدة غداً.`);
+    return {
+      total_weekly_au: totalAu,
+      status: warnings.length > 0 ? "warning" : "optimal",
+      warnings_ar: warnings,
+    };
+  };
+
   const handleGenerate = async () => {
     setGenerating(true);
     try {
@@ -205,8 +225,39 @@ export default function TrainingSessionStudio({
         "club_demo_egypt",
         "coach"
       );
+      const mergedList = [res.session, ...sessions.filter((x) => x.session_id !== res.session.session_id)];
+      saveLocalSessions(club.club_id, mergedList);
+      const safety = computeSafetyFromList(mergedList);
       loadSessionIntoCanvas(res.session);
-      onSessionUpdated(res.session, res.sessions, res.weekly_load_safety);
+      onSessionUpdated(res.session, mergedList, safety);
+      setSaveToast(isAr ? `✓ تم حفظ حصة ${selectedMd} وتحديث الأحمال الأسبوعية` : `✓ Saved ${selectedMd} & updated weekly load`);
+      setTimeout(() => setSaveToast(null), 3500);
+    } catch {
+      const localSess: TrainingSessionPlan = {
+        session_id: `sess_${Date.now()}`,
+        club_name: club.name_ar,
+        md_code: selectedMd,
+        title_ar: focusTopic || `${selectedMd}: وحدة تدريبية (${formation})`,
+        title_en: `${selectedMd} Training`,
+        session_date: new Date().toISOString().slice(0, 10),
+        tactical_formation: formation,
+        focus_ar: focusTopic || "التطوير التكتيكي",
+        available_players_count: club.players.length,
+        duration_min: durationMin,
+        target_rpe: targetRpe,
+        srpe_au: Math.round(durationMin * targetRpe * 10) / 10,
+        intensity: targetRpe >= 7.5 ? "high" : "moderate",
+        intensity_ar: targetRpe >= 7.5 ? "عالية" : "متوسطة",
+        phases: [{ phase: "main", title_ar: "التمرين الرئيسي", duration_min: durationMin, notes_ar: focusTopic || "تطبيق تكتيكي" }],
+        drill_setup: { ...(drills[0] || ({} as DrillSetup)), pitch_view: pitchView, players: drillPlayers, props: drillProps, arrows: drillArrows, zones: drillZones },
+        coaching_points_ar: [],
+      };
+      const mergedList = [localSess, ...sessions];
+      saveLocalSessions(club.club_id, mergedList);
+      loadSessionIntoCanvas(localSess);
+      onSessionUpdated(localSess, mergedList, computeSafetyFromList(mergedList));
+      setSaveToast(isAr ? "✓ تم الحفظ محلياً وتحديث الأحمال" : "✓ Saved locally");
+      setTimeout(() => setSaveToast(null), 3500);
     } finally {
       setGenerating(false);
     }
@@ -231,28 +282,36 @@ export default function TrainingSessionStudio({
         zones: drillZones,
       },
     };
-    const res = await apiFetch<{
-      session: TrainingSessionPlan;
-      sessions: TrainingSessionPlan[];
-      weekly_load_safety: Props["weeklySafety"];
-    }>(
-      "/api/coach/training/sessions",
-      { method: "POST", body: JSON.stringify({ ...updated, club_id: club.club_id, save: true }) },
-      "club_demo_egypt",
-      "coach"
-    );
-    loadSessionIntoCanvas(res.session);
-    onSessionUpdated(res.session, res.sessions, res.weekly_load_safety);
+    const mergedList = [updated, ...sessions.filter((x) => x.session_id !== updated.session_id)];
+    saveLocalSessions(club.club_id, mergedList);
+    try {
+      await apiFetch<{
+        session: TrainingSessionPlan;
+        sessions: TrainingSessionPlan[];
+        weekly_load_safety: Props["weeklySafety"];
+      }>(
+        "/api/coach/training/sessions",
+        { method: "POST", body: JSON.stringify({ ...updated, club_id: club.club_id, save: true }) },
+        "club_demo_egypt",
+        "coach"
+      );
+    } catch {}
+    loadSessionIntoCanvas(updated);
+    onSessionUpdated(updated, mergedList, computeSafetyFromList(mergedList));
+    setSaveToast(isAr ? "✓ تم حفظ تعديلات اللوحة والأحمال بنجاح" : "✓ Session edits & loads saved");
+    setTimeout(() => setSaveToast(null), 3500);
   };
 
   const handleDeleteSession = async (sid: string) => {
-    const res = await apiFetch<{ sessions: TrainingSessionPlan[]; weekly_load_safety: Props["weeklySafety"] }>(
+    const remaining = sessions.filter((s) => s.session_id !== sid);
+    saveLocalSessions(club.club_id, remaining);
+    onSessionsDeleted(remaining, computeSafetyFromList(remaining));
+    apiFetch(
       `/api/coach/training/sessions/${encodeURIComponent(sid)}?club_id=${encodeURIComponent(club.club_id)}`,
       { method: "DELETE" },
       "club_demo_egypt",
       "coach"
-    );
-    onSessionsDeleted(res.sessions, res.weekly_load_safety);
+    ).catch(() => {});
   };
 
   const getDomain = () => {
@@ -424,7 +483,7 @@ export default function TrainingSessionStudio({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pitchView, drillPlayers, drillProps, drillArrows, drillZones, animBallPos, club.kit_hex]);
 
-  const getCvsCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const getCvsCoords = (e: React.PointerEvent<HTMLCanvasElement> | React.MouseEvent<HTMLCanvasElement>) => {
     const cvs = cvsRef.current!;
     const rect = cvs.getBoundingClientRect();
     return {
@@ -521,6 +580,7 @@ export default function TrainingSessionStudio({
           <div className="lg:col-span-7 grid grid-cols-4 sm:grid-cols-7 gap-2">
             {MD_DAYS.map((d) => {
               const active = selectedMd === d.id;
+              const dayAu = Math.round(sessions.filter((s) => s.md_code === d.id).reduce((acc, s) => acc + Number(s.srpe_au || 0), 0));
               return (
                 <button
                   key={d.id}
@@ -537,8 +597,10 @@ export default function TrainingSessionStudio({
                   }`}
                 >
                   <div className="text-xs font-extrabold">{d.label}</div>
-                  <div className="text-[10px] text-slate-500">RPE {d.rpe}</div>
-                  <div className="text-[10px] text-emerald-700 font-bold">{d.dur}m</div>
+                  <div className="text-[10px] text-slate-500">RPE {d.rpe} • {d.dur}m</div>
+                  <div className={`text-[10px] font-extrabold ${dayAu > 0 ? "text-[#0D717A]" : "text-slate-400"}`}>
+                    {dayAu > 0 ? `${dayAu} AU` : "0 AU"}
+                  </div>
                 </button>
               );
             })}
@@ -640,10 +702,11 @@ export default function TrainingSessionStudio({
             ref={cvsRef}
             width={760}
             height={440}
-            onMouseDown={handleCanvasDown}
-            onMouseMove={handleCanvasMove}
-            onMouseUp={handleCanvasUp}
-            className="w-full rounded-2xl border border-emerald-700/30 cursor-crosshair bg-[#15803D] shadow-sm"
+            onPointerDown={handleCanvasDown}
+            onPointerMove={handleCanvasMove}
+            onPointerUp={handleCanvasUp}
+            onPointerCancel={handleCanvasUp}
+            className="w-full rounded-2xl border border-emerald-700/30 cursor-crosshair bg-[#15803D] shadow-sm touch-none"
           />
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -661,7 +724,7 @@ export default function TrainingSessionStudio({
               </button>
               {currentSession && (
                 <a
-                  href={`http://127.0.0.1:8080/api/coach/training/sessions/${encodeURIComponent(currentSession.session_id)}/print`}
+                  href={`${API_BASE}/api/coach/training/sessions/${encodeURIComponent(currentSession.session_id)}/print`}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 font-bold hover:border-emerald-400"
@@ -672,6 +735,11 @@ export default function TrainingSessionStudio({
               )}
             </div>
           </div>
+          {saveToast && (
+            <div className="p-2 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-extrabold text-emerald-800">
+              {saveToast}
+            </div>
+          )}
         </div>
 
         {/* Right: Session Generator + 4 Phases + Saved Sessions */}
@@ -782,6 +850,149 @@ export default function TrainingSessionStudio({
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      </div>
+      {/* Direct AI Player Deployment & Individual Load Monitor inside Training */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 text-xs">
+        {onAskAiAboutPlayer && (
+          <div className="xl:col-span-7 studio-panel p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 font-extrabold text-[#0D717A]">
+                <Bot className="w-4 h-4" />
+                <span>{isAr ? "توظيف وتدريب اللاعبين بالـ AI (بحث حي موثّق)" : "AI Player Role & Individual Training"}</span>
+              </div>
+              <div className="relative w-full sm:w-56">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute top-2 start-2.5" />
+                <input
+                  type="text"
+                  value={aiPlayerSearch}
+                  onChange={(e) => setAiPlayerSearch(e.target.value)}
+                  placeholder={isAr ? "ابحث عن لاعب..." : "Search player..."}
+                  className="w-full rounded-xl bg-slate-50 border border-slate-200 ps-8 pe-2.5 py-1 text-xs outline-none focus:border-[#0FB5AE]"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {club.players
+                .filter((p) => {
+                  const q = aiPlayerSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  return p.name_ar.toLowerCase().includes(q) || p.name_en.toLowerCase().includes(q) || String(p.jersey_number) === q;
+                })
+                .slice(0, 18)
+                .map((p) => {
+                  const active = aiTargetPlayer?.jersey_number === p.jersey_number;
+                  return (
+                    <button
+                      key={p.jersey_number}
+                      type="button"
+                      onClick={() => setAiTargetPlayer(p)}
+                      className={`p-2 rounded-2xl border flex items-center gap-2 shrink-0 transition ${
+                        active ? "bg-[#E6F8F7] border-[#0D717A] ring-1 ring-[#0FB5AE]" : "bg-slate-50 border-slate-200 hover:bg-white"
+                      }`}
+                    >
+                      {p.photo_url ? (
+                        <img src={p.photo_url} alt={p.name_ar} className="w-8 h-8 rounded-xl object-cover object-top shrink-0" />
+                      ) : (
+                        <span className="w-8 h-8 rounded-xl bg-[#0D717A] text-white font-extrabold flex items-center justify-center shrink-0">#{p.jersey_number}</span>
+                      )}
+                      <div className="text-start">
+                        <div className="font-extrabold text-slate-900 whitespace-nowrap">{p.name_ar}</div>
+                        <div className="text-[10px] text-[#0D717A] font-bold">{p.position} • {p.readiness_pct}%</div>
+                      </div>
+                    </button>
+                  );
+                })}
+            </div>
+
+            {aiTargetPlayer && (
+              <div className="p-3 rounded-2xl bg-[#F2F6F8] border border-[#D8E3EB] space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-extrabold text-[#0B1F3A]">
+                    {isAr
+                      ? `اللاعب المحدد: #${aiTargetPlayer.jersey_number} ${aiTargetPlayer.name_ar} (${aiTargetPlayer.position})`
+                      : `Selected: #${aiTargetPlayer.jersey_number} ${aiTargetPlayer.name_en}`}
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      {
+                        lbl: isAr ? "أين أوظفه في التشكيل؟" : "Best Role?",
+                        q: `ايه توظيف لاعب ${club.name_ar} ${aiTargetPlayer.name_ar} ومراكزه المناسبة في خطة ${formation}؟`,
+                      },
+                      {
+                        lbl: isAr ? "مميزاته وعيوبه التدريبية" : "Strengths & Weaknesses",
+                        q: `حلل مميزات وعيوب اللاعب ${aiTargetPlayer.name_ar} وما التمرين المخصص لتطويره؟`,
+                      },
+                      {
+                        lbl: isAr ? "برنامج أحمال فردي" : "Load Program",
+                        q: `صمم برنامج أحمال فردي للاعب ${aiTargetPlayer.name_ar} (جاهزيته ${aiTargetPlayer.readiness_pct}%) في أسبوع ${selectedMd}`,
+                      },
+                    ].map((btn, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => onAskAiAboutPlayer(aiTargetPlayer, club, btn.q)}
+                        className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-emerald-50 border border-[#0FB5AE]/45 text-[11px] font-extrabold text-[#0D717A]"
+                      >
+                        {btn.lbl}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!aiCustomPrompt.trim()) return;
+                    onAskAiAboutPlayer(aiTargetPlayer, club, aiCustomPrompt.trim());
+                    setAiCustomPrompt("");
+                  }}
+                  className="flex gap-2"
+                >
+                  <input
+                    type="text"
+                    value={aiCustomPrompt}
+                    onChange={(e) => setAiCustomPrompt(e.target.value)}
+                    placeholder={isAr ? `اسأل عن توظيف أو تدريب ${aiTargetPlayer.name_ar}...` : `Ask AI about ${aiTargetPlayer.name_en}...`}
+                    className="flex-1 rounded-xl bg-white border border-slate-200 px-3 py-1.5 text-xs outline-none focus:border-[#0FB5AE]"
+                  />
+                  <button type="submit" className="px-4 py-1.5 rounded-xl bg-[#0D717A] text-white font-extrabold">
+                    {isAr ? "بحث وتحليل AI" : "Ask AI"}
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className={`${onAskAiAboutPlayer ? "xl:col-span-5" : "xl:col-span-12"} studio-panel p-4 space-y-2.5`}>
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-1.5 font-extrabold text-slate-900">
+              <Activity className="w-4 h-4 text-emerald-600" />
+              <span>{isAr ? "مراقبة جاهزية وأحمال اللاعبين" : "Individual Readiness & Load Risk"}</span>
+            </span>
+            <span className="text-[11px] font-bold text-slate-500">
+              {isAr ? `ACWR التقديري: ${(Math.max(0.4, (weeklySafety.total_weekly_au || 0) / 2200)).toFixed(2)}` : `ACWR: ${(Math.max(0.4, (weeklySafety.total_weekly_au || 0) / 2200)).toFixed(2)}`}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-44 overflow-y-auto">
+            {club.players.slice(0, 14).map((p) => {
+              const risk = p.readiness_pct < 80 || p.status !== "fit";
+              return (
+                <div
+                  key={p.jersey_number}
+                  className={`px-2.5 py-2 rounded-xl border flex items-center justify-between gap-2 ${
+                    risk ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-slate-50 border-slate-200 text-slate-800"
+                  }`}
+                >
+                  <span className="font-bold truncate">#{p.jersey_number} {p.name_ar}</span>
+                  <span className={`font-extrabold shrink-0 ${risk ? "text-amber-700" : "text-emerald-700"}`}>
+                    {p.readiness_pct}% {p.status === "load_managed" ? "• تقنين" : !p.is_eligible_starter ? "• مستبعد" : ""}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

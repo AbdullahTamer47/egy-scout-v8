@@ -10,11 +10,93 @@ export interface CoachProfile {
   club_id: string;
   opponent_id: string;
   formation: string;
+  league_id?: string;
+  opponent_league_id?: string;
   updated_at?: string;
+}
+
+export const COACH_LEAGUES: Array<{ id: string; ar: string; en: string; logo: string }> = [
+  { id: "egy.1", ar: "الدوري المصري", en: "Egypt EPL", logo: "https://imagecache.365scores.com/image/upload/f_png,w_96,h_96,c_limit,q_auto:eco,dpr_2,d_Competitions:default.png/v1/Competitions/552" },
+  { id: "eng.1", ar: "الدوري الإنجليزي", en: "Premier League", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/23.png" },
+  { id: "esp.1", ar: "الدوري الإسباني", en: "LaLiga", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/15.png" },
+  { id: "ger.1", ar: "الدوري الألماني", en: "Bundesliga", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/10.png" },
+  { id: "ita.1", ar: "الدوري الإيطالي", en: "Serie A", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/12.png" },
+  { id: "fra.1", ar: "الدوري الفرنسي", en: "Ligue 1", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/9.png" },
+  { id: "uefa.champions", ar: "أبطال أوروبا", en: "UEFA CL", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/2.png" },
+  { id: "caf.champions", ar: "أبطال إفريقيا", en: "CAF CL", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/67.png" },
+];
+
+export interface SavedTacticalPlan {
+  plan_id: string;
+  club_id: string;
+  name: string;
+  formation_a: string;
+  formation_b: string;
+  phases: Record<TacticalPhaseId, TacticalPhaseSnapshot>;
+  lineHeight?: "low" | "mid" | "high";
+  pressingStyle?: "contain" | "trigger" | "gegenpress";
+  updated_at: string;
+}
+
+export interface ResearchedPlayerDossier {
+  athlete_id?: number | null;
+  name_ar: string;
+  name_en?: string;
+  club_name_ar?: string;
+  jersey_number?: number | null;
+  position_code: string;
+  position_label_ar?: string;
+  age?: number | null;
+  height_cm?: number | null;
+  preferred_foot?: string | null;
+  nationality_ar?: string;
+  readiness_pct?: number;
+  photo_url?: string | null;
+  season_stats?: {
+    season_name?: string;
+    appearances?: number;
+    starts?: number;
+    goals?: number;
+    assists?: number;
+    competitions?: string[];
+  };
+  tactical_profile?: {
+    best_roles_ar?: string[];
+    fit_3421?: string;
+    fit_4231?: string;
+  };
+  sources?: string[];
+}
+
+export interface ChatMessageItem {
+  id: string;
+  sender: "user" | "ai";
+  text: string;
+  engine?: string;
+  action?: string;
+  researchedPlayer?: ResearchedPlayerDossier | null;
+  researchSources?: string[];
+  timestamp?: string;
+}
+
+export interface ChatThread {
+  id: string;
+  title: string;
+  clubId: string;
+  updatedAt: string;
+  messages: ChatMessageItem[];
+}
+
+export interface AiPendingRequest {
+  id: string;
+  question: string;
+  targetPlayer?: CoachPlayer | null;
+  targetClub?: CoachClubDetail | null;
 }
 
 export interface CoachClubListItem {
   club_id: string;
+  ts_365_id?: number | null;
   name_ar: string;
   name_en: string;
   kit_hex: string;
@@ -325,5 +407,6 @@ export interface CoachOverviewPayload {
   matchday_sheet: MatchdaySheetPayload;
   training_sessions: TrainingSessionPlan[];
   weekly_load_safety: { total_weekly_au: number; status: "optimal" | "warning"; warnings_ar: string[] };
+  saved_plans?: SavedTacticalPlan[];
   live_hub: LiveHubPayload;
 }

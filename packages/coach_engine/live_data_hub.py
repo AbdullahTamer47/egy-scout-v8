@@ -205,6 +205,17 @@ CACHE_TTL_SECONDS = 300
 SQUAD_CACHE_TTL_SECONDS = 21600
 
 THREESIXFIVE_COMPETITION_EGY = 552
+THREESIXFIVE_LEAGUE_IDS: dict[str, int] = {
+    "egy.1": 552,
+    "eng.1": 7,
+    "esp.1": 11,
+    "ger.1": 25,
+    "ita.1": 17,
+    "fra.1": 35,
+    "uefa.champions": 572,
+    "caf.champions": 624,
+}
+_MEM_LEAGUE_CLUBS: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 THREESIXFIVE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
     "Accept": "application/json",
@@ -500,6 +511,7 @@ def sync_365scores_club_squad(
     kit_hex: Optional[str] = None,
     stadium_ar: Optional[str] = None,
     city_ar: Optional[str] = None,
+    league_id: str = "egy.1",
 ) -> dict[str, Any]:
     """Fetch exact live 2026/27 first-team squad, HD portraits, ages, heights, positions & head coach via 365Scores."""
     from datetime import timedelta
@@ -523,6 +535,7 @@ def sync_365scores_club_squad(
         for a in ((j_en.get("squads") or [{}])[0].get("athletes") or [])
         if a.get("id")
     }
+    en_comp_meta = next((c for c in (j_en.get("competitors") or []) if int(c.get("id") or 0) == comp_id), {})
     country_names_ar = {int(c.get("id") or 0): str(c.get("name") or "") for c in (j_ar.get("countries") or []) if c.get("id")}
     comp_meta = next((c for c in (j_ar.get("competitors") or []) if int(c.get("id") or 0) == comp_id), {})
     img_cver = _safe_int(comp_meta.get("imageVersion"), 1)
@@ -530,6 +543,9 @@ def sync_365scores_club_squad(
         f"https://imagecache.365scores.com/image/upload/f_png,w_96,h_96,c_limit,q_auto:eco,dpr_2,"
         f"d_Competitors:default1.png/v{img_cver}/Competitors/{comp_id}"
     )
+    resolved_color = str(comp_meta.get("color") or "").strip()
+    if resolved_color and not resolved_color.startswith("#") and len(resolved_color) == 6:
+        resolved_color = f"#{resolved_color}"
 
     players: list[dict[str, Any]] = []
     used_nums: set[int] = set()
@@ -634,14 +650,14 @@ def sync_365scores_club_squad(
         "club_id": club_id,
         "ts_365_id": comp_id,
         "name_ar": name_ar or preset.get("name_ar") or str(comp_meta.get("name") or club_id),
-        "name_en": name_en or preset.get("name_en") or club_id,
-        "kit_hex": kit_hex or preset.get("kit_hex") or "#0FB5AE",
+        "name_en": name_en or preset.get("name_en") or str(en_comp_meta.get("name") or club_id),
+        "kit_hex": kit_hex or preset.get("kit_hex") or resolved_color or "#0FB5AE",
         "stadium_ar": stadium_ar or preset.get("stadium_ar") or "",
         "city_ar": city_ar or preset.get("city_ar") or "",
         "logo_url": logo_url,
         "head_coach_ar": head_coach_ar,
         "head_coach_en": head_coach_en,
-        "league_id": "egy.1",
+        "league_id": league_id,
         "season": "2026/2027",
         "source": "365Scores Live 2026/27",
         "verified_at": f"{cairo_now} (توقيت القاهرة)",
@@ -802,19 +818,72 @@ def fetch_live_league_hub(league_id: str = "egy.1", force_refresh: bool = False)
             except Exception:
                 standings = []
     else:
+        comp_id_365 = THREESIXFIVE_LEAGUE_IDS.get(lid)
+        if comp_id_365:
+            try:
+                with httpx.Client(headers=THREESIXFIVE_HEADERS, timeout=10.0) as client:
+                    r_ar = client.get(
+                        "https://webws.365scores.com/web/standings/",
+                        params={"appTypeId": 5, "langId": 27, "timezoneName": "Africa/Cairo", "competitions": comp_id_365},
+                    )
+                    r_en = client.get(
+                        "https://webws.365scores.com/web/standings/",
+                        params={"appTypeId": 5, "langId": 1, "timezoneName": "Africa/Cairo", "competitions": comp_id_365},
+                    )
+                    en_rows = ((r_en.json().get("standings") or [{}])[0].get("rows") or []) if r_en.status_code == 200 else []
+                    en_by_id = {int((rw.get("competitor") or {}).get("id") or 0): str((rw.get("competitor") or {}).get("name") or "") for rw in en_rows}
+                    if r_ar.status_code == 200:
+                        for row in ((r_ar.json().get("standings") or [{}])[0].get("rows") or []):
+                            comp = row.get("competitor") or {}
+                            c_id = _safe_int(comp.get("id"))
+                            if not c_id:
+                                continue
+                            img_v = _safe_int(comp.get("imageVersion"), 1)
+                            color_s = str(comp.get("color") or "").strip()
+                            kit = color_s if color_s.startswith("#") else f"#{color_s}" if len(color_s) == 6 else "#0FB5AE"
+                            gf = _safe_int(row.get("for"))
+                            ga = _safe_int(row.get("against"))
+                            standings.append(
+                                {
+                                    "rank": _safe_int(row.get("position"), len(standings) + 1),
+                                    "team_id": f"ts365_{c_id}",
+                                    "ts_365_id": c_id,
+                                    "team_name": en_by_id.get(c_id) or str(comp.get("name") or ""),
+                                    "team_name_ar": str(comp.get("name") or en_by_id.get(c_id) or ""),
+                                    "kit_hex": kit,
+                                    "logo_url": f"https://imagecache.365scores.com/image/upload/f_png,w_96,h_96,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/v{img_v}/Competitors/{c_id}",
+                                    "group": str(row.get("groupName") or ""),
+                                    "played": _safe_int(row.get("gamePlayed")),
+                                    "wins": _safe_int(row.get("gamesWon")),
+                                    "draws": _safe_int(row.get("gamesEven")),
+                                    "losses": _safe_int(row.get("gamesLost")),
+                                    "gf": gf,
+                                    "ga": ga,
+                                    "gd": gf - ga,
+                                    "points": _safe_int(row.get("points")),
+                                    "form": "",
+                                }
+                            )
+                        standings.sort(key=lambda r: (r["rank"], -r["points"], -r["gd"]))
+                        source_name = f"365Scores Live — {meta['name_ar']} 2026/2027"
+                        is_live = bool(standings)
+            except Exception:
+                standings = []
         try:
             slug = meta["espn_slug"]
-            source_name = f"ESPN Public Soccer API ({slug})"
-            with httpx.Client(headers=PUBLIC_HEADERS, timeout=10.0) as client:
-                r_st = client.get(f"https://site.api.espn.com/apis/v2/sports/soccer/{slug}/standings")
-                if r_st.status_code == 200:
-                    standings = _extract_espn_standings(r_st.json())
+            with httpx.Client(headers=PUBLIC_HEADERS, timeout=9.0) as client:
+                if not standings:
+                    r_st = client.get(f"https://site.api.espn.com/apis/v2/sports/soccer/{slug}/standings")
+                    if r_st.status_code == 200:
+                        standings = _extract_espn_standings(r_st.json())
+                        source_name = f"ESPN Public Soccer API ({slug})"
                 r_sc = client.get(f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard")
                 if r_sc.status_code == 200:
                     upcoming, recent = _extract_espn_events(r_sc.json())
                 is_live = bool(standings or upcoming or recent)
         except Exception:
-            is_live = False
+            if not standings:
+                is_live = False
 
     if not standings:
         stale = _read_cache(cache_key, allow_stale=True)
@@ -1314,3 +1383,76 @@ def load_all_coach_clubs(store_clubs: Optional[dict[str, dict[str, Any]]] = None
         merged[cid] = c
 
     return merged
+
+
+def fetch_league_clubs_light(
+    league_id: str = "egy.1",
+    store_clubs: Optional[dict[str, dict[str, Any]]] = None,
+) -> list[dict[str, Any]]:
+    """Return lightweight club cards ONLY for the requested league (progressive loading)."""
+    lid = league_id if league_id in SUPPORTED_LEAGUES else "egy.1"
+    all_local = load_all_coach_clubs(store_clubs)
+    hub = fetch_live_league_hub(league_id=lid, force_refresh=False)
+    standings = list(hub.get("standings") or [])
+    st_by_cid = {str(s.get("team_id") or ""): s for s in standings if s.get("team_id")}
+
+    items: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    if lid == "egy.1":
+        for cid, c in all_local.items():
+            if (c.get("league_id") or "egy.1") != "egy.1" and cid not in EGYPTIAN_CLUB_PRESETS:
+                continue
+            st = st_by_cid.get(cid)
+            ts_id = c.get("ts_365_id") or (EGYPTIAN_CLUB_PRESETS.get(cid) or {}).get("ts_365_id")
+            items.append(
+                {
+                    "club_id": cid,
+                    "ts_365_id": ts_id,
+                    "name_ar": c.get("name_ar") or cid,
+                    "name_en": c.get("name_en") or cid,
+                    "kit_hex": c.get("kit_hex") or "#0FB5AE",
+                    "stadium_ar": c.get("stadium_ar") or "",
+                    "city_ar": c.get("city_ar") or "",
+                    "league_id": "egy.1",
+                    "season": "2026/2027",
+                    "source": c.get("source") or "Egyptian Premier League 2026/27",
+                    "head_coach_ar": c.get("head_coach_ar") or "",
+                    "player_count": len(c.get("players") or []),
+                    "live_rank": st.get("rank") if st else None,
+                    "live_points": st.get("points") if st else None,
+                    "live_played": st.get("played") if st else None,
+                    "logo_url": c.get("logo_url") or (st.get("logo_url") if st else ""),
+                }
+            )
+            seen_ids.add(cid)
+    else:
+        for st in standings:
+            cid = str(st.get("team_id") or "")
+            if not cid or cid in seen_ids:
+                continue
+            seen_ids.add(cid)
+            cached_club = all_local.get(cid) or (store_clubs or {}).get(cid)
+            items.append(
+                {
+                    "club_id": cid,
+                    "ts_365_id": st.get("ts_365_id"),
+                    "name_ar": st.get("team_name_ar") or st.get("team_name") or cid,
+                    "name_en": st.get("team_name") or st.get("team_name_ar") or cid,
+                    "kit_hex": (cached_club or {}).get("kit_hex") or st.get("kit_hex") or "#0FB5AE",
+                    "stadium_ar": (cached_club or {}).get("stadium_ar") or "",
+                    "city_ar": "",
+                    "league_id": lid,
+                    "season": "2026/2027",
+                    "source": hub.get("source") or "365Scores Live 2026/27",
+                    "head_coach_ar": (cached_club or {}).get("head_coach_ar") or "",
+                    "player_count": len((cached_club or {}).get("players") or []),
+                    "live_rank": st.get("rank"),
+                    "live_points": st.get("points"),
+                    "live_played": st.get("played"),
+                    "logo_url": st.get("logo_url") or "",
+                }
+            )
+
+    items.sort(key=lambda x: (x["live_rank"] or 999, -x["player_count"], x["name_en"]))
+    return items

@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.rbac import TenantContext, get_tenant_context
-from apps.api.routes_coach import router as coach_router
+from apps.api.routes_coach import get_coach_store, router as coach_router
 from packages.tactics_engine.plan_validator import validate_tactical_plan
 
 app = FastAPI(title="EGY-SCOUT Coach Pro API", version="1.0.0")
@@ -59,3 +59,26 @@ def api_validate_plan(
     nodes_b = payload.get("nodes_b") or payload.get("opponent_nodes") or []
     formation_code = str(payload.get("formation_code") or "")
     return validate_tactical_plan(nodes_a, nodes_b, formation_code=formation_code)
+
+
+@app.get("/api/plans")
+def api_list_plans_root(
+    club_id: str | None = None,
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    ctx.require("read:tactics")
+    store = get_coach_store()
+    return {"plans": store.list_tactical_plans(ctx.tenant_id, club_id)}
+
+
+@app.post("/api/plans")
+def api_save_plan_root(
+    payload: dict[str, Any],
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    ctx.require("write:tactics")
+    store = get_coach_store()
+    match_id = str(payload.get("match_id") or "")
+    club_id = str(payload.get("club_id") or (match_id.split("_vs_")[0] if "_vs_" in match_id else "al_ahly"))
+    saved = store.save_tactical_plan(ctx.tenant_id, club_id, payload)
+    return {"saved": True, "plan": saved, "plans": store.list_tactical_plans(ctx.tenant_id, club_id)}
