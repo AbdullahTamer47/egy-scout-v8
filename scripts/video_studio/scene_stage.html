@@ -2,7 +2,7 @@
 <html lang="ar">
 <head>
   <meta charset="UTF-8" />
-  <title>EGY-SCOUT Coach Pro · Kinetic SaaS Studio Stage</title>
+  <title>EGY-SCOUT Coach Pro · Lovio-Style Live Motion Stage</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@500;700;900&family=IBM+Plex+Sans+Arabic:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;700;800&display=swap" rel="stylesheet" />
@@ -12,48 +12,46 @@
       width: 1920px;
       height: 1080px;
       overflow: hidden;
-      background: #FFFFFF;
+      background: #F6F9FE;
       color: #0F172A;
       font-family: 'Cairo', 'IBM Plex Sans Arabic', 'Plus Jakarta Sans', system-ui, sans-serif;
       -webkit-font-smoothing: antialiased;
     }
 
+    /* Sunlit Lovio horizon backdrop + soft organic light rays */
     .stage {
       position: relative;
       width: 1920px;
       height: 1080px;
-      background: #FFFFFF;
+      background:
+        radial-gradient(1100px 680px at 78% 12%, rgba(56, 189, 248, 0.22) 0%, rgba(255,255,255,0) 68%),
+        radial-gradient(960px 660px at 16% 88%, rgba(15, 181, 174, 0.18) 0%, rgba(255,255,255,0) 70%),
+        linear-gradient(155deg, #FFFFFF 0%, #F1F6FC 54%, #E8F2FC 100%);
       overflow: hidden;
     }
 
-    /* Subtle bright studio bokeh orbs (Dexatel / Lovio luminous glow) */
-    .orb {
+    /* Sunlit diagonal window light rays (Lovio hero ambiance, purely CSS gradients) */
+    .sun-beam {
       position: absolute;
-      border-radius: 9999px;
+      width: 440px;
+      height: 1400px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.68) 0%, rgba(255,255,255,0) 85%);
+      transform: rotate(28deg);
       pointer-events: none;
-      filter: blur(90px);
-    }
-    .orb-teal {
-      width: 780px;
-      height: 780px;
-      background: radial-gradient(circle, rgba(15, 181, 174, 0.16) 0%, rgba(15, 181, 174, 0) 70%);
-    }
-    .orb-blue {
-      width: 820px;
-      height: 820px;
-      background: radial-gradient(circle, rgba(0, 102, 255, 0.12) 0%, rgba(0, 102, 255, 0) 70%);
+      filter: blur(22px);
+      z-index: 2;
     }
 
-    /* Ultra-clean minimal corner brand mark (only logo from bedigital PDF, Lovio/Frogotiv subtle watermark) */
+    /* Subtle top-left watermark logo (matching Lovio "zelios") */
     .corner-brand {
       position: absolute;
-      top: 40px;
-      left: 56px;
+      top: 38px;
+      left: 52px;
       display: flex;
       align-items: center;
       gap: 10px;
       z-index: 40;
-      opacity: 0.55;
+      opacity: 0.72;
       direction: ltr;
     }
     .corner-wordmark {
@@ -65,33 +63,6 @@
     }
     .corner-wordmark span { color: #0FB5AE; }
 
-    /* Accent flash layer for kinetic_accent */
-    .accent-bg {
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(135deg, #0055FF 0%, #0EA5A4 100%);
-      opacity: 0;
-      pointer-events: none;
-      z-index: 5;
-    }
-
-    /* Shared typography building blocks */
-    .k-mask {
-      overflow: hidden;
-      display: inline-block;
-      vertical-align: bottom;
-    }
-    .k-word {
-      display: inline-block;
-      will-change: transform, opacity;
-    }
-    .grad-text {
-      background: linear-gradient(95deg, #0055FF 0%, #0FB5AE 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      font-weight: 900;
-    }
-
     .scene-layer {
       position: absolute;
       inset: 0;
@@ -101,83 +72,81 @@
       justify-content: center;
     }
 
-    /* Elevated Soft Rounded SaaS UI Card */
-    .ui-card {
+    /* Sleek macOS / Lovio glossy glass UI window */
+    .lovio-frame {
       position: relative;
-      background: #FFFFFF;
-      border-radius: 28px;
-      border: 1px solid rgba(15, 23, 42, 0.08);
+      background: rgba(255, 255, 255, 0.88);
+      border-radius: 26px;
+      border: 1.5px solid rgba(255, 255, 255, 0.95);
       box-shadow:
-        0 35px 90px -18px rgba(15, 23, 42, 0.16),
-        0 12px 30px -10px rgba(14, 165, 164, 0.14);
+        0 45px 100px -20px rgba(15, 23, 42, 0.22),
+        0 18px 40px -12px rgba(0, 102, 255, 0.14),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95);
       overflow: hidden;
     }
-    .ui-card img {
+    .lovio-frame img {
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
     }
 
-    .pill-badge {
+    .grad-text {
+      background: linear-gradient(95deg, #0055FF 0%, #0FB5AE 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-weight: 900;
+    }
+
+    .glass-pill {
       display: inline-flex;
       align-items: center;
       gap: 10px;
       padding: 10px 22px;
       border-radius: 9999px;
-      background: rgba(255, 255, 255, 0.92);
-      border: 1px solid rgba(15, 23, 42, 0.09);
-      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.09);
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      box-shadow: 0 14px 32px rgba(15, 23, 42, 0.10);
       font-weight: 700;
       font-size: 20px;
       color: #0F172A;
     }
-    .pill-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 9999px;
-      background: #0FB5AE;
-      display: inline-block;
-    }
-
-    /* Floating Frogotiv-style white cards */
-    .float-pill-card {
+    .crest-chip {
+      width: 108px;
+      height: 108px;
+      border-radius: 28px;
       background: #FFFFFF;
-      border-radius: 22px;
-      padding: 20px 28px;
       border: 1px solid rgba(15, 23, 42, 0.07);
-      box-shadow: 0 22px 48px rgba(15, 23, 42, 0.09);
+      box-shadow: 0 24px 52px rgba(15, 23, 42, 0.12);
       display: flex;
+      flex-direction: column;
       align-items: center;
-      gap: 16px;
-      font-size: 26px;
-      font-weight: 700;
-      color: #0F172A;
+      justify-content: center;
+      gap: 6px;
     }
-    .float-avatar {
-      width: 42px;
-      height: 42px;
+    .crest-badge {
+      width: 48px;
+      height: 48px;
       border-radius: 9999px;
-      background: linear-gradient(135deg, #0055FF 0%, #0FB5AE 100%);
       color: #FFFFFF;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-weight: 800;
+      font-size: 14px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-weight: 800;
-      font-size: 18px;
-      flex-shrink: 0;
+      letter-spacing: -0.02em;
     }
   </style>
 </head>
 <body>
   <div class="stage" id="stage">
-    <div class="orb orb-teal" id="orb1"></div>
-    <div class="orb orb-blue" id="orb2"></div>
-    <div class="accent-bg" id="accent-bg"></div>
+    <div class="sun-beam" id="beam1" style="top:-360px;left:340px;"></div>
+    <div class="sun-beam" id="beam2" style="top:-320px;left:1080px;"></div>
 
-    <!-- Subtle bedigital corner watermark (hidden on center logo_morph & outro) -->
     <div class="corner-brand" id="corner-brand">
-      <svg width="30" height="30" viewBox="0 0 36 36" fill="none">
+      <svg width="28" height="28" viewBox="0 0 36 36" fill="none">
         <rect x="2" y="3" width="29" height="21" rx="3" fill="#FFFFFF" stroke="#0B1F3A" stroke-width="2.2"/>
         <rect x="4.5" y="5.5" width="24" height="16" rx="1.5" fill="#0B1F3A"/>
         <rect x="6" y="7" width="4" height="2" fill="#0FB5AE"/>
@@ -202,14 +171,12 @@
       const t = clamp(x, 0, 1);
       return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
     };
-    // Crisp snappy SaaS spring overshoot
     const springEase = (x) => {
       const t = clamp(x, 0, 1);
       const c1 = 1.70158;
       const c3 = c1 + 1;
       return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
     };
-
     const esc = (s) =>
       String(s ?? "")
         .replace(/&/g, "&amp;")
@@ -217,54 +184,51 @@
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
 
-    function bedigitalSvg(size = 86, nuqtaScale = 1, baOpacity = 1) {
+    function animatedBedigitalLogo(size = 112, t = 1) {
+      // Lovio-style 4-stage choreographed reveal: sparkle -> monitor frame -> Ba stroke -> gold diamond pulse
+      const frameScale = springEase(t / 0.32);
+      const baDash = clamp((t - 0.16) / 0.28, 0, 1);
+      const nuqtaScale = t < 0.34 ? 0 : springEase((t - 0.34) / 0.28);
+      const glow = 0.35 + 0.35 * Math.sin(t * 6);
       return `
-        <svg width="${size}" height="${size}" viewBox="0 0 36 36" fill="none" style="flex-shrink:0;">
-          <rect x="4" y="6" width="29" height="21" rx="3" fill="#0FB5AE" fill-opacity="0.18"/>
+        <svg width="${size}" height="${size}" viewBox="0 0 36 36" fill="none" style="flex-shrink:0;filter:drop-shadow(0 14px 28px rgba(15,181,174,${glow.toFixed(2)}));transform:scale(${frameScale.toFixed(4)})">
+          <rect x="4" y="6" width="29" height="21" rx="3" fill="#0FB5AE" fill-opacity="0.22"/>
           <rect x="2" y="3" width="29" height="21" rx="3" fill="#FFFFFF" stroke="#0B1F3A" stroke-width="2.1"/>
           <rect x="4.5" y="5.5" width="24" height="16" rx="1.5" fill="#0B1F3A"/>
-          <rect x="6" y="7" width="4.5" height="2" fill="#0FB5AE"/>
-          <path d="M9.5 11.5V15.5H23.5V11.5" stroke="#FFFFFF" stroke-width="2.3" stroke-linecap="square" style="opacity:${baOpacity}"/>
-          <polygon points="16.5,17 19,19.5 16.5,22 14,19.5" fill="#E0A526"
-            style="transform-origin:16.5px 19.5px;transform:scale(${nuqtaScale.toFixed(3)})"/>
+          <rect x="6" y="7" width="${(4.5 * baDash).toFixed(2)}" height="2" fill="#0FB5AE"/>
+          <path d="M9.5 11.5V15.5H23.5V11.5" stroke="#FFFFFF" stroke-width="2.3" stroke-linecap="square"
+            stroke-dasharray="28" stroke-dashoffset="${((1 - baDash) * 28).toFixed(2)}"/>
+          <polygon points="16.5,17 19.1,19.6 16.5,22.2 13.9,19.6" fill="#E0A526"
+            style="transform-origin:16.5px 19.6px;transform:scale(${nuqtaScale.toFixed(3)})"/>
           <rect x="13.5" y="24" width="6" height="4" fill="#0B1F3A"/>
           <rect x="10" y="28" width="13" height="2.6" fill="#0B1F3A"/>
         </svg>`;
     }
 
-    function kineticText(text, localTime, delay, isHighlight = false, sizePx = 68) {
-      const p = springEase((localTime - delay) / 0.34);
-      const o = clamp((localTime - delay) / 0.16, 0, 1);
-      const y = (1 - p) * 58;
+    function wordReveal(text, localTime, delay, highlight = false, size = 62) {
+      const p = springEase((localTime - delay) / 0.32);
+      const o = clamp((localTime - delay) / 0.14, 0, 1);
       return `
-        <div class="k-mask">
-          <div class="k-word ${isHighlight ? "grad-text" : ""}" style="
-            font-size:${sizePx}px;
-            line-height:1.18;
-            font-weight:${isHighlight ? 900 : 600};
-            transform:translate3d(0,${y.toFixed(1)}px,0);
+        <div style="overflow:hidden;display:inline-block;">
+          <div class="${highlight ? "grad-text" : ""}" style="
+            font-size:${size}px;
+            font-weight:${highlight ? 900 : 700};
+            line-height:1.15;
+            transform:translate3d(0,${((1 - p) * 52).toFixed(1)}px,0);
             opacity:${o.toFixed(3)};
           ">${esc(text)}</div>
         </div>`;
     }
 
-    // Track last template/scene to minimize DOM churn while driving smooth deterministic animation
-    window.__imgCache = new Map();
-    async function ensureImages(uris) {
-      await Promise.all(
-        (uris || []).map((uri) => {
-          if (!uri || window.__imgCache.get(uri) === true) return Promise.resolve();
-          return new Promise((resolve) => {
-            const im = new Image();
-            im.onload = () => {
-              window.__imgCache.set(uri, true);
-              resolve();
-            };
-            im.onerror = resolve;
-            im.src = uri;
-          });
-        })
-      );
+    window.__frameImgLoaded = new Map();
+    async function preloadDataUri(uri) {
+      if (!uri || window.__frameImgLoaded.get(uri) === true) return;
+      await new Promise((res) => {
+        const im = new Image();
+        im.onload = () => { window.__frameImgLoaded.set(uri, true); res(); };
+        im.onerror = res;
+        im.src = uri;
+      });
     }
 
     window.renderFrame = async function ({
@@ -272,198 +236,174 @@
       sceneIdx,
       totalScenes,
       scene,
+      crests,
       localTime,
       globalProgress,
-      screenDataUris,
+      liveFrameDataUri,
     }) {
-      await ensureImages(screenDataUris);
+      await preloadDataUri(liveFrameDataUri);
 
       const isAr = lang === "ar";
       const dir = isAr ? "rtl" : "ltr";
-      const dur = Math.max(1.4, scene.duration_s || 3.5);
-      const enter = easeOutExpo(localTime / 0.28);
-      const exit = localTime > dur - 0.18 ? easeOutExpo((dur - localTime) / 0.18) : 1;
+      const dur = Math.max(1.2, scene.duration_s || 4.0);
+      const enter = easeOutExpo(localTime / 0.26);
+      const exit = localTime > dur - 0.16 ? easeOutExpo((dur - localTime) / 0.16) : 1;
       const alpha = clamp(Math.min(enter * 1.15, exit), 0, 1);
 
-      // Gentle drifting luminous studio orbs
-      const tGlob = globalProgress * Math.PI * 2;
-      const orb1 = document.getElementById("orb1");
-      const orb2 = document.getElementById("orb2");
-      orb1.style.left = `${1120 + Math.sin(tGlob) * 140}px`;
-      orb1.style.top = `${-120 + Math.cos(tGlob) * 90}px`;
-      orb2.style.left = `${-140 + Math.cos(tGlob * 0.8) * 120}px`;
-      orb2.style.top = `${480 + Math.sin(tGlob * 0.8) * 110}px`;
+      // Gentle sunlit studio rays shift
+      document.getElementById("beam1").style.left = `${300 + Math.sin(globalProgress * 4) * 90}px`;
+      document.getElementById("beam2").style.left = `${1060 + Math.cos(globalProgress * 3) * 110}px`;
 
-      const accentBg = document.getElementById("accent-bg");
+      const tpl = scene.template;
       const cornerBrand = document.getElementById("corner-brand");
+      cornerBrand.style.display = tpl === "lovio_logo_reveal" || tpl === "lovio_end_card" ? "none" : "flex";
+
       const root = document.getElementById("scene-root");
 
-      const tpl = scene.template || "tilted_3d_hero";
-      accentBg.style.opacity = tpl === "kinetic_accent" ? String(alpha) : "0";
-      cornerBrand.style.display =
-        tpl === "logo_morph" || tpl === "dexatel_outro" || tpl === "kinetic_accent" ? "none" : "flex";
-
-      const img0 = screenDataUris[0] || "";
-      const img1 = screenDataUris[1] || img0;
-      const img2 = screenDataUris[2] || img1;
-
-      if (tpl === "kinetic_hook") {
-        const chip1O = clamp((localTime - 0.08) / 0.2, 0, 1) * 0.55;
-        const chip2O = clamp((localTime - 0.18) / 0.2, 0, 1) * 0.55;
-        const drift = localTime * 22;
-        const badChips = isAr
-          ? ["بيانات 2024؟", "أرقام مكررة؟", "تشكيل غير متزامن"]
-          : ["Static Sheets?", "Manual Lineups?", "2024 Data?"];
+      // 1. Animated bedigital Logo Sting -> EGY-SCOUT Coach Pro (Lovio Frame 1-3 glow)
+      if (tpl === "lovio_logo_reveal") {
+        const morphSlide = easeOutExpo((localTime - 0.48) / 0.45);
+        const pillO = easeOutExpo((localTime - 0.72) / 0.35);
+        const haloScale = 0.8 + 0.5 * easeOutExpo(localTime / 1.2);
         root.innerHTML = `
-          <div dir="${dir}" style="position:relative;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;opacity:${alpha};">
-            <div class="pill-badge" style="position:absolute;top:210px;left:240px;opacity:${chip1O};transform:translateY(${(-drift * 0.5).toFixed(1)}px) rotate(-4deg);color:#EF4444;border-color:rgba(239,68,68,0.22);">${esc(badChips[0])}</div>
-            <div class="pill-badge" style="position:absolute;bottom:220px;right:230px;opacity:${chip2O};transform:translateY(${(drift * 0.4).toFixed(1)}px) rotate(3deg);color:#64748B;">${esc(badChips[1])}</div>
-            <div style="display:flex;flex-direction:column;align-items:center;gap:12px;">
-              ${kineticText(scene.headline, localTime, 0.0, false, 88)}
-              ${kineticText(scene.highlight, localTime, 0.22, true, 98)}
-              <div style="margin-top:16px;font-size:28px;font-weight:500;color:#64748B;opacity:${easeOutExpo((localTime - 0.36) / 0.25)};">${esc(scene.sub)}</div>
-            </div>
-          </div>`;
-        return;
-      }
-
-      if (tpl === "kinetic_accent") {
-        const s = 0.88 + 0.12 * springEase(localTime / 0.34);
-        root.innerHTML = `
-          <div dir="${dir}" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:#FFFFFF;opacity:${alpha};transform:scale(${s.toFixed(4)});padding:0 120px;">
-            <div style="font-size:86px;font-weight:600;line-height:1.18;opacity:0.92;">${esc(scene.headline)}</div>
-            <div style="font-size:106px;font-weight:900;line-height:1.12;letter-spacing:-0.02em;">${esc(scene.highlight)}</div>
-          </div>`;
-        return;
-      }
-
-      if (tpl === "logo_morph") {
-        const iconS = springEase(localTime / 0.36);
-        const slide = easeOutExpo((localTime - 0.24) / 0.38);
-        const nuqtaS = localTime < 0.18 ? 0 : springEase((localTime - 0.18) / 0.25);
-        const subO = easeOutExpo((localTime - 0.45) / 0.3);
-        root.innerHTML = `
-          <div dir="ltr" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;opacity:${alpha};gap:26px;">
-            <div style="display:flex;align-items:center;gap:28px;">
-              <div style="transform:scale(${iconS.toFixed(4)});">${bedigitalSvg(104, nuqtaS, 1)}</div>
-              <div style="overflow:hidden;max-width:${(slide * 980).toFixed(0)}px;white-space:nowrap;text-align:left;">
-                <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:74px;font-weight:800;letter-spacing:-0.03em;color:#0F172A;line-height:1.05;">
+          <div style="position:relative;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;opacity:${alpha};">
+            <div style="position:absolute;width:620px;height:620px;border-radius:9999px;background:radial-gradient(circle,rgba(15,181,174,0.22),rgba(0,85,255,0.08),transparent 72%);filter:blur(40px);transform:scale(${haloScale.toFixed(3)});pointer-events:none;"></div>
+            <div dir="ltr" style="position:relative;z-index:2;display:flex;align-items:center;gap:26px;">
+              ${animatedBedigitalLogo(122, localTime)}
+              <div style="overflow:hidden;max-width:${(morphSlide * 980).toFixed(0)}px;white-space:nowrap;">
+                <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:78px;font-weight:800;letter-spacing:-0.03em;color:#0F172A;line-height:1.05;">
                   EGY-SCOUT <span class="grad-text">Coach Pro</span>
                 </div>
               </div>
             </div>
-            <div style="display:flex;align-items:center;gap:14px;opacity:${subO};transform:translateY(${((1 - subO) * 14).toFixed(1)}px);">
-              <span class="pill-badge" style="background:linear-gradient(95deg,#0055FF,#0FB5AE);color:#FFFFFF;border:none;font-size:21px;padding:10px 26px;">${esc(scene.highlight)}</span>
-              <span dir="${dir}" style="font-size:26px;font-weight:600;color:#475569;">${esc(scene.sub)}</span>
+            <div class="glass-pill" style="opacity:${pillO};transform:translateY(${((1 - pillO) * 14).toFixed(1)}px);font-size:22px;padding:11px 28px;">
+              <span style="width:10px;height:10px;border-radius:9999px;background:#0FB5AE;display:inline-block;"></span>
+              <span>bedigital · 2026/27 Live Football Suite</span>
             </div>
           </div>`;
         return;
       }
 
-      if (tpl === "floating_cards") {
-        const cards = scene.cards || [];
-        const bgShift = easeInOutCubic(localTime / dur);
-        root.innerHTML = `
-          <div dir="${dir}" style="width:1720px;height:860px;display:flex;align-items:center;justify-content:space-between;gap:64px;opacity:${alpha};">
-            <div style="width:660px;display:flex;flex-direction:column;gap:18px;">
-              ${kineticText(scene.headline, localTime, 0.0, false, 68)}
-              ${kineticText(scene.highlight, localTime, 0.14, true, 76)}
-              <div style="font-size:26px;font-weight:500;color:#475569;line-height:1.45;margin-top:8px;opacity:${easeOutExpo((localTime - 0.25) / 0.25)};">${esc(scene.sub)}</div>
-            </div>
-            <div style="position:relative;flex:1;height:780px;display:flex;align-items:center;justify-content:center;">
-              <div class="ui-card" style="position:absolute;width:820px;height:520px;opacity:0.35;filter:blur(2px);transform:perspective(1400px) rotateY(${isAr ? -8 : 8}deg) scale(${(0.96 + 0.05 * bgShift).toFixed(3)});">
-                <img src="${img1}" alt="" />
+      // 2. Multi-League Animated Club Crests -> Live Switching Across Multiple Leagues (Lovio Frame 14)
+      if (tpl === "lovio_multi_leagues") {
+        const showLiveHub = localTime >= 1.55;
+        if (!showLiveHub) {
+          const bracketSpread = easeOutExpo(localTime / 0.55);
+          const list = crests || [];
+          root.innerHTML = `
+            <div dir="${dir}" style="width:1720px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:34px;opacity:${alpha};text-align:center;">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+                ${wordReveal(scene.headline, localTime, 0.0, false, 64)}
+                ${wordReveal(scene.highlight, localTime, 0.12, true, 72)}
               </div>
-              <div style="position:relative;z-index:5;width:720px;display:flex;flex-direction:column;gap:20px;">
-                ${cards
-                  .map((c, i) => {
-                    const p = springEase((localTime - 0.12 - i * 0.14) / 0.34);
-                    const o = clamp((localTime - 0.12 - i * 0.14) / 0.16, 0, 1);
-                    const offX = (isAr ? -1 : 1) * (1 - p) * 70 + (i % 2 === 0 ? -18 : 18);
+              <div dir="ltr" style="display:flex;align-items:center;justify-content:center;gap:${(14 + bracketSpread * 16).toFixed(1)}px;">
+                <span style="font-family:'Plus Jakarta Sans';font-size:118px;font-weight:300;color:#0FB5AE;opacity:${bracketSpread};">{</span>
+                ${list
+                  .map((c, idx) => {
+                    const p = springEase((localTime - 0.14 - idx * 0.08) / 0.34);
+                    const o = clamp((localTime - 0.14 - idx * 0.08) / 0.16, 0, 1);
+                    const floatY = Math.sin(localTime * 3.5 + idx) * 6;
                     return `
-                      <div class="float-pill-card" style="opacity:${o};transform:translate3d(${offX.toFixed(1)}px,${((1 - p) * 26).toFixed(1)}px,0) scale(${(0.92 + 0.08 * p).toFixed(3)});">
-                        <div class="float-avatar">${i < 3 ? i + 1 : "✓"}</div>
-                        <span>${esc(c)}</span>
+                      <div class="crest-chip" style="opacity:${o};transform:translateY(${((1 - p) * 30 + floatY).toFixed(1)}px) scale(${(0.84 + 0.16 * p).toFixed(3)});">
+                        <div class="crest-badge" style="background:${c.hex};">${esc(c.short)}</div>
+                        <span style="font-size:15px;font-weight:800;color:#0F172A;">${esc(c.label)}</span>
                       </div>`;
                   })
                   .join("")}
+                <span style="font-family:'Plus Jakarta Sans';font-size:118px;font-weight:300;color:#0055FF;opacity:${bracketSpread};">}</span>
               </div>
-            </div>
-          </div>`;
-        return;
-      }
-
-      if (tpl === "tilted_3d_hero") {
-        const glide = easeInOutCubic(localTime / dur);
-        const rx = 11 - 9 * glide;
-        const ry = (isAr ? 12 : -12) * (1 - 0.72 * glide);
-        const rz = (isAr ? 1.8 : -1.8) * (1 - glide);
-        const sc = 1.0 + 0.08 * glide;
-        root.innerHTML = `
-          <div dir="${dir}" style="width:1760px;height:900px;display:flex;align-items:center;justify-content:space-between;gap:56px;opacity:${alpha};">
-            <div style="width:520px;display:flex;flex-direction:column;gap:14px;flex-shrink:0;">
-              <div class="pill-badge" style="align-self:flex-start;margin-bottom:6px;opacity:${easeOutExpo(localTime / 0.25)};"><span class="pill-dot"></span>${esc(scene.badge || "COACH PRO")}</div>
-              ${kineticText(scene.headline, localTime, 0.04, false, 60)}
-              ${kineticText(scene.highlight, localTime, 0.16, true, 66)}
-              <div style="font-size:24px;font-weight:500;color:#475569;line-height:1.45;margin-top:8px;">${esc(scene.sub)}</div>
-            </div>
-            <div style="flex:1;height:780px;display:flex;align-items:center;justify-content:center;">
-              <div class="ui-card" style="width:1120px;height:700px;transform:perspective(1600px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg) rotateZ(${rz.toFixed(2)}deg);">
-                <img src="${img0}" alt="" style="object-position:center 38%;transform:scale(${sc.toFixed(4)});" />
+              <div style="font-size:25px;font-weight:600;color:#475569;">${esc(scene.sub)}</div>
+            </div>`;
+        } else {
+          const tLive = localTime - 1.55;
+          const sc = 0.94 + 0.06 * easeOutExpo(tLive / 0.35);
+          root.innerHTML = `
+            <div dir="${dir}" style="width:1760px;height:900px;display:flex;align-items:center;justify-content:space-between;gap:46px;opacity:${alpha};">
+              <div style="width:450px;display:flex;flex-direction:column;gap:12px;flex-shrink:0;">
+                ${wordReveal(scene.headline, localTime, 0.0, false, 56)}
+                ${wordReveal(scene.highlight, localTime, 0.12, true, 62)}
+                <div style="font-size:23px;font-weight:600;color:#475569;line-height:1.45;margin-top:8px;">${esc(scene.sub)}</div>
               </div>
-            </div>
-          </div>`;
+              <div class="lovio-frame" style="flex:1;height:760px;transform:scale(${sc.toFixed(4)});">
+                <img src="${liveFrameDataUri}" alt="" style="object-position:top center;" />
+              </div>
+            </div>`;
+        }
         return;
       }
 
-      if (tpl === "macro_zoom" || tpl === "macro_pitch") {
-        const crop = scene.crop || { scale: 1.34, ox: "50%", oy: "50%" };
-        const glide = easeInOutCubic(localTime / dur);
-        const z = Number(crop.scale) + 0.12 * glide;
-        root.innerHTML = `
-          <div dir="${dir}" style="width:1760px;height:900px;display:flex;align-items:center;justify-content:space-between;gap:52px;opacity:${alpha};">
-            <div style="width:480px;display:flex;flex-direction:column;gap:14px;flex-shrink:0;">
-              <div class="pill-badge" style="align-self:flex-start;margin-bottom:6px;"><span class="pill-dot"></span>${esc(scene.badge || "LIVE")}</div>
-              ${kineticText(scene.headline, localTime, 0.0, false, 58)}
-              ${kineticText(scene.highlight, localTime, 0.14, true, 66)}
-              <div style="font-size:24px;font-weight:500;color:#475569;line-height:1.45;margin-top:8px;">${esc(scene.sub)}</div>
-            </div>
-            <div class="ui-card" style="flex:1;height:750px;transform:scale(${(0.94 + 0.06 * springEase(localTime / 0.35)).toFixed(4)});">
-              <img src="${img0}" alt="" style="transform-origin:${crop.ox} ${crop.oy};transform:scale(${z.toFixed(4)});" />
-            </div>
-          </div>`;
+      // 3. LIVE AI Prompt Typing -> 3-4-2-1 Drawing with Passes (Lovio Frame 2 & 6)
+      if (tpl === "lovio_prompt_live") {
+        const prompt = scene.prompt || "";
+        const preIntro = localTime < 1.15;
+        if (preIntro) {
+          const frac = clamp(localTime / 0.95, 0, 1);
+          const chars = Math.max(1, Math.floor(prompt.length * frac));
+          const sc = 0.9 + 0.1 * springEase(localTime / 0.35);
+          root.innerHTML = `
+            <div dir="${dir}" style="width:1400px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;opacity:${alpha};transform:scale(${sc.toFixed(4)});text-align:center;">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+                ${wordReveal(scene.headline, localTime, 0.0, false, 64)}
+                ${wordReveal(scene.highlight, localTime, 0.10, true, 72)}
+              </div>
+              <div style="width:980px;padding:22px 30px;border-radius:9999px;background:rgba(255,255,255,0.88);backdrop-filter:blur(18px);border:2px solid rgba(15,181,174,0.65);box-shadow:0 28px 70px rgba(0,85,255,0.16);display:flex;align-items:center;justify-content:space-between;gap:16px;">
+                <span style="font-size:28px;font-weight:700;color:#0F172A;">${esc(prompt.slice(0, chars))}<span style="color:#0FB5AE;">|</span></span>
+                <span style="padding:10px 26px;border-radius:9999px;background:linear-gradient(95deg,#0055FF,#0FB5AE);color:#FFFFFF;font-size:20px;font-weight:800;">AI</span>
+              </div>
+            </div>`;
+        } else {
+          const z = 1.0 + 0.14 * easeInOutCubic((localTime - 1.15) / (dur - 1.15));
+          const crop = scene.crop || { ox: "50%", oy: "50%" };
+          root.innerHTML = `
+            <div dir="${dir}" style="width:1760px;height:900px;display:flex;align-items:center;justify-content:space-between;gap:42px;opacity:${alpha};">
+              <div style="width:430px;display:flex;flex-direction:column;gap:12px;flex-shrink:0;">
+                <div class="glass-pill" style="align-self:flex-start;font-size:17px;padding:8px 18px;">
+                  <span style="width:9px;height:9px;border-radius:9999px;background:#0FB5AE;display:inline-block;"></span>
+                  <span>3-4-2-1 · AI Live</span>
+                </div>
+                ${wordReveal(scene.headline, localTime, 0.0, false, 54)}
+                ${wordReveal(scene.highlight, localTime, 0.1, true, 60)}
+                <div style="font-size:22px;font-weight:600;color:#475569;line-height:1.45;margin-top:6px;">${esc(scene.sub)}</div>
+              </div>
+              <div class="lovio-frame" style="flex:1;height:780px;">
+                <img src="${liveFrameDataUri}" alt="" style="transform-origin:${crop.ox} ${crop.oy};transform:scale(${z.toFixed(4)});" />
+              </div>
+            </div>`;
+        }
         return;
       }
 
-      if (tpl === "split_bento") {
+      // 4. LIVE 3-Phase Split Bento (Possession -> Attack -> Defense live morph sync)
+      if (tpl === "lovio_bento_phases") {
         const phases = scene.phases || [];
-        const activeIdx = Math.min(2, Math.floor((localTime / dur) * 3));
-        const imgZ = 1.18 + 0.08 * easeInOutCubic(localTime / dur);
+        // Synchronized cleanly to capture_live_clips phase clicks (~0..20% Possession, 20..44% Attack, 44..68% Defense, 68..100% Morphing)
+        const frac = clamp(localTime / dur, 0, 1);
+        const activeIdx = frac < 0.22 ? 0 : frac < 0.45 ? 1 : frac < 0.72 ? 2 : Math.floor((frac * 9) % 3);
         root.innerHTML = `
-          <div dir="${dir}" style="width:1740px;height:820px;display:flex;align-items:stretch;gap:30px;opacity:${alpha};">
-            <div class="ui-card" style="flex:1.35;height:100%;">
-              <img src="${img0}" alt="" style="transform-origin:42% 58%;transform:scale(${imgZ.toFixed(4)});" />
+          <div dir="${dir}" style="width:1760px;height:860px;display:flex;align-items:stretch;gap:28px;opacity:${alpha};">
+            <div class="lovio-frame" style="flex:1.45;height:100%;">
+              <img src="${liveFrameDataUri}" alt="" style="transform-origin:42% 62%;transform:scale(1.14);" />
             </div>
-            <div style="flex:0.85;border-radius:30px;background:linear-gradient(155deg,#0B4F5C 0%,#0FB5AE 100%);padding:48px 42px;display:flex;flex-direction:column;justify-content:center;gap:22px;color:#FFFFFF;box-shadow:0 30px 70px rgba(14,165,164,0.28);">
+            <div style="flex:0.75;border-radius:28px;background:linear-gradient(155deg,#0B4F5C 0%,#0FB5AE 100%);padding:44px 36px;display:flex;flex-direction:column;justify-content:center;gap:20px;color:#FFFFFF;box-shadow:0 32px 72px rgba(14,165,164,0.28);">
               <div>
-                <div style="font-size:48px;font-weight:600;line-height:1.15;opacity:0.9;">${esc(scene.headline)}</div>
-                <div style="font-size:56px;font-weight:900;line-height:1.15;">${esc(scene.highlight)}</div>
+                <div style="font-size:44px;font-weight:600;line-height:1.15;opacity:0.92;">${esc(scene.headline)}</div>
+                <div style="font-size:52px;font-weight:900;line-height:1.15;">${esc(scene.highlight)}</div>
               </div>
-              <div style="font-size:22px;opacity:0.86;margin-bottom:8px;">${esc(scene.sub)}</div>
-              <div style="display:flex;flex-direction:column;gap:14px;">
+              <div style="font-size:21px;opacity:0.86;">${esc(scene.sub)}</div>
+              <div style="display:flex;flex-direction:column;gap:12px;margin-top:4px;">
                 ${phases
                   .map((ph, idx) => {
                     const isAct = idx === activeIdx;
                     return `
                       <div style="
-                        padding:18px 24px;
+                        padding:16px 22px;
                         border-radius:18px;
                         background:${isAct ? "#FFFFFF" : "rgba(255,255,255,0.14)"};
                         color:${isAct ? "#0B1F3A" : "#FFFFFF"};
-                        font-size:24px;
+                        font-size:23px;
                         font-weight:800;
-                        transform:scale(${isAct ? 1.03 : 0.99});
-                        box-shadow:${isAct ? "0 16px 32px rgba(0,0,0,0.14)" : "none"};
+                        transform:scale(${isAct ? 1.04 : 0.99});
+                        box-shadow:${isAct ? "0 16px 32px rgba(0,0,0,0.16)" : "none"};
                       ">${esc(ph)}</div>`;
                   })
                   .join("")}
@@ -473,146 +413,71 @@
         return;
       }
 
-      if (tpl === "format_montage") {
-        const formats = scene.formats || ["5×5", "6×6", "7×7", "8×8", "9×9", "10×10", "11×11"];
-        const frac = clamp(localTime / dur, 0, 0.999);
-        const fmtIdx = Math.floor(frac * formats.length);
-        const scrArr = [img0, img1, img2];
-        const scrIdx = Math.min(scrArr.length - 1, Math.floor(frac * scrArr.length));
-        const subBeat = (frac * scrArr.length) % 1;
-        const popScale = 0.965 + 0.035 * springEase(subBeat / 0.25);
+      // 5. Sleek Lovio 3D Device Playing Live Action Clip (Command / Formats / Edit)
+      if (tpl === "lovio_device_live") {
+        const glide = easeInOutCubic(localTime / dur);
+        const rx = 8 - 6.5 * glide;
+        const ry = (isAr ? 9 : -9) * (1 - 0.72 * glide);
+        const sc = 0.96 + 0.04 * springEase(localTime / 0.35);
         root.innerHTML = `
-          <div dir="${dir}" style="width:1720px;height:900px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;opacity:${alpha};">
-            <div style="text-align:center;">
-              <div style="font-size:58px;font-weight:600;color:#0F172A;line-height:1.15;">
-                ${esc(scene.headline)} <span class="grad-text">${esc(scene.highlight)}</span>
-              </div>
-              <div style="font-size:23px;color:#64748B;margin-top:6px;">${esc(scene.sub)}</div>
+          <div dir="${dir}" style="width:1760px;height:900px;display:flex;align-items:center;justify-content:space-between;gap:46px;opacity:${alpha};">
+            <div style="width:450px;display:flex;flex-direction:column;gap:12px;flex-shrink:0;">
+              ${wordReveal(scene.headline, localTime, 0.0, false, 56)}
+              ${wordReveal(scene.highlight, localTime, 0.12, true, 62)}
+              <div style="font-size:23px;font-weight:600;color:#475569;line-height:1.45;margin-top:8px;">${esc(scene.sub)}</div>
             </div>
-            <div style="display:flex;align-items:center;gap:12px;background:#F1F5F9;padding:8px;border-radius:9999px;border:1px solid rgba(15,23,42,0.06);">
-              ${formats
-                .map((f, i) => {
-                  const act = i === fmtIdx;
-                  return `<div style="padding:10px 24px;border-radius:9999px;font-size:21px;font-weight:800;background:${act ? "linear-gradient(95deg,#0055FF,#0FB5AE)" : "transparent"};color:${act ? "#FFFFFF" : "#475569"};box-shadow:${act ? "0 8px 20px rgba(0,102,255,0.24)" : "none"};">${esc(f)}</div>`;
-                })
-                .join("")}
-            </div>
-            <div class="ui-card" style="width:1280px;height:620px;transform:scale(${popScale.toFixed(4)});">
-              <img src="${scrArr[scrIdx]}" alt="" style="object-position:center 55%;transform:scale(1.16);" />
-            </div>
-          </div>`;
-        return;
-      }
-
-      if (tpl === "layered_stack") {
-        const swap = easeInOutCubic((localTime - dur * 0.42) / 0.45);
-        const c1Front = swap < 0.5;
-        const c1Scale = 1.0 - 0.08 * swap;
-        const c2Scale = 0.92 + 0.08 * swap;
-        const c1X = (isAr ? 1 : -1) * 55 * swap;
-        const c2X = (isAr ? -1 : 1) * 55 * (1 - swap);
-        root.innerHTML = `
-          <div dir="${dir}" style="width:1760px;height:860px;display:flex;align-items:center;justify-content:space-between;gap:56px;opacity:${alpha};">
-            <div style="width:500px;display:flex;flex-direction:column;gap:14px;flex-shrink:0;">
-              ${kineticText(scene.headline, localTime, 0.0, false, 60)}
-              ${kineticText(scene.highlight, localTime, 0.14, true, 68)}
-              <div style="font-size:24px;font-weight:500;color:#475569;line-height:1.45;margin-top:8px;">${esc(scene.sub)}</div>
-            </div>
-            <div style="position:relative;flex:1;height:740px;display:flex;align-items:center;justify-content:center;">
-              <div class="ui-card" style="position:absolute;width:1020px;height:620px;z-index:${c1Front ? 4 : 2};opacity:${(1 - 0.45 * swap).toFixed(3)};transform:translate3d(${c1X.toFixed(1)}px,${(-32 * swap).toFixed(1)}px,0) scale(${c1Scale.toFixed(4)});">
-                <img src="${img0}" alt="" />
-              </div>
-              <div class="ui-card" style="position:absolute;width:1020px;height:620px;z-index:${c1Front ? 2 : 4};opacity:${(0.55 + 0.45 * swap).toFixed(3)};transform:translate3d(${c2X.toFixed(1)}px,${(32 * (1 - swap)).toFixed(1)}px,0) scale(${c2Scale.toFixed(4)});">
-                <img src="${img1}" alt="" />
+            <div style="flex:1;height:780px;display:flex;align-items:center;justify-content:center;">
+              <div class="lovio-frame" style="width:1200px;height:750px;transform:perspective(1650px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg) scale(${sc.toFixed(4)});">
+                <img src="${liveFrameDataUri}" alt="" />
               </div>
             </div>
           </div>`;
         return;
       }
 
-      if (tpl === "marquee_split") {
-        const pills = scene.pills || [];
-        const showLive = localTime > dur * 0.52;
-        const shift = localTime * 75;
+      // 6. Full Video Analysis Studio Alpha/Beta Showcase
+      if (tpl === "lovio_alpha_live") {
+        const feats = isAr
+          ? ["تتبع اللاعبين", "رادار 2D", "xPass والتمرير", "مؤشر الضغط", "وسم اللقطات"]
+          : ["Player Tracking", "2D Tactical Radar", "Passing xPass%", "Match Momentum", "Clip Tagging"];
+        const sc = 0.95 + 0.05 * springEase(localTime / 0.36);
         root.innerHTML = `
-          <div dir="${dir}" style="width:1760px;height:880px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;opacity:${alpha};">
-            <div style="display:flex;align-items:baseline;gap:18px;text-align:center;">
-              <span style="font-size:60px;font-weight:600;color:#0F172A;">${esc(scene.headline)}</span>
-              <span class="grad-text" style="font-size:64px;">${esc(scene.highlight)}</span>
-            </div>
-            <div style="width:100%;overflow:hidden;padding:8px 0;">
-              <div style="display:flex;gap:18px;justify-content:center;transform:translateX(${((isAr ? 1 : -1) * (shift - 90)).toFixed(1)}px);">
-                ${pills
-                  .map(
-                    (p, idx) =>
-                      `<div class="pill-badge" style="white-space:nowrap;background:${idx % 2 === 0 ? "#FFFFFF" : "#EFF6FF"};"><span class="pill-dot"></span>${esc(p)}</div>`
-                  )
+          <div dir="${dir}" style="width:1760px;height:900px;display:flex;align-items:center;justify-content:space-between;gap:46px;opacity:${alpha};">
+            <div style="width:470px;display:flex;flex-direction:column;gap:12px;flex-shrink:0;">
+              <div class="glass-pill" style="align-self:flex-start;background:#0F172A;color:#FFFFFF;border:none;font-size:17px;padding:8px 18px;">
+                ${esc(scene.badge || "Alpha / Beta")}
+              </div>
+              ${wordReveal(scene.headline, localTime, 0.0, false, 50)}
+              ${wordReveal(scene.highlight, localTime, 0.12, true, 54)}
+              <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
+                ${feats
+                  .map((f, i) => {
+                    const o = clamp((localTime - 0.18 - i * 0.12) / 0.2, 0, 1);
+                    return `<span class="glass-pill" style="font-size:16px;padding:7px 14px;opacity:${o};">${esc(f)}</span>`;
+                  })
                   .join("")}
               </div>
             </div>
-            <div class="ui-card" style="width:1240px;height:620px;transform:scale(${(0.96 + 0.04 * springEase(localTime / 0.3)).toFixed(4)});">
-              <img src="${showLive ? img1 : img0}" alt="" style="object-position:top center;" />
+            <div class="lovio-frame" style="flex:1;height:760px;background:#0B1220;transform:scale(${sc.toFixed(4)});">
+              <img src="${liveFrameDataUri}" alt="" style="transform-origin:52% 45%;transform:scale(1.06);" />
             </div>
           </div>`;
         return;
       }
 
-      if (tpl === "ai_prompt_card") {
-        const prompt = scene.prompt || "";
-        const typeFrac = clamp(localTime / (dur * 0.42), 0, 1);
-        const chars = Math.max(1, Math.floor(prompt.length * typeFrac));
-        const revealScreen = easeOutExpo((localTime - 0.55) / 0.4);
-        root.innerHTML = `
-          <div dir="${dir}" style="width:1680px;height:900px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;opacity:${alpha};">
-            <div style="text-align:center;">
-              <div style="font-size:56px;font-weight:600;color:#0F172A;">
-                ${esc(scene.headline)} <span class="grad-text">${esc(scene.highlight)}</span>
-              </div>
-            </div>
-            <div style="width:920px;padding:18px 28px;border-radius:9999px;background:#FFFFFF;border:2px solid #0FB5AE;box-shadow:0 20px 50px rgba(15,181,174,0.18);display:flex;align-items:center;justify-content:space-between;gap:16px;">
-              <div style="display:flex;align-items:center;gap:14px;font-size:26px;font-weight:700;color:#0F172A;">
-                <span style="width:14px;height:14px;border-radius:9999px;background:linear-gradient(135deg,#0055FF,#0FB5AE);display:inline-block;"></span>
-                <span>${esc(prompt.slice(0, chars))}<span style="color:#0FB5AE;font-weight:900;">|</span></span>
-              </div>
-              <div style="padding:8px 22px;border-radius:9999px;background:linear-gradient(95deg,#0055FF,#0FB5AE);color:#FFFFFF;font-size:18px;font-weight:800;">AI Copilot</div>
-            </div>
-            <div class="ui-card" style="width:1220px;height:600px;opacity:${revealScreen};transform:translateY(${((1 - revealScreen) * 32).toFixed(1)}px) scale(${(0.95 + 0.05 * revealScreen).toFixed(4)});">
-              <img src="${img0}" alt="" style="object-position:center center;" />
-            </div>
-          </div>`;
-        return;
-      }
-
-      if (tpl === "beta_peek") {
-        const sc = 0.94 + 0.06 * springEase(localTime / 0.38);
-        root.innerHTML = `
-          <div dir="${dir}" style="width:1720px;height:880px;display:flex;align-items:center;justify-content:space-between;gap:54px;opacity:${alpha};">
-            <div style="width:520px;display:flex;flex-direction:column;gap:14px;flex-shrink:0;">
-              <div class="pill-badge" style="align-self:flex-start;background:#0F172A;color:#FFFFFF;border:none;">${esc(scene.badge || "Full Video Studio · Beta")}</div>
-              ${kineticText(scene.headline, localTime, 0.0, false, 60)}
-              ${kineticText(scene.highlight, localTime, 0.14, true, 60)}
-              <div style="font-size:24px;font-weight:500;color:#475569;line-height:1.45;margin-top:8px;">${esc(scene.sub)}</div>
-            </div>
-            <div class="ui-card" style="flex:1;height:700px;background:#0F172A;transform:scale(${sc.toFixed(4)});">
-              <img src="${img0}" alt="" />
-            </div>
-          </div>`;
-        return;
-      }
-
-      // Default / dexatel_outro
-      const sc = springEase(localTime / 0.38);
-      const ctaO = easeOutExpo((localTime - 0.34) / 0.3);
+      // 7. End Card (Lovio outro)
+      const sc = springEase(localTime / 0.36);
+      const subO = easeOutExpo((localTime - 0.28) / 0.3);
       root.innerHTML = `
-        <div dir="ltr" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;opacity:${alpha};gap:26px;">
-          <div style="display:flex;align-items:center;gap:22px;transform:scale(${sc.toFixed(4)});">
-            ${bedigitalSvg(92, 1, 1)}
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;opacity:${alpha};gap:24px;">
+          <div dir="ltr" style="display:flex;align-items:center;gap:22px;transform:scale(${sc.toFixed(4)});">
+            ${animatedBedigitalLogo(96, 1.0)}
             <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:74px;font-weight:800;letter-spacing:-0.03em;color:#0F172A;">
               EGY-SCOUT <span class="grad-text">Coach Pro</span>
             </div>
           </div>
-          <div dir="${dir}" style="font-size:40px;font-weight:800;color:#0F172A;opacity:${ctaO};">${esc(scene.highlight)}</div>
-          <div dir="${dir}" class="pill-badge" style="border:2px solid #0F172A;padding:14px 36px;font-size:23px;font-weight:700;opacity:${ctaO};transform:translateY(${((1 - ctaO) * 14).toFixed(1)}px);">
+          <div dir="${dir}" style="font-size:40px;font-weight:800;color:#0F172A;opacity:${subO};">${esc(scene.highlight)}</div>
+          <div class="glass-pill" style="padding:12px 32px;font-size:21px;opacity:${subO};">
             ${esc(scene.sub)}
           </div>
         </div>`;

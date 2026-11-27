@@ -5,7 +5,7 @@ import path from "node:path";
 const CHROME_PATH = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const ASSETS_ROOT =
   "C:\\Users\\Abdullah_Yassen\\.gemini\\antigravity\\brain\\63f869d2-f74e-4708-9f2a-2f435628b8c8\\scratch\\video_assets";
-const SCREENS_DIR = path.join(ASSETS_ROOT, "screens");
+const CLIPS_ROOT = path.join(ASSETS_ROOT, "clips_v3");
 const OUT_DIR = "D:\\manger\\coach_pro_videos";
 const STAGE_URL = "file:///D:/manger/scripts/video_studio/scene_stage.html";
 const FPS = 30;
@@ -26,19 +26,33 @@ function findFfmpeg() {
 const FFMPEG = findFfmpeg();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const screenCache = new Map();
-function getScreenUri(filename) {
-  if (!filename) return "";
-  if (!screenCache.has(filename)) {
-    const fullPath = path.join(SCREENS_DIR, filename);
-    const buf = fs.readFileSync(fullPath);
-    screenCache.set(filename, `data:image/png;base64,${buf.toString("base64")}`);
+const clipIndexCache = new Map();
+function getClipFrames(clipKey) {
+  if (!clipKey) return [];
+  if (!clipIndexCache.has(clipKey)) {
+    const dir = path.join(CLIPS_ROOT, clipKey);
+    const files = fs.existsSync(dir)
+      ? fs.readdirSync(dir).filter((f) => f.endsWith(".jpg")).sort().map((f) => path.join(dir, f))
+      : [];
+    clipIndexCache.set(clipKey, files);
   }
-  return screenCache.get(filename);
+  return clipIndexCache.get(clipKey);
+}
+
+// Keep a tiny rolling base64 cache so RAM stays lean
+const uriCache = new Map();
+function loadFrameUri(filePath) {
+  if (!filePath) return "";
+  if (!uriCache.has(filePath)) {
+    if (uriCache.size > 200) uriCache.clear();
+    const buf = fs.readFileSync(filePath);
+    uriCache.set(filePath, `data:image/jpeg;base64,${buf.toString("base64")}`);
+  }
+  return uriCache.get(filePath);
 }
 
 async function openChromeCdp(port) {
-  const userDataDir = path.join(ASSETS_ROOT, `chrome_render_v2_${port}`);
+  const userDataDir = path.join(ASSETS_ROOT, `chrome_render_v3_${port}`);
   fs.mkdirSync(userDataDir, { recursive: true });
   const proc = spawn(
     CHROME_PATH,
@@ -107,7 +121,7 @@ async function openChromeCdp(port) {
 }
 
 async function renderOneVideo(lang, cdpPort) {
-  const manifestPath = path.join(ASSETS_ROOT, `manifest_v2_${lang}.json`);
+  const manifestPath = path.join(ASSETS_ROOT, `manifest_v3_${lang}.json`);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
   const scenes = manifest.scenes;
   const totalDur = manifest.total_duration_s;
@@ -164,7 +178,18 @@ async function renderOneVideo(lang, cdpPort) {
       }
       const sc = scenes[curIdx];
       const localTime = Math.max(0, t - sc.start_s);
-      const screenDataUris = (sc.screens || []).map((fn) => getScreenUri(fn));
+      const frames = getClipFrames(sc.clip);
+      let liveFrameDataUri = "";
+      if (frames.length > 0) {
+        // Fit the entire live UI action cleanly inside the scene's vocal beat duration
+        const effTime = sc.template === "lovio_multi_leagues"
+          ? Math.max(0, localTime - 1.55) / Math.max(0.5, sc.duration_s - 1.55)
+          : sc.template === "lovio_prompt_live"
+          ? Math.max(0, localTime - 1.15) / Math.max(0.5, sc.duration_s - 1.15)
+          : localTime / Math.max(0.5, sc.duration_s);
+        const fIdx = Math.min(frames.length - 1, Math.floor(Math.max(0, Math.min(0.999, effTime)) * frames.length));
+        liveFrameDataUri = loadFrameUri(frames[fIdx]);
+      }
 
       await send("Runtime.evaluate", {
         expression: `window.renderFrame(${JSON.stringify({
@@ -172,9 +197,10 @@ async function renderOneVideo(lang, cdpPort) {
           sceneIdx: curIdx,
           totalScenes: scenes.length,
           scene: sc,
+          crests: manifest.crests || [],
           localTime,
           globalProgress: t / totalDur,
-          screenDataUris,
+          liveFrameDataUri,
         })})`,
         awaitPromise: true,
       });
@@ -186,7 +212,7 @@ async function renderOneVideo(lang, cdpPort) {
       }
 
       if (f % 150 === 0 || f === totalFrames - 1) {
-        console.log(`[${lang.toUpperCase()}] frame ${f + 1}/${totalFrames} (${sc.id} / ${sc.template})`);
+        console.log(`[${lang.toUpperCase()}] frame ${f + 1}/${totalFrames} (${sc.id})`);
       }
     }
 
@@ -203,7 +229,6 @@ async function renderOneVideo(lang, cdpPort) {
 }
 
 async function main() {
-  // Render Arabic (#1 priority) and English (#2) simultaneously in isolated CDP browsers
   await Promise.all([renderOneVideo("ar", 9340), renderOneVideo("en", 9341)]);
 }
 
