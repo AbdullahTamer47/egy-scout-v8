@@ -29,7 +29,7 @@ const MD_DAYS = [
   { id: "MD+1", label: "MD+1", rpe: 2.5, dur: 40 },
 ];
 
-type CanvasTool = "move" | "player_a" | "player_b" | "cone" | "mini_goal" | "mannequin" | "ball" | "pass_arrow" | "press_arrow";
+type CanvasTool = "move" | "eraser" | "player_a" | "player_b" | "cone" | "mini_goal" | "mannequin" | "ball" | "pass_arrow" | "press_arrow";
 
 export default function TrainingSessionStudio({
   lang,
@@ -497,6 +497,36 @@ export default function TrainingSessionStudio({
   const handleCanvasDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const { cx, cy, W, H } = getCvsCoords(e);
     const m = toMeters(cx, cy, W, H);
+    if (tool === "eraser") {
+      for (let i = 0; i < drillPlayers.length; i++) {
+        const pt = toCanvas(drillPlayers[i].x_m, drillPlayers[i].y_m, W, H);
+        if (Math.hypot(pt.x - cx, pt.y - cy) < 20) {
+          setDrillPlayers((prev) => prev.filter((_, idx) => idx !== i));
+          return;
+        }
+      }
+      for (let i = 0; i < drillProps.length; i++) {
+        const pt = toCanvas(drillProps[i].x_m, drillProps[i].y_m, W, H);
+        if (Math.hypot(pt.x - cx, pt.y - cy) < 20) {
+          setDrillProps((prev) => prev.filter((_, idx) => idx !== i));
+          return;
+        }
+      }
+      for (let i = 0; i < drillArrows.length; i++) {
+        const ar = drillArrows[i];
+        const a = toCanvas(ar.from_x_m, ar.from_y_m, W, H);
+        const b = toCanvas(ar.to_x_m, ar.to_y_m, W, H);
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const l2 = dx * dx + dy * dy;
+        const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((cx - a.x) * dx + (cy - a.y) * dy) / l2));
+        if (Math.hypot(cx - (a.x + t * dx), cy - (a.y + t * dy)) < 16) {
+          setDrillArrows((prev) => prev.filter((_, idx) => idx !== i));
+          return;
+        }
+      }
+      return;
+    }
     if (tool === "move") {
       for (let i = 0; i < drillPlayers.length; i++) {
         const pt = toCanvas(drillPlayers[i].x_m, drillPlayers[i].y_m, W, H);
@@ -675,6 +705,7 @@ export default function TrainingSessionStudio({
             {(
               [
                 ["move", isAr ? "سحب" : "Move"],
+                ["eraser", isAr ? "ممحاة" : "Eraser"],
                 ["player_a", isAr ? "+ لاعب فريقك" : "+ Player A"],
                 ["player_b", isAr ? "+ ضاغط" : "+ Press"],
                 ["cone", isAr ? "+ قمع" : "+ Cone"],
@@ -690,7 +721,11 @@ export default function TrainingSessionStudio({
                 type="button"
                 onClick={() => setTool(tid)}
                 className={`px-2.5 py-1 rounded-lg font-bold transition ${
-                  tool === tid ? "bg-emerald-600 text-white shadow-2xs" : "bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100"
+                  tool === tid
+                    ? tid === "eraser"
+                      ? "bg-rose-600 text-white"
+                      : "bg-slate-900 text-white"
+                    : "bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100"
                 }`}
               >
                 {lbl}

@@ -4,11 +4,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Bot,
   History,
+  Loader2,
+  MessageSquare,
   MessageSquarePlus,
   Search,
   Send,
   ShieldCheck,
-  Sparkles,
   Trash2,
   User,
   X,
@@ -27,6 +28,8 @@ import {
   CoachClubDetail,
   CoachPlayer,
   CoachProfile,
+  formatCoachName,
+  LineupSwapSuggestion,
   MatchdaySheetPayload,
   ResearchedPlayerDossier,
   ThreePhaseBlueprint,
@@ -41,6 +44,7 @@ export interface CoachChatResponse {
   action?: string;
   ai_drawing_blueprint?: ThreePhaseBlueprint | null;
   ai_blueprint?: ThreePhaseBlueprint | null;
+  ai_lineup_swaps?: { suggestions?: LineupSwapSuggestion[]; summary_ar?: string } | null;
   ai_training_session?: TrainingSessionPlan | null;
   ai_matchday_sheet?: MatchdaySheetPayload | null;
   researched_player?: ResearchedPlayerDossier | null;
@@ -57,6 +61,7 @@ interface Props {
   isOpen: boolean;
   onToggleOpen: () => void;
   onActionExecuted: (res: CoachChatResponse) => void;
+  onApplyBlueprintToBoard?: (bp: ThreePhaseBlueprint, asGeneral?: boolean) => void;
   pendingRequest?: AiPendingRequest | null;
   onPendingConsumed?: () => void;
 }
@@ -72,12 +77,12 @@ function buildWelcomeMessage(
     id: `welcome-${Date.now()}`,
     sender: "ai",
     text: isAr
-      ? `أهلاً كابتن **${profile.coach_name}** — أنا المساعد التكتيكي بالـ AI المرتبط حياً بقائمة **${club.name_ar}** (${club.players.length} لاعباً)${
+      ? `أهلاً ${formatCoachName(profile.coach_name, true)} — مساعد الجهاز الفني مرتبط حياً بقائمة **${club.name_ar}** (${club.players.length} لاعباً)${
           hasOpponent ? ` ومواجهة **${opponent.name_ar}**` : ""
-        }.\nاسألني عن توظيف أي لاعب (سأبحث حياً في بيانات 2026/27 قبل الإجابة)، أو اطلب رسم خطة (بالحالات الـ 3: الاستحواذ، الهجوم، الدفاع)، أو تصميم وحدة تدريبية، أو كشف المباراة.`
-      : `Welcome Coach **${profile.coach_name}** — live AI Tactical Assistant connected to **${club.name_en}** (${club.players.length} players)${
+        }.\nاسأل عن توظيف أي لاعب، أو اطلب رسم خطة (الاستحواذ، الهجوم، الدفاع)، أو وحدة تدريبية، أو كشف المباراة.`
+      : `Welcome ${formatCoachName(profile.coach_name, false)} — connected live to **${club.name_en}** (${club.players.length} players)${
           hasOpponent ? ` vs **${opponent.name_en}**` : ""
-        }. Ask about any player's tactical role (live-verified before answering), formations, or training sessions.`,
+        }. Ask about any player's role, formations, or training sessions.`,
     timestamp: new Date().toISOString(),
   };
 }
@@ -115,22 +120,84 @@ function renderInlineBold(text: string): React.ReactNode[] {
 
 function FormattedAiBody({ text }: { text: string }) {
   const lines = String(text || "").split("\n");
+  const blocks: Array<{ kind: "table"; headers: string[]; rows: string[][] } | { kind: "line"; raw: string }> = [];
+
+  let i = 0;
+  while (i < lines.length) {
+    const trimmed = lines[i].trim();
+    if (trimmed.startsWith("|") && trimmed.endsWith("|") && i + 1 < lines.length && /^\|[\s:|-]+\|$/.test(lines[i + 1].trim())) {
+      const headers = trimmed
+        .slice(1, -1)
+        .split("|")
+        .map((c) => c.trim());
+      i += 2;
+      const rows: string[][] = [];
+      while (i < lines.length) {
+        const rt = lines[i].trim();
+        if (!rt.startsWith("|") || !rt.endsWith("|")) break;
+        if (!/^\|[\s:|-]+\|$/.test(rt)) {
+          rows.push(
+            rt
+              .slice(1, -1)
+              .split("|")
+              .map((c) => c.trim())
+          );
+        }
+        i++;
+      }
+      blocks.push({ kind: "table", headers, rows });
+      continue;
+    }
+    blocks.push({ kind: "line", raw: lines[i] });
+    i++;
+  }
+
   return (
     <div className="space-y-1.5 text-xs leading-relaxed">
-      {lines.map((rawLine, idx) => {
-        const line = rawLine.trimEnd();
+      {blocks.map((blk, idx) => {
+        if (blk.kind === "table") {
+          return (
+            <div key={idx} className="my-2 overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full text-[11px] text-start border-collapse">
+                <thead className="bg-slate-100 text-slate-900">
+                  <tr>
+                    {blk.headers.map((h, hi) => (
+                      <th key={hi} className="px-2 py-1.5 font-extrabold border-b border-slate-200 whitespace-nowrap">
+                        {renderInlineBold(h)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {blk.rows.map((r, ri) => (
+                    <tr key={ri} className="hover:bg-slate-50">
+                      {r.map((cell, ci) => (
+                        <td key={ci} className="px-2 py-1.5 text-slate-800 align-top">
+                          {renderInlineBold(cell)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
+
+        const line = blk.raw.trimEnd();
         if (!line.trim()) return <div key={idx} className="h-1" />;
+        if (/^[-_*]{3,}$/.test(line.trim())) return <hr key={idx} className="border-slate-200 my-1.5" />;
         if (line.trim().startsWith("###")) {
           return (
-            <div key={idx} className="pt-1.5 pb-0.5 text-[12px] font-extrabold text-[#0D717A] border-b border-[#D8E3EB]/60">
-              {line.replace(/^#+\s*/, "")}
+            <div key={idx} className="pt-1.5 pb-0.5 text-[12px] font-extrabold text-[#15803D] border-b border-slate-200">
+              {renderInlineBold(line.replace(/^#+\s*/, ""))}
             </div>
           );
         }
         if (line.trim().startsWith("##")) {
           return (
-            <div key={idx} className="pt-2 text-[13px] font-black text-[#0B1F3A]">
-              {line.replace(/^#+\s*/, "")}
+            <div key={idx} className="pt-2 text-[13px] font-black text-slate-900">
+              {renderInlineBold(line.replace(/^#+\s*/, ""))}
             </div>
           );
         }
@@ -138,7 +205,7 @@ function FormattedAiBody({ text }: { text: string }) {
           const content = line.replace(/^\s*[-*•]\s+/, "");
           return (
             <div key={idx} className="flex items-start gap-1.5 ps-1">
-              <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#0FB5AE] shrink-0" />
+              <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#15803D] shrink-0" />
               <span className="flex-1">{renderInlineBold(content)}</span>
             </div>
           );
@@ -160,7 +227,7 @@ function ResearchedPlayerCard({ dossier, isAr }: { dossier: ResearchedPlayerDoss
   const roles = dossier.tactical_profile?.best_roles_ar || [];
   const stats = dossier.season_stats || {};
   return (
-    <div className="mt-2.5 rounded-2xl border border-[#0FB5AE]/40 bg-gradient-to-br from-[#F2FBFB] to-white p-3 space-y-2 shadow-xs">
+    <div className="mt-2.5 rounded-xl border border-slate-200 bg-slate-50/70 p-3 space-y-2">
       <div className="flex items-center gap-2.5">
         {dossier.photo_url ? (
           <img
@@ -223,13 +290,13 @@ function ResearchedPlayerCard({ dossier, isAr }: { dossier: ResearchedPlayerDoss
         </div>
       )}
 
-      <div className="flex items-center justify-between text-[10px] text-[#0D717A] font-bold pt-1 border-t border-[#D8E3EB]/60">
-        <span className="inline-flex items-center gap-1">
-          <ShieldCheck className="w-3 h-3" />
-          {isAr ? "تحقق حي قبل الإجابة (365Scores 2026/27)" : "Live Verified (365Scores 2026/27)"}
-        </span>
-        {dossier.readiness_pct !== undefined && <span>{dossier.readiness_pct}%</span>}
-      </div>
+      {dossier.readiness_pct !== undefined && (
+        <div className="flex items-center justify-end text-[10px] text-[#15803D] font-bold pt-1 border-t border-slate-200/70">
+          <span>
+            {isAr ? `الجاهزية للمباراة: ${dossier.readiness_pct}%` : `Match Readiness: ${dossier.readiness_pct}%`}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -242,6 +309,7 @@ export default function CoachAICopilot({
   isOpen,
   onToggleOpen,
   onActionExecuted,
+  onApplyBlueprintToBoard,
   pendingRequest,
   onPendingConsumed,
 }: Props) {
@@ -391,6 +459,7 @@ export default function CoachAICopilot({
           "coach"
         );
 
+        const bp = res.ai_drawing_blueprint || res.ai_blueprint || null;
         const aiMsg: ChatMessageItem = {
           id: `a-${Date.now()}`,
           sender: "ai",
@@ -399,6 +468,8 @@ export default function CoachAICopilot({
           action: res.action,
           researchedPlayer: res.researched_player || null,
           researchSources: res.research_sources || [],
+          blueprint: bp,
+          lineupSwaps: res.ai_lineup_swaps?.suggestions || [],
           timestamp: new Date().toISOString(),
         };
 
@@ -506,10 +577,10 @@ export default function CoachAICopilot({
       <button
         type="button"
         onClick={onToggleOpen}
-        className="fixed bottom-20 lg:bottom-6 end-4 sm:end-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-full bg-gradient-to-r from-[#0FB5AE] to-[#0055FF] text-white font-extrabold text-sm shadow-2xl shadow-sky-500/25 hover:scale-105 transition"
+        className="hidden md:flex fixed bottom-5 end-5 z-50 items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-lg transition"
       >
-        <Bot className="w-5 h-5" />
-        <span>{isAr ? "المساعد الذكي بالـ AI" : "AI Tactical Chat"}</span>
+        <MessageSquare className="w-4 h-4" />
+        <span>{isAr ? "مساعد التكتيك" : "Tactical Assistant"}</span>
       </button>
     );
   }
@@ -519,20 +590,20 @@ export default function CoachAICopilot({
   return (
     <aside
       dir={isAr ? "rtl" : "ltr"}
-      className="fixed inset-y-0 end-0 w-full sm:w-[460px] z-50 bg-white border-s border-[#D8E3EB] shadow-2xl flex flex-col"
+      className="fixed inset-y-0 end-0 w-full sm:w-[440px] z-50 bg-white border-s border-slate-200 shadow-2xl flex flex-col"
     >
       {/* Header */}
-      <div className="px-4 py-3 bg-[#F2F6F8] border-b border-[#D8E3EB] space-y-2">
+      <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 space-y-2">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#0FB5AE] to-[#0055FF] flex items-center justify-center text-white shrink-0">
-              <Sparkles className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center text-white shrink-0">
+              <MessageSquare className="w-4 h-4" />
             </div>
             <div className="min-w-0">
-              <div className="text-sm font-extrabold text-[#0B1F3A] truncate">
-                {isAr ? `المساعد التكتيكي بالـ AI — ${profile.coach_name}` : `AI Assistant — ${profile.coach_name}`}
+              <div className="text-sm font-extrabold text-slate-900 truncate">
+                {isAr ? `مساعد التكتيك — ${formatCoachName(profile.coach_name, true)}` : `Assistant — ${formatCoachName(profile.coach_name, false)}`}
               </div>
-              <div className="text-[11px] font-bold text-[#0D717A] truncate">
+              <div className="text-[11px] font-semibold text-slate-600 truncate">
                 {club.name_ar} ({club.players.length}) {hasOpponent ? `× ${opponent.name_ar}` : ""}
               </div>
             </div>
@@ -702,26 +773,71 @@ export default function CoachAICopilot({
 
               {m.researchedPlayer && <ResearchedPlayerCard dossier={m.researchedPlayer} isAr={isAr} />}
 
-              {m.engine && (
-                <div className="mt-2 pt-1.5 border-t border-slate-100 text-[10px] text-slate-500 flex items-center justify-between gap-2">
-                  <span>{m.engine}</span>
-                  {m.action && m.action !== "answer" && (
-                    <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-extrabold border border-emerald-200">
-                      ✓ {m.action}
+              {m.blueprint && (
+                <div className="mt-2.5 p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between gap-2 text-[11px] font-extrabold text-slate-900">
+                    <span>{m.blueprint.title_ar}</span>
+                    <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-[#15803D] border border-emerald-200 text-[10px]">
+                      {m.blueprint.formation_code}
                     </span>
+                  </div>
+                  {m.lineupSwaps && m.lineupSwaps.length > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-bold text-slate-500">
+                        {isAr ? "تبديلات مقترحة للتشكيل:" : "Recommended Lineup Swaps:"}
+                      </div>
+                      {m.lineupSwaps.slice(0, 3).map((sw, si) => (
+                        <div key={si} className="text-[10.5px] text-slate-700 bg-white px-2 py-1 rounded border border-slate-200">
+                          <b>({sw.slot})</b> #{sw.in_jersey} {sw.in_name_ar} ← {sw.out_name_ar} ({sw.reason_ar})
+                        </div>
+                      ))}
+                    </div>
                   )}
+                  {onApplyBlueprintToBoard && (
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => onApplyBlueprintToBoard(m.blueprint!, false)}
+                        className="flex-1 py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold"
+                      >
+                        {isAr ? "فتح الخطة على السبورة" : "Open on Board"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onApplyBlueprintToBoard(m.blueprint!, true)}
+                        className="flex-1 py-1.5 px-2.5 rounded-lg bg-[#15803D] hover:bg-[#166534] text-white text-[11px] font-bold"
+                      >
+                        {isAr ? "اعتماد كخطة عامة للرئيسية" : "Save as General Plan"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {m.action && m.action !== "answer" && (
+                <div className="mt-2 pt-1.5 border-t border-slate-100 text-[10px] flex items-center justify-end">
+                  <span className="px-2 py-0.5 rounded bg-emerald-50 text-[#15803D] font-bold border border-emerald-200">
+                    ✓{" "}
+                    {m.action === "apply_tactics"
+                      ? isAr ? "تم تجهيز الخطة التكتيكية" : "Tactical Plan Ready"
+                      : m.action === "create_training"
+                      ? isAr ? "تم تجهيز الوحدة التدريبية" : "Training Session Ready"
+                      : m.action === "update_matchday_sheet"
+                      ? isAr ? "تم تحديث كشف المباراة" : "Matchday Sheet Updated"
+                      : isAr ? "تم التنفيذ" : "Done"}
+                  </span>
                 </div>
               )}
             </div>
           </div>
         ))}
         {sending && (
-          <div className="flex items-center gap-2 text-xs font-bold text-[#0D717A] bg-[#E6F8F7] border border-[#0FB5AE]/30 rounded-2xl px-3.5 py-2.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#0FB5AE] animate-ping" />
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-700 bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-2.5">
+            <Loader2 className="w-4 h-4 animate-spin text-[#15803D]" />
             <span>
               {isAr
-                ? "جاري البحث الحي عن اللاعب والبيانات (2026/27) ثم التحليل بالذكاء الاصطناعي..."
-                : "Running live 2026/27 player research before AI response..."}
+                ? "جاري فحص بيانات اللاعب والفريق (2026/27)..."
+                : "Verifying live 2026/27 player data..."}
             </span>
           </div>
         )}
@@ -734,23 +850,8 @@ export default function CoachAICopilot({
           e.preventDefault();
           sendPrompt();
         }}
-        className="p-3 border-t border-[#D8E3EB] bg-white space-y-2"
+        className="p-3 border-t border-slate-200 bg-white pb-[max(0.75rem,env(safe-area-inset-bottom))]"
       >
-        <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
-          <span>{isAr ? "نموذج الذكاء الاصطناعي:" : "AI Model:"}</span>
-          <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-            className="bg-[#F2F6F8] border border-[#D8E3EB] rounded-lg px-2 py-1 text-[11px] font-bold text-[#0B1F3A]"
-          >
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {isAr ? m.ar : m.en}
-              </option>
-            ))}
-          </select>
-        </div>
-
         <div className="flex gap-2">
           <input
             type="text"
@@ -761,12 +862,12 @@ export default function CoachAICopilot({
                 ? "اكتب سؤالك (توظيف لاعب، رسم خطة، حصة تدريبية...)"
                 : "Ask about player deployment, 3-phase blueprint, training..."
             }
-            className="flex-1 rounded-xl bg-[#F2F6F8] border border-[#D8E3EB] px-3 py-2 text-xs text-[#0B1F3A] focus:outline-none focus:border-[#0FB5AE]"
+            className="flex-1 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-slate-400"
           />
           <button
             type="submit"
             disabled={sending || !input.trim()}
-            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#0FB5AE] to-[#0055FF] text-white font-extrabold text-xs disabled:opacity-40 flex items-center gap-1"
+            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs disabled:opacity-40 flex items-center gap-1"
           >
             <Send className="w-3.5 h-3.5" />
           </button>

@@ -563,9 +563,16 @@ def sync_365scores_club_squad(
         fpos_ar = str((ath.get("formationPosition") or {}).get("name") or "").strip()
         pos_ar = str((ath.get("position") or {}).get("name") or "").strip()
 
-        if fpos_en.lower() == "coach" or pos_ar == "الإدارة" or (ath.get("position") is None and "coach" in fpos_en.lower()):
-            head_coach_ar = str(ath.get("name") or "").strip()
-            head_coach_en = str(a_en.get("name") or head_coach_ar).strip()
+        role_txt = f"{fpos_en} {pos_en} {fpos_ar} {pos_ar}".lower()
+        age_chk = _safe_int(ath.get("age"), 0)
+        is_staff = any(
+            cw in role_txt
+            for cw in ("coach", "manager", "staff", "assistant", "مدرب", "إدارة", "الإدارة", "طاقم", "المدير")
+        ) or (age_chk >= 42 and _safe_int(ath.get("jerseyNum"), 0) == 0)
+        if is_staff:
+            if not head_coach_ar and any(cw in role_txt for cw in ("coach", "manager", "مدرب", "المدير")):
+                head_coach_ar = str(ath.get("name") or "").strip()
+                head_coach_en = str(a_en.get("name") or head_coach_ar).strip()
             continue
 
         num = _safe_int(ath.get("jerseyNum"), 0)
@@ -1456,3 +1463,97 @@ def fetch_league_clubs_light(
 
     items.sort(key=lambda x: (x["live_rank"] or 999, -x["player_count"], x["name_en"]))
     return items
+
+
+_CLUB_SCHED_CACHE: dict[int, tuple[float, dict[str, Any]]] = {}
+
+
+def resolve_365_competitor_id(club_id: str, team_name: str = "") -> Optional[int]:
+    """Resolve a 365Scores numeric competitor ID from club_id, preset, or search."""
+    cid = str(club_id or "").strip()
+    if cid.startswith("ts365_") and cid[6:].isdigit():
+        return int(cid[6:])
+    preset = EGYPTIAN_CLUB_PRESETS.get(cid)
+    if preset and preset.get("ts_365_id"):
+        return int(preset["ts_365_id"])
+    q = (team_name or cid.replace("_", " ")).strip()
+    if not q:
+        return None
+    try:
+        with httpx.Client(headers=THREESIXFIVE_HEADERS, timeout=6.0) as client:
+            r = client.get(
+                "https://webws.365scores.com/web/search/",
+                params={"appTypeId": 5, "langId": 27, "query": q},
+            )
+            if r.status_code == 200:
+                comps = r.json().get("competitors") or []
+                if comps and comps[0].get("id"):
+                    return int(comps[0]["id"])
+    except Exception:
+        pass
+    return None
+
+
+def fetch_club_live_schedule(comp_id: int) -> dict[str, Any]:
+    """Fetch upcoming fixtures and recent official results for a club across competitions."""
+    now = time.time()
+    cached = _CLUB_SCHED_CACHE.get(int(comp_id))
+    if cached and (now - cached[0]) < 600.0:
+        return cached[1]
+
+    upcoming: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
+
+    def _parse_game(g: dict[str, Any], is_result: bool) -> dict[str, Any]:
+        hc = g.get("homeCompetitor") or {}
+        ac = g.get("awayCompetitor") or {}
+        hid = int(hc.get("id") or 0)
+        aid = int(ac.get("id") or 0)
+        hver = _safe_int(hc.get("imageVersion"), 1)
+        aver = _safe_int(ac.get("imageVersion"), 1)
+        h_score = _safe_int(hc.get("score"), 0) if is_result and hc.get("score") is not None else None
+        a_score = _safe_int(ac.get("score"), 0) if is_result and ac.get("score") is not None else None
+        outcome = None
+        if is_result and h_score is not None and a_score is not None:
+            if hid == int(comp_id):
+                outcome = "W" if h_score > a_score else ("L" if h_score < a_score else "D")
+            elif aid == int(comp_id):
+                outcome = "W" if a_score > h_score else ("L" if a_score < h_score else "D")
+        return {
+            "event_id": str(g.get("id") or ""),
+            "competition": str(g.get("competitionDisplayName") or ""),
+            "date_utc": str(g.get("startTime") or ""),
+            "status": str(g.get("statusText") or ("انتهت" if is_result else "مجدولة")),
+            "home_id": hid,
+            "away_id": aid,
+            "home_team": str(hc.get("name") or ""),
+            "away_team": str(ac.get("name") or ""),
+            "home_score": h_score,
+            "away_score": a_score,
+            "outcome": outcome,
+            "is_home": hid == int(comp_id),
+            "home_logo": f"https://imagecache.365scores.com/image/upload/f_png,w_64,h_64,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/v{hver}/Competitors/{hid}" if hid else "",
+            "away_logo": f"https://imagecache.365scores.com/image/upload/f_png,w_64,h_64,c_limit,q_auto:eco,dpr_2,d_Competitors:default1.png/v{aver}/Competitors/{aid}" if aid else "",
+        }
+
+    try:
+        with httpx.Client(headers=THREESIXFIVE_HEADERS, timeout=7.5) as client:
+            rf = client.get(
+                "https://webws.365scores.com/web/games/fixtures/",
+                params={"appTypeId": 5, "langId": 27, "timezoneName": "Africa/Cairo", "competitors": int(comp_id)},
+            )
+            if rf.status_code == 200:
+                upcoming = [_parse_game(g, False) for g in (rf.json().get("games") or [])[:8]]
+            rr = client.get(
+                "https://webws.365scores.com/web/games/results/",
+                params={"appTypeId": 5, "langId": 27, "timezoneName": "Africa/Cairo", "competitors": int(comp_id)},
+            )
+            if rr.status_code == 200:
+                results = [_parse_game(g, True) for g in (rr.json().get("games") or [])[:8]]
+    except Exception:
+        pass
+
+    payload = {"upcoming_matches": upcoming, "recent_results": results}
+    if upcoming or results:
+        _CLUB_SCHED_CACHE[int(comp_id)] = (now, payload)
+    return payload

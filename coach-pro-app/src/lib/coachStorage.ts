@@ -14,6 +14,7 @@ import type {
 
 const KEY_PROFILE = "egy_scout_coach_profile_v2";
 const KEY_PLANS_PREFIX = "egy_scout_plans_v2_";
+const KEY_GENERAL_PLAN_PREFIX = "egy_scout_general_plan_v2_";
 const KEY_SESSIONS_PREFIX = "egy_scout_sessions_v2_";
 const KEY_ADMIN_PREFIX = "egy_scout_admin_v2_";
 const KEY_CLUBS_PREFIX = "egy_scout_league_clubs_v2_";
@@ -80,6 +81,28 @@ export function deleteLocalPlan(clubId: string, planId: string): SavedTacticalPl
   const next = loadSavedPlans(clubId).filter((p) => p.plan_id !== planId);
   safeWrite(`${KEY_PLANS_PREFIX}${clubId}`, next);
   return next;
+}
+
+export function loadGeneralPlan(clubId: string): SavedTacticalPlan | null {
+  const direct = safeRead<SavedTacticalPlan | null>(`${KEY_GENERAL_PLAN_PREFIX}${clubId}`, null);
+  if (direct && direct.phases) return direct;
+  const fromList = loadSavedPlans(clubId).find(
+    (p) => p.is_general || p.plan_id === `general_${clubId}`
+  );
+  return fromList && fromList.phases ? fromList : null;
+}
+
+export function saveGeneralPlan(clubId: string, plan: SavedTacticalPlan): SavedTacticalPlan {
+  const normalized: SavedTacticalPlan = {
+    ...plan,
+    plan_id: `general_${clubId}`,
+    club_id: clubId,
+    is_general: true,
+    updated_at: new Date().toISOString(),
+  };
+  safeWrite(`${KEY_GENERAL_PLAN_PREFIX}${clubId}`, normalized);
+  saveLocalPlan(clubId, normalized);
+  return normalized;
 }
 
 export function loadSavedSessions(clubId: string): TrainingSessionPlan[] {

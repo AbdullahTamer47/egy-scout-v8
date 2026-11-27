@@ -14,7 +14,7 @@ import {
 } from "./coachTypes";
 
 import { COACH_LEAGUES as TD_COACH_LEAGUES } from "./coachTypes";
-import { Sparkles as TdSparkles, ShieldPlus as TdShieldPlus } from "lucide-react";
+import { SlidersHorizontal as TdSparkles, ShieldPlus as TdShieldPlus } from "lucide-react";
 import { loadCachedLeagueClubs as tdLoadCachedClubs, saveCachedLeagueClubs as tdSaveCachedClubs } from "@/lib/coachStorage";
 
 interface Props {
@@ -28,6 +28,7 @@ interface Props {
   onAskAiAboutPlayer?: (player: CoachPlayer, ownerClub?: CoachClubDetail) => void;
   onAskAiAboutClub?: (targetClub: CoachClubDetail) => void;
   onOpenOpponentPicker?: () => void;
+  onClubStatsSynced?: (updatedClub: CoachClubDetail) => void;
 }
 
 export default function TechnicalDirectorHub({
@@ -41,6 +42,7 @@ export default function TechnicalDirectorHub({
   onAskAiAboutPlayer,
   onAskAiAboutClub,
   onOpenOpponentPicker,
+  onClubStatsSynced,
 }: Props) {
   const isAr = lang === "ar";
   const [subView, setSubView] = useState<"club_depth" | "egypt_scout">("club_depth");
@@ -59,6 +61,31 @@ export default function TechnicalDirectorHub({
 
   const [scoutLeague, setScoutLeague] = useState<string>(club.league_id || "egy.1");
   const [scoutClubs, setScoutClubs] = useState<CoachClubListItem[]>(clubs);
+  const [syncingStats, setSyncingStats] = useState(false);
+  const [statsMsg, setStatsMsg] = useState<string | null>(null);
+
+  const handleSyncClubStats = async () => {
+    setSyncingStats(true);
+    setStatsMsg(null);
+    try {
+      const res = await apiFetch<{ synced_count: number; club: CoachClubDetail }>(
+        `/api/coach/clubs/${encodeURIComponent(club.club_id)}/sync-stats?league=${encodeURIComponent(club.league_id || "egy.1")}`,
+        { method: "POST" },
+        "club_demo_egypt",
+        "coach"
+      );
+      if (res.club) onClubStatsSynced?.(res.club);
+      setStatsMsg(
+        isAr
+          ? `✓ تم تحديث إحصائيات ${res.synced_count} لاعباً بنجاح`
+          : `✓ Synced live stats for ${res.synced_count} players`
+      );
+    } catch {
+      setStatsMsg(isAr ? "تعذر تحديث كل الإحصائيات حالياً" : "Sync unavailable");
+    } finally {
+      setSyncingStats(false);
+    }
+  };
 
   useEffect(() => {
     if (subView !== "egypt_scout") return;
@@ -402,10 +429,10 @@ export default function TechnicalDirectorHub({
                           players: [],
                         });
                       }}
-                      className="mt-1.5 w-full inline-flex items-center justify-center gap-1 py-1.5 rounded-lg bg-[#E6F8F7] hover:bg-[#0D717A] text-[#0D717A] hover:text-white border border-[#0FB5AE]/40 text-[10px] font-extrabold transition"
+                      className="mt-1.5 w-full inline-flex items-center justify-center gap-1 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-900 text-slate-800 hover:text-white border border-slate-200 text-[10px] font-bold transition"
                     >
                       <TdSparkles className="w-3 h-3" />
-                      {isAr ? "توظيف بالـ AI" : "AI Role Analysis"}
+                      {isAr ? "توظيف تكتيكي" : "Tactical Role"}
                     </button>
                   )}
                 </div>
@@ -494,10 +521,10 @@ export default function TechnicalDirectorHub({
                     <button
                       type="button"
                       onClick={() => onAskAiAboutClub(club)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#E6F8F7] border border-[#0FB5AE]/40 text-[#0D717A] text-[10px] font-extrabold hover:bg-[#0D717A] hover:text-white transition"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-800 text-[10px] font-bold hover:bg-slate-900 hover:text-white transition"
                     >
                       <TdSparkles className="w-3 h-3" />
-                      {isAr ? "تحليل الفريق بالـ AI" : "AI Club Audit"}
+                      {isAr ? "تحليل الفريق" : "Club Audit"}
                     </button>
                   )}
                   {onOpenOpponentPicker && (
@@ -571,14 +598,23 @@ export default function TechnicalDirectorHub({
                     type="button"
                     onClick={() => setPosFilter(p)}
                     className={`px-2 py-1 rounded-lg font-bold ${
-                      posFilter === p ? "bg-emerald-600 text-white" : "bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100"
+                      posFilter === p ? "bg-slate-900 text-white" : "bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100"
                     }`}
                   >
                     {p === "ALL" ? (isAr ? "الكل" : "All") : p}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={handleSyncClubStats}
+                  disabled={syncingStats}
+                  className="px-2.5 py-1 rounded-lg bg-[#15803D] hover:bg-[#166534] text-white font-bold disabled:opacity-50"
+                >
+                  {syncingStats ? (isAr ? "جاري الاستيراد..." : "Importing...") : isAr ? "استيراد إحصائيات النادي لايف" : "Import Live Stats"}
+                </button>
               </div>
             </div>
+            {statsMsg && <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-[#15803D]">{statsMsg}</div>}
 
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5">
               {filteredPlayers.map((p) => {
@@ -635,10 +671,10 @@ export default function TechnicalDirectorHub({
                       <button
                         type="button"
                         onClick={() => onAskAiAboutPlayer(p, activeClub)}
-                        className="w-full inline-flex items-center justify-center gap-1 py-1 rounded-lg bg-[#E6F8F7] hover:bg-[#0D717A] text-[#0D717A] hover:text-white border border-[#0FB5AE]/30 text-[10px] font-extrabold transition"
+                        className="w-full inline-flex items-center justify-center gap-1 py-1 rounded-lg bg-slate-100 hover:bg-slate-900 text-slate-800 hover:text-white border border-slate-200 text-[10px] font-bold transition"
                       >
                         <TdSparkles className="w-3 h-3" />
-                        {isAr ? "اسأل الـ AI عن توظيفه" : "Ask AI Role"}
+                        {isAr ? "توظيف اللاعب" : "Player Role"}
                       </button>
                     </div>
                   )}

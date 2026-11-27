@@ -8,12 +8,14 @@ from typing import Any, Optional
 
 import httpx
 
+from packages.coach_engine.club_tactical_profiles import get_club_tactical_profile
 from packages.coach_engine.director_admin import (
     _assign_roster_by_position,
     build_official_matchday_sheet,
     build_squad_depth_report,
 )
 from packages.coach_engine.live_research import research_player_live
+from packages.coach_engine.match_simulator import suggest_tactical_lineup_swaps
 from packages.coach_engine.training_planner import generate_custom_session_plan
 from packages.tactics_engine.moment_analyzer import (
     build_formation_blueprint,
@@ -323,13 +325,17 @@ def build_three_phase_tactical_package(
         "team_b_hex": str(opponent.get("kit_hex") or "#38BDF8"),
     }
 
-    # Phase 1: Possession (في حالة الاستحواذ والبناء)
-    pos_a = copy.deepcopy(bp_pos["nodes"])
+    club_prof = get_club_tactical_profile(club)
+    base_lh = club_prof.get("line_height", "mid")
+    lh_shift = {"low": -4.0, "mid": 0.0, "high": 4.5}.get(base_lh, 0.0)
+
+    # Phase 2: Possession (الاستحواذ والبناء)
+    pos_a = _shift_phase_nodes(pos_a_raw := copy.deepcopy(bp_pos["nodes"]), dx_outfield=lh_shift * 0.5, x_compress=1.0, y_compress=1.0, min_x=10.0, max_x=94.0) if lh_shift else copy.deepcopy(bp_pos["nodes"])
     pos_b = copy.deepcopy(bp_pos.get("opponent_nodes", []))
     pos_arrows = enrich_arrows_with_probabilities(bp_pos.get("passing_arrows", []), pos_a, pos_b, attack_right=True)
     pos_opp_arrows = enrich_arrows_with_probabilities(bp_pos.get("opponent_passing_arrows", []), pos_b, pos_a, attack_right=False)
 
-    # Phase 2: Attack / Final-Third Penetration (في حالة الهجوم والاختراق)
+    # Phase 3: Attack / Final-Third Penetration (الهجوم والإنهاء)
     att_a = _shift_phase_nodes(pos_a, dx_outfield=+13.5, x_compress=0.92, y_compress=1.06, min_x=18.0, max_x=98.0)
     att_b = _shift_phase_nodes(pos_b, dx_outfield=+12.0, x_compress=0.82, y_compress=0.84, min_x=15.0, max_x=96.0)
     att_arrows_raw = []
@@ -361,8 +367,8 @@ def build_three_phase_tactical_package(
     att_arrows = enrich_arrows_with_probabilities(att_arrows_raw or pos_arrows, att_a, att_b, attack_right=True)
     att_opp_arrows = enrich_arrows_with_probabilities(bp_pos.get("opponent_passing_arrows", []), att_b, att_a, attack_right=False)
 
-    # Phase 3: Defense & Ball Recovery (في حالة قطع الكرة والدفاع)
-    def_a = _shift_phase_nodes(pos_a, dx_outfield=-14.0, x_compress=0.78, y_compress=0.78, min_x=10.0, max_x=82.0)
+    # Phase 1: Defense & Ball Recovery (الدفاع وقطع الكرة)
+    def_a = _shift_phase_nodes(pos_a, dx_outfield=-14.0 + lh_shift * 0.4, x_compress=0.78, y_compress=0.78, min_x=10.0, max_x=82.0)
     def_b = _shift_phase_nodes(pos_b, dx_outfield=-11.5, x_compress=0.95, y_compress=1.05, min_x=12.0, max_x=94.0)
     def_press_arrows = []
     sorted_def_a = sorted([n for n in def_a if n.get("slot") != "GK"], key=lambda n: float(n.get("x_m") or 0.0), reverse=True)
@@ -387,40 +393,13 @@ def build_three_phase_tactical_package(
         )
     def_opp_arrows = enrich_arrows_with_probabilities(bp_pos.get("opponent_passing_arrows", []), def_b, def_a, attack_right=False)
 
+    shapes = club_prof.get("phase_shapes") or {}
     phase_states = {
-        "possession": {
-            "phase_id": "possession",
-            "label_ar": "في حالة الاستحواذ والبناء",
-            "label_en": "In Possession (Build-up)",
-            "description_ar": f"توزيع {team_name} لتدوير الكرة وبناء الهجمة من الخلف مع فتح زوايا التمرير أمام {opp_name}.",
-            "nodes": pos_a,
-            "opponent_nodes": pos_b,
-            "passing_arrows": pos_arrows,
-            "opponent_passing_arrows": pos_opp_arrows,
-            "custom_arrows": [],
-            "custom_links": [],
-            "custom_zones": [],
-            "validation": validate_tactical_plan(pos_a, pos_b, formation_code=base_form),
-        },
-        "attack": {
-            "phase_id": "attack",
-            "label_ar": "في حالة الهجوم والاختراق",
-            "label_en": "Attacking (Final Third)",
-            "description_ar": f"اندفاع {team_name} للثلث الأخير والمنطقة 14 وأطراف الملعب بينما يتكتل {opp_name} في عمقه الدفاعي.",
-            "nodes": att_a,
-            "opponent_nodes": att_b,
-            "passing_arrows": att_arrows,
-            "opponent_passing_arrows": att_opp_arrows,
-            "custom_arrows": [],
-            "custom_links": [],
-            "custom_zones": [{"id": "atk-z14", "x1_m": 68.0, "y1_m": 22.0, "x2_m": 88.5, "y2_m": 46.0, "label_ar": "Zone 14", "color": "#F59E0B"}],
-            "validation": validate_tactical_plan(att_a, att_b, formation_code=base_form),
-        },
         "defense": {
             "phase_id": "defense",
-            "label_ar": "في حالة قطع الكرة والدفاع",
-            "label_en": "Defense & Ball Recovery",
-            "description_ar": f"انضغاط خطوط {team_name} وتضييق المساحات العرضية وإغلاق العمق مع مصائد ضغط لاسترجاع الكرة من {opp_name}.",
+            "label_ar": "3. الدفاع وقطع الكرة",
+            "label_en": "3. Defense & Ball Recovery",
+            "description_ar": f"تنظيم {team_name} الدفاعي ({shapes.get('defense', '4-4-2')}) لتضييق المساحات وإغلاق العمق ومصائد الضغط ضد {opp_name}.",
             "nodes": def_a,
             "opponent_nodes": def_b,
             "passing_arrows": def_press_arrows,
@@ -428,10 +407,42 @@ def build_three_phase_tactical_package(
             "custom_arrows": [],
             "custom_links": [],
             "custom_zones": [{"id": "def-block", "x1_m": 16.0, "y1_m": 15.0, "x2_m": 44.0, "y2_m": 53.0, "label_ar": "كتلة الإغلاق", "color": "#EF4444"}],
+            "extra_markers": [],
             "validation": validate_tactical_plan(def_a, def_b, formation_code=base_form),
+        },
+        "possession": {
+            "phase_id": "possession",
+            "label_ar": "2. الاستحواذ وبناء اللعب",
+            "label_en": "2. In Possession (Build-up)",
+            "description_ar": f"تدرّج {team_name} بالكرة ({shapes.get('possession', base_form)}) وفتح زوايا التمرير لبناء الهجمة المنظمة أمام {opp_name}.",
+            "nodes": pos_a,
+            "opponent_nodes": pos_b,
+            "passing_arrows": pos_arrows,
+            "opponent_passing_arrows": pos_opp_arrows,
+            "custom_arrows": [],
+            "custom_links": [],
+            "custom_zones": [],
+            "extra_markers": [],
+            "validation": validate_tactical_plan(pos_a, pos_b, formation_code=base_form),
+        },
+        "attack": {
+            "phase_id": "attack",
+            "label_ar": "1. الهجوم والإنهاء",
+            "label_en": "1. Attacking (Final Third)",
+            "description_ar": f"اندفاع {team_name} ({shapes.get('attack', '3-2-5')}) نحو الثلث الأخير والممرات النصفية بينما يتراجع {opp_name}.",
+            "nodes": att_a,
+            "opponent_nodes": att_b,
+            "passing_arrows": att_arrows,
+            "opponent_passing_arrows": att_opp_arrows,
+            "custom_arrows": [],
+            "custom_links": [],
+            "custom_zones": [{"id": "atk-z14", "x1_m": 68.0, "y1_m": 22.0, "x2_m": 88.5, "y2_m": 46.0, "label_ar": "Zone 14", "color": "#F59E0B"}],
+            "extra_markers": [],
+            "validation": validate_tactical_plan(att_a, att_b, formation_code=base_form),
         },
     }
 
+    bp_pos["tactical_profile"] = club_prof
     bp_pos["validation"] = phase_states["possession"]["validation"]
     bp_pos["phase_states"] = phase_states
     return bp_pos
@@ -559,13 +570,33 @@ def run_coach_copilot_chat(
         f"حلل التشكيل الأنسب وأبرز نقاط القوة في {club.get('name_ar')}",
     ]
 
-    # Always run live search BEFORE deciding if this is a player-focused inquiry
-    is_player_query = bool(target_player) or any(
+    want_tactics = (not target_player) and any(
         kw in low
         for kw in (
-            "توظيف", "توضيف", "مركز", "احطه", "أحطه", "فين", "الاعبه", "العبه", "الالعبه",
-            "مميزات", "عيوب", "نقاط", "لاعب", "دور", "اداء", "أداء", "تطوير",
-            "role", "deploy", "position", "strengths", "weaknesses", "profile",
+            "ارسم", "رسم", "خطة", "خطط", "3 خطط", "3 حالات", "ال3 حالات", "ثلاث حالات",
+            "تكتيك", "تشكيل", "ترشيح", "رشح", "تغيير اللاعبين", "تغير اللاعيبه", "تبديل",
+            "3-4-2-1", "3421", "4-3-3", "433", "4-2-3-1", "4231", "3-5-2", "352",
+            "4-4-2", "5-3-2", "3-2-4-1", "tactic", "formation", "lineup",
+        )
+    )
+    want_training = any(
+        kw in low
+        for kw in ("صمم وحدة", "وحدة تدريبية", "حصة تدريب", "روندو", "md-", "md+", "build session", "training session")
+    )
+    want_matchday = any(
+        kw in low
+        for kw in ("كشف المباراة", "اسكور شيت", "matchday", "lineup sheet")
+    )
+
+    is_player_query = bool(target_player) or (
+        (not want_tactics and not want_training and not want_matchday)
+        and any(
+            kw in low
+            for kw in (
+                "توظيف", "توضيف", "مركز", "احطه", "أحطه", "فين", "الاعبه", "العبه", "الالعبه",
+                "مميزات", "عيوب", "نقاط", "لاعب", "دور", "اداء", "أداء", "تطوير",
+                "role", "deploy", "position", "strengths", "weaknesses", "profile",
+            )
         )
     )
     researched_player: Optional[dict[str, Any]] = None
@@ -579,24 +610,9 @@ def run_coach_copilot_chat(
             history=history,
         )
 
-    want_tactics = (not target_player) and any(
-        kw in low
-        for kw in (
-            "ارسم", "رسم", "خطة 3", "خطة 4", "خطة 5", "تكتيك", "تشكيل الفريق",
-            "3-4-2-1", "3421", "4-3-3", "433", "4-2-3-1", "4231", "3-5-2", "352", "4-4-2", "5-3-2", "3-2-4-1", "tactic", "formation",
-        )
-    )
-    want_training = any(
-        kw in low
-        for kw in ("صمم وحدة", "وحدة تدريبية", "حصة تدريب", "روندو", "md-", "md+", "build session", "training session")
-    )
-    want_matchday = any(
-        kw in low
-        for kw in ("كشف المباراة", "اسكور شيت", "matchday", "lineup sheet")
-    )
-
     resolved_form = _detect_formation_code(q, formation_code)
     preset = match_masterclass_preset(q)
+    ai_lineup_swaps: Optional[dict[str, Any]] = None
 
     if (want_tactics or preset) and not researched_player:
         action_executed = "apply_tactics"
@@ -613,6 +629,12 @@ def run_coach_copilot_chat(
             opponent_tactical_mode=opponent_tactical_mode or "balanced",
             masterclass_preset=preset,
         )
+        ai_lineup_swaps = suggest_tactical_lineup_swaps(
+            club=club,
+            formation_code=resolved_form,
+            current_nodes=ai_blueprint.get("nodes") or [],
+            opponent=opponent,
+        )
         structured_cards.append(
             {
                 "type": "tactics_applied",
@@ -620,7 +642,7 @@ def run_coach_copilot_chat(
                 "fit_used": len(fit_players),
                 "excluded": len(unavail),
                 "formation": resolved_form,
-                "phases": ["possession", "attack", "defense"],
+                "phases": ["defense", "possession", "attack"],
             }
         )
 
@@ -697,24 +719,34 @@ def run_coach_copilot_chat(
     candidate_models = list(dict.fromkeys([primary_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]))
 
     if api_key:
+        swap_note = ""
+        if ai_lineup_swaps and ai_lineup_swaps.get("suggestions"):
+            swap_lines = [
+                f"- ({s['slot']}): إشراك #{s['in_jersey']} {s['in_name_ar']} ({s['in_pos']}) بدلاً من #{s['out_jersey']} {s['out_name_ar']} ({s['out_pos']}) — {s['reason_ar']}"
+                for s in ai_lineup_swaps["suggestions"][:5]
+            ]
+            swap_note = "\n\n=== تبديلات وترشيحات التشكيل الموصى بها ===\n" + "\n".join(swap_lines)
+
         system_prompt = (
-            "أنت الخبير التكتيكي ومساعد المدرب الذكي في EGY-SCOUT Coach Pro.\n"
+            "أنت الخبير التكتيكي ومساعد المدرب في EGY-SCOUT Coach Pro.\n"
             "قواعد صارمة:\n"
-            "1. اعتمد على البحث الحي وبيانات القائمة الكاملة المرفقة، ولا تخترع أي رقم أو إحصائية غير موجودة.\n"
-            "2. إذا سأل المدرب عن لاعب معين (توظيفه، مركزه، مميزاته وعيوبه، أو كيف يدربه): أجب فوراً بتحليل مباشر ومنظم يشمل:\n"
-            "   - المركز الأساسي والبديل بناءً على البيانات الحية الموثقة.\n"
-            "   - أين تضعه بالضبط في التشكيل المطلوب وما أدواره في الحالات الثلاث (الاستحواذ / الهجوم / الدفاع).\n"
-            "   - المميزات ونقاط الانتباه المستخلصة من مركزه الفعلي وأرقامه الموثقة وأسلوب لعبه، مع الإشارة بوضوح لما هو غير متوفر إن وُجد.\n"
-            "   - توصية تدريبية عملية خاصة به.\n"
-            "3. أكمل إجابتك للنهاية بشكل واضح ومختصر ومفيد دون قطع الجمل.\n\n"
-            f"البيانات الحية الموثّقة الآن:\n{ctx_block}{research_block}"
+            "1. اعتمد على بيانات القائمة الكاملة المرفقة فقط؛ لا تخترع أرقاماً غير موجودة، ولا تضع حارس مرمى (GK) أبداً في مركز لاعب ميدان.\n"
+            "2. عند طلب رسم أو بناء 3 خطط للحالات الثلاث، التزم بهذا الترتيب الدقيق:\n"
+            "   **1. حالة الهجوم والإنهاء**\n"
+            "   **2. حالة الاستحواذ وبناء اللعب**\n"
+            "   **3. حالة الدفاع وقطع الكرة**\n"
+            "   واكتب نقاطاً مركزة ومنظمة (تجنب الجداول الطويلة المرهقة) تشمل التشكيل الأساسي والأدوار والبدلاء المرشحين، وأنهِ كل الجمل بشكل مكتمل.\n"
+            "3. عند السؤال عن لاعب معين: أجب مباشرة بتحليل مركزه الأصلي، توظيفه، نقاط القوة/الانتباه، وتوصية التدريب.\n"
+            "4. خاطب المدرب بالاسم المذكور بدون تكرار كلمة كابتن إذا كانت موجودة في الاسم.\n"
+            "5. لا تذكر أبداً أسماء مزودي البيانات أو نماذج الذكاء الاصطناعي التقنية (مثل 365Scores أو ESPN أو TheSportsDB أو Groq) في إجابتك؛ اعرض التحليل الكروي والبيانات مباشرة بشكل احترافي.\n\n"
+            f"البيانات الحية الموثّقة الآن:\n{ctx_block}{research_block}{swap_note}"
         )
         msgs: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
         for h in (history or [])[-10:]:
             if h.get("role") in ("user", "assistant") and h.get("content"):
                 msgs.append({"role": h["role"], "content": str(h["content"])[:900]})
         action_note = (
-            f"\n[تم رسم خطة {resolved_form} بالحالات الثلاث لـ {len(fit_players)} لاعب جاهز.]"
+            f"\n[تم رسم خطة {resolved_form} بالحالات الثلاث في السبورة لـ {len(fit_players)} لاعب جاهز.]"
             if ai_blueprint
             else f"\n[تم توليد وحدة تدريبية {ai_training_session['md_code']} بحمل {ai_training_session['srpe_au']} AU.]"
             if ai_training_session
@@ -729,7 +761,7 @@ def run_coach_copilot_chat(
                 r = httpx.post(
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json={"model": m_id, "messages": msgs, "temperature": 0.2, "max_tokens": 1800},
+                    json={"model": m_id, "messages": msgs, "temperature": 0.2, "max_tokens": 3000},
                     timeout=22.0,
                 )
                 if r.status_code == 200:
@@ -741,14 +773,18 @@ def run_coach_copilot_chat(
                 continue
 
     if not answer_text:
-        greet = f"مرحباً كابتن **{coach_name}**"
+        clean_coach = (coach_name or "").strip()
+        if clean_coach.startswith("كابتن") or clean_coach.startswith("ك.") or clean_coach.lower().startswith("coach"):
+            greet = f"مرحباً **{clean_coach}**"
+        else:
+            greet = f"مرحباً كابتن **{clean_coach}**"
         if researched_player:
             tp = researched_player.get("tactical_profile") or {}
             stats = researched_player.get("season_stats") or {}
             comp_str = " | ".join(stats.get("competitions") or []) or "قيد التحديث من البطولة الحالية"
             answer_text = (
                 f"{greet} — **تقرير البحث الحي وتوظيف اللاعب: {researched_player.get('name_ar')}** ({researched_player.get('club_name_ar')}):\n\n"
-                f"1. **البيانات والمركز الموثق (`365Scores 2026/27`):**\n"
+                f"1. **البيانات والمركز الحالي (موسم 2026/27):**\n"
                 f"- القميص: `#{researched_player.get('jersey_number') or '-'}` | المركز الأصلي: **{researched_player.get('position_label_ar')} ({researched_player.get('position_code')})**\n"
                 f"- العمر: {researched_player.get('age') or '-'} سنة | الطول: {researched_player.get('height_cm') or '-'} سم | الجاهزية: **{researched_player.get('readiness_pct', 100)}%**\n"
                 f"- إحصائيات 2026/27: {comp_str}\n\n"
@@ -784,11 +820,15 @@ def run_coach_copilot_chat(
                 f"- تنبيهات العمق: {alerts}"
             )
 
+    answer_text = re.sub(r"كابتن\s+\*\*كابتن\s+", "**كابتن ", answer_text)
+    answer_text = re.sub(r"كابتن\s+كابتن", "كابتن", answer_text)
+
     return {
         "answer_ar": answer_text,
         "engine": engine_used,
         "action_executed": action_executed,
         "ai_drawing_blueprint": ai_blueprint,
+        "ai_lineup_swaps": ai_lineup_swaps,
         "ai_training_session": ai_training_session,
         "ai_matchday_sheet": ai_matchday_sheet,
         "researched_player": researched_player,

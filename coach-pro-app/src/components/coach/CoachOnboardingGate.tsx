@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, CheckCircle2, Globe, Search, Shield, Sparkles, UserCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, Globe, Search, Shield, UserCheck } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { loadCachedLeagueClubs, saveCachedLeagueClubs } from "@/lib/coachStorage";
 import BedigitalBrandMark from "./BedigitalBrandMark";
@@ -116,9 +116,13 @@ export default function CoachOnboardingGate({
 
   const handleSelectLeagueCard = (lid: string) => {
     setSelectedLeague(lid);
-    if (!oppLeague) setOppLeague(lid);
+    if (!oppLeague || lid !== initialProfile?.league_id) {
+      setOppLeague(lid);
+    }
     if (lid !== initialProfile?.league_id) {
       setClubId("");
+      setWantOpponentNow(false);
+      setOpponentId("none");
     }
     setErrorMsg("");
   };
@@ -143,28 +147,28 @@ export default function CoachOnboardingGate({
   };
 
   return (
-    <div dir={isAr ? "rtl" : "ltr"} className="coach-light min-h-[100dvh] bg-gradient-to-br from-[#E6F8F7] via-[#F4F7FA] to-[#EBF5FE] text-slate-900 flex items-center justify-center p-3 sm:p-6">
+    <div dir={isAr ? "rtl" : "ltr"} className="coach-light min-h-[100dvh] bg-[#F5F6F8] text-slate-900 flex items-center justify-center p-3 sm:p-6">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-5xl rounded-3xl bg-white border border-[#D8E3EB] shadow-xl shadow-slate-900/5 overflow-hidden"
+        className="w-full max-w-5xl rounded-2xl bg-white border border-slate-200 shadow-sm overflow-hidden"
       >
-        {/* Top Hero Banner + Stepper */}
-        <div className="px-5 sm:px-6 py-4 bg-gradient-to-l from-[#E6F8F7] via-white to-[#F2F6F8] border-b border-[#D8E3EB] flex flex-wrap items-center justify-between gap-3">
+        {/* Top Clean Editorial Header + Stepper */}
+        <div className="px-4 sm:px-6 py-4 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <BedigitalBrandMark showWordmark={false} />
             <div>
-              <h1 className="text-base sm:text-lg font-extrabold text-[#0B1F3A]">
+              <h1 className="text-base sm:text-lg font-extrabold text-slate-900">
                 {isAr ? "EGY-SCOUT Coach Pro — إعداد حساب المدرب" : "EGY-SCOUT Coach Pro — Progressive Setup"}
               </h1>
-              <p className="text-[11px] text-[#5C6A7C]">
+              <p className="text-[11px] text-slate-500">
                 {isAr
-                  ? "1. الاسم والدوري  ←  2. ناديك (تحميل فوري للقائمة والصور)  ←  3. الخصم اختياري"
-                  : "1. League  →  2. Your Club (on-demand roster)  →  3. Optional Opponent"}
+                  ? "1. الاسم والدوري  ←  2. ناديك  ←  3. التشكيل والخصم"
+                  : "1. League  →  2. Your Club  →  3. Setup"}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
             {([1, 2, 3] as const).map((n) => (
               <button
                 key={n}
@@ -172,22 +176,22 @@ export default function CoachOnboardingGate({
                 onClick={() => {
                   if (n === 1 || (n === 2 && selectedLeague) || (n === 3 && clubId)) setStep(n);
                 }}
-                className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold border transition ${
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition whitespace-nowrap ${
                   step === n
-                    ? "bg-[#0D717A] text-white border-[#0D717A]"
+                    ? "bg-slate-900 text-white border-slate-900"
                     : n < step
-                      ? "bg-[#E6F8F7] text-[#0D717A] border-[#0FB5AE]/50"
+                      ? "bg-emerald-50 text-[#15803D] border-emerald-200"
                       : "bg-slate-50 text-slate-400 border-slate-200"
                 }`}
               >
-                {n}. {n === 1 ? (isAr ? "الدوري" : "League") : n === 2 ? (isAr ? "النادي" : "Club") : isAr ? "الخطة والخصم" : "Setup"}
+                {n}. {n === 1 ? (isAr ? "الدوري" : "League") : n === 2 ? (isAr ? "النادي" : "Club") : isAr ? "التشكيل" : "Setup"}
               </button>
             ))}
             {onCancel && (
               <button
                 type="button"
                 onClick={onCancel}
-                className="px-3 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700"
+                className="px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700"
               >
                 {isAr ? "إلغاء" : "Cancel"}
               </button>
@@ -515,20 +519,20 @@ export default function CoachOnboardingGate({
                 <button
                   type="button"
                   onClick={() => setStep(2)}
-                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-extrabold text-slate-700"
+                  className="px-4 py-2.5 min-h-[44px] rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-extrabold text-slate-700"
                 >
                   {isAr ? "السابق: النادي" : "Back"}
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="inline-flex items-center gap-2 px-7 py-3 rounded-2xl bg-[#0D717A] hover:bg-[#0B5E66] text-white font-extrabold text-sm shadow-lg shadow-[#0D717A]/25 disabled:opacity-50 transition"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-3 min-h-[44px] rounded-xl bg-[#15803D] hover:bg-[#166534] text-white font-extrabold text-sm shadow-xs disabled:opacity-50 transition w-full sm:w-auto"
                 >
                   <UserCheck className="w-4 h-4" />
                   <span>
                     {saving
                       ? isAr ? "جاري تحميل لاعبي النادي..." : "Loading squad..."
-                      : isAr ? "دخول إلى غرفة القيادة" : "Enter Workspace"}
+                      : isAr ? "دخول إلى لوحة الفريق" : "Enter Workspace"}
                   </span>
                 </button>
               </div>
@@ -536,8 +540,7 @@ export default function CoachOnboardingGate({
           )}
 
           <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-500 pt-1">
-            <Sparkles className="w-3.5 h-3.5 text-[#0FB5AE]" />
-            <span>{isAr ? "جميع البيانات حية لموسم 2026/27 ويتم حفظ جلستك تلقائياً على جهازك" : "Live 2026/27 data with automatic session persistence"}</span>
+            <span>{isAr ? "بيانات موسم 2026/27 محدثة مع حفظ تلقائي على جهازك" : "Live 2026/27 data with automatic session persistence"}</span>
           </div>
         </div>
       </form>

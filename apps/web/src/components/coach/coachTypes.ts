@@ -26,6 +26,15 @@ export const COACH_LEAGUES: Array<{ id: string; ar: string; en: string; logo: st
   { id: "caf.champions", ar: "أبطال إفريقيا", en: "CAF CL", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/67.png" },
 ];
 
+export function formatCoachName(name: string, isAr: boolean): string {
+  const clean = (name || "")
+    .trim()
+    .replace(/^(?:كابتن|الكابتن|ك\.|Coach|Mr\.?)\s+/i, "")
+    .trim();
+  if (!clean) return isAr ? "المدرب" : "Coach";
+  return isAr ? `كابتن ${clean}` : `Coach ${clean}`;
+}
+
 export interface SavedTacticalPlan {
   plan_id: string;
   club_id: string;
@@ -35,6 +44,7 @@ export interface SavedTacticalPlan {
   phases: Record<TacticalPhaseId, TacticalPhaseSnapshot>;
   lineHeight?: "low" | "mid" | "high";
   pressingStyle?: "contain" | "trigger" | "gegenpress";
+  is_general?: boolean;
   updated_at: string;
 }
 
@@ -76,7 +86,116 @@ export interface ChatMessageItem {
   action?: string;
   researchedPlayer?: ResearchedPlayerDossier | null;
   researchSources?: string[];
+  blueprint?: ThreePhaseBlueprint | null;
+  lineupSwaps?: LineupSwapSuggestion[];
   timestamp?: string;
+}
+
+export interface ClubTacticalProfile {
+  default_formation: string;
+  line_height: "low" | "mid" | "high";
+  pressing_style: "contain" | "trigger" | "gegenpress";
+  phase_shapes?: Record<TacticalPhaseId, string>;
+  identity_ar: string;
+  identity_en?: string;
+  source?: string;
+}
+
+export interface PitchExtraMarker {
+  id: string;
+  kind: "ball" | "cone" | "marker";
+  x_m: number;
+  y_m: number;
+  color?: string;
+  label?: string;
+}
+
+export interface MultiSourcePlayerStats {
+  name_ar: string;
+  name_en?: string;
+  club_name?: string;
+  position_code: string;
+  position_label_ar?: string;
+  age?: number | null;
+  height_cm?: number | null;
+  preferred_foot?: string | null;
+  birth_location?: string | null;
+  bio_summary_en?: string | null;
+  photo_url?: string | null;
+  injury?: string | null;
+  metrics: {
+    appearances?: number | null;
+    starts?: number | null;
+    minutes?: number | null;
+    goals?: number | null;
+    assists?: number | null;
+    shots?: number | null;
+    shots_on_target?: number | null;
+    shot_accuracy_pct?: number | null;
+    goals_per_90?: number | null;
+    assists_per_90?: number | null;
+    ga_per_90?: number | null;
+    start_rate_pct?: number | null;
+    yellow_cards?: number | null;
+    red_cards?: number | null;
+    fouls_suffered?: number | null;
+    impact_rating?: number | null;
+  };
+  competitions?: Array<{
+    competition: string;
+    appearances: number;
+    starts: number;
+    goals: number;
+    assists: number;
+    yellow_cards: number;
+    red_cards: number;
+  }>;
+  highlights?: string[];
+  recent_matches?: Array<{
+    date: string;
+    opponent: string;
+    score: string;
+    result: string;
+    goals?: string | number | null;
+    assists?: string | number | null;
+    shots?: string | number | null;
+  }>;
+  heatmap_zones: Array<{ x: number; y: number; w: number }>;
+  sources_verified: string[];
+}
+
+export interface LineupSwapSuggestion {
+  slot: string;
+  node_index: number;
+  out_jersey: number | null;
+  out_name_ar: string;
+  out_pos: string;
+  in_jersey: number;
+  in_name_ar: string;
+  in_pos: string;
+  in_photo_url?: string | null;
+  gain_points: number;
+  priority: "urgent" | "tactical";
+  reason_ar: string;
+  tactical_impact_ar: string;
+}
+
+export interface MatchSimulationResult {
+  mode: string;
+  rollouts: number;
+  win_prob_pct: number;
+  draw_prob_pct: number;
+  loss_prob_pct: number;
+  xg_team_a: number;
+  xg_team_b: number;
+  possession_pct_a: number;
+  ppda_a: number;
+  field_tilt_pct_a: number;
+  xi_quality_pct: number;
+  top_scorelines: Array<{ score: string; prob_pct: number }>;
+  momentum_blocks: Array<{ window: string; team_a_xg: number; team_b_xg: number; control_pct: number }>;
+  tactical_insights_ar: string[];
+  risk_warnings_ar: string[];
 }
 
 export interface ChatThread {
@@ -150,7 +269,10 @@ export interface CoachPlayer {
     goals?: number | null;
     assists?: number | null;
     yellow_cards?: number | null;
+    shot_accuracy_pct?: number | null;
+    ga_per_90?: number | null;
   };
+  sources_verified?: string[];
   assigned_slot?: string;
   assigned_role_ar?: string;
 }
@@ -194,6 +316,7 @@ export interface CoachClubDetail {
   verified_at?: string;
   is_live?: boolean;
   logo_url?: string;
+  tactical_profile?: ClubTacticalProfile;
   players: CoachPlayer[];
 }
 
@@ -268,6 +391,7 @@ export interface TacticalPhaseSnapshot {
   custom_links: PlayerTacticalLink[];
   custom_zones: EditableZone[];
   freehand_strokes?: FreehandStroke[];
+  extra_markers?: PitchExtraMarker[];
   validation?: MathValidationResult | null;
 }
 

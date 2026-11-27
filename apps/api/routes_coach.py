@@ -12,6 +12,7 @@ from packages.coach_engine.ai_copilot import (
     build_three_phase_tactical_package,
     run_coach_copilot_chat,
 )
+from packages.coach_engine.club_tactical_profiles import get_club_tactical_profile
 from packages.coach_engine.director_admin import (
     CoachProStore,
     build_official_matchday_sheet,
@@ -26,14 +27,24 @@ from packages.coach_engine.live_data_hub import (
     EGYPTIAN_CLUB_PRESETS,
     SQUAD_CACHE_TTL_SECONDS,
     SUPPORTED_LEAGUES,
+    fetch_club_live_schedule,
     fetch_league_clubs_light,
     fetch_live_league_hub,
     load_all_coach_clubs,
+    resolve_365_competitor_id,
     sync_365scores_club_squad,
     sync_espn_team_roster,
     sync_wikipedia_club_squad,
 )
 from packages.coach_engine.live_research import research_player_live
+from packages.coach_engine.match_simulator import (
+    simulate_tactical_match,
+    suggest_tactical_lineup_swaps,
+)
+from packages.coach_engine.multi_source_stats import (
+    fetch_multi_source_player_stats,
+    sync_club_live_stats_batch,
+)
 from packages.coach_engine.training_planner import (
     PRO_DRILLS_CATALOG,
     WEEKLY_MICROCYCLE_TEMPLATES,
@@ -182,7 +193,9 @@ def api_coach_club_detail(
     ctx.require("read:tactics")
     store = get_coach_store()
     club = _resolve_or_sync_club(store, ctx.tenant_id, club_id, league_id=league, force_refresh=force_refresh)
-    return _enrich_club_with_admin(store, ctx.tenant_id, club)
+    enriched = _enrich_club_with_admin(store, ctx.tenant_id, club)
+    enriched["tactical_profile"] = get_club_tactical_profile(enriched)
+    return enriched
 
 
 @router.get("/overview")
@@ -200,13 +213,17 @@ def api_coach_overview(
     active_league = league or (profile or {}).get("league_id") or "egy.1"
     active_cid = club_id if club_id is not None else (profile or {}).get("club_id") or "al_ahly"
     active_oid = opponent_id if opponent_id is not None else ((profile or {}).get("opponent_id") or "none")
-    active_form = formation or (profile or {}).get("formation") or "4-2-3-1"
 
     club_raw = _resolve_or_sync_club(store, ctx.tenant_id, active_cid, league_id=active_league)
     opp_raw = _resolve_or_sync_club(store, ctx.tenant_id, active_oid, league_id=active_league)
 
     club_enriched = _enrich_club_with_admin(store, ctx.tenant_id, club_raw)
+    tactical_profile = get_club_tactical_profile(club_enriched)
+    club_enriched["tactical_profile"] = tactical_profile
     opp_enriched = _enrich_club_with_admin(store, ctx.tenant_id, opp_raw) if opp_raw.get("club_id") != "none" else opp_raw
+    if opp_enriched.get("club_id") != "none":
+        opp_enriched["tactical_profile"] = get_club_tactical_profile(opp_enriched)
+    active_form = formation or (profile or {}).get("formation") or tactical_profile.get("default_formation") or "4-2-3-1"
     depth = build_squad_depth_report(club_enriched["players"], formation_code=active_form)
     matchday_sheet = build_official_matchday_sheet(
         club_name_ar=str(club_enriched.get("name_ar") or ""),
@@ -420,25 +437,36 @@ def api_coach_sync_club(
     ctx.require("write:tactics")
     store = get_coach_store()
     mode = str(payload.get("mode") or "wikipedia").lower()
+    raw_team_id = str(payload.get("team_id") or payload.get("club_id") or "").strip()
+    league_slug = str(payload.get("league_slug") or payload.get("league") or "egy.1").strip()
+    cid_hint = str(payload.get("club_id") or raw_team_id or "al_ahly").strip()
 
     try:
-        if mode == "espn":
-            league_slug = str(payload.get("league_slug") or "eng.1")
-            team_id = str(payload.get("team_id") or "")
-            if not team_id:
-                raise ValueError("team_id is required for ESPN sync")
-            synced = sync_espn_team_roster(
-                league_slug=league_slug,
-                team_id=team_id,
-                club_id=payload.get("club_id"),
-                kit_hex=str(payload.get("kit_hex") or "#38BDF8"),
+        if raw_team_id.startswith("ts365_") and raw_team_id[6:].isdigit():
+            synced = sync_365scores_club_squad(
+                comp_id=int(raw_team_id[6:]),
+                club_id=raw_team_id,
+                name_ar=payload.get("name_ar"),
+                name_en=payload.get("name_en"),
+                kit_hex=str(payload.get("kit_hex") or "#15803D"),
             )
+            synced["league_id"] = league_slug
+        elif mode == "espn":
+            if raw_team_id.isdigit():
+                synced = sync_espn_team_roster(
+                    league_slug=league_slug,
+                    team_id=raw_team_id,
+                    club_id=payload.get("club_id"),
+                    kit_hex=str(payload.get("kit_hex") or "#38BDF8"),
+                )
+            else:
+                synced = _resolve_or_sync_club(store, ctx.tenant_id, cid_hint, league_id=league_slug)
         elif mode == "scoresheet":
             cid = str(payload.get("club_id") or "custom_club")
             raw_text = str(payload.get("raw_text") or "")
             parsed = parse_scoresheet_text(raw_text)
             if not parsed:
-                raise ValueError("Could not extract any numbered players from scoresheet text")
+                raise ValueError("تعذر استخراج أي لاعبين بأرقام قمصان من الكشف.")
             synced = {
                 "club_id": cid,
                 "name_ar": str(payload.get("name_ar") or cid),
@@ -464,7 +492,7 @@ def api_coach_sync_club(
                 ],
             }
         else:
-            cid = str(payload.get("club_id") or "al_ahly")
+            cid = cid_hint
             preset = EGYPTIAN_CLUB_PRESETS.get(cid, {})
             ts_id = payload.get("ts_365_id") or preset.get("ts_365_id")
             if ts_id:
@@ -479,23 +507,75 @@ def api_coach_sync_club(
                 )
             else:
                 wiki_page = str(payload.get("wiki_page") or preset.get("wiki_page") or "")
-                if not wiki_page:
-                    raise ValueError("ts_365_id or wiki_page is required for sync")
-                synced = sync_wikipedia_club_squad(
-                    wiki_page=wiki_page,
-                    club_id=cid,
-                    name_ar=payload.get("name_ar") or preset.get("name_ar"),
-                    name_en=payload.get("name_en") or preset.get("name_en"),
-                    kit_hex=str(payload.get("kit_hex") or preset.get("kit_hex") or "#10B981"),
-                    ar_wiki_page=preset.get("ar_wiki_page"),
-                    stadium_ar=preset.get("stadium_ar", ""),
-                    city_ar=preset.get("city_ar", ""),
-                )
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Live club sync failed: {exc}")
+                if wiki_page:
+                    synced = sync_wikipedia_club_squad(
+                        wiki_page=wiki_page,
+                        club_id=cid,
+                        name_ar=payload.get("name_ar") or preset.get("name_ar"),
+                        name_en=payload.get("name_en") or preset.get("name_en"),
+                        kit_hex=str(payload.get("kit_hex") or preset.get("kit_hex") or "#10B981"),
+                        ar_wiki_page=preset.get("ar_wiki_page"),
+                        stadium_ar=preset.get("stadium_ar", ""),
+                        city_ar=preset.get("city_ar", ""),
+                    )
+                else:
+                    synced = _resolve_or_sync_club(store, ctx.tenant_id, cid, league_id=league_slug)
+    except Exception:
+        existing = load_all_coach_clubs(store.list_club_rosters(ctx.tenant_id)).get(cid_hint)
+        if existing and existing.get("players"):
+            synced = existing
+        else:
+            raise HTTPException(
+                status_code=503,
+                detail="تعذر تحديث قائمة هذا النادي في الوقت الحالي، يرجى المحاولة لاحقاً.",
+            )
 
     store.save_club_roster(ctx.tenant_id, str(synced["club_id"]), synced)
     return _enrich_club_with_admin(store, ctx.tenant_id, synced)
+
+
+@router.get("/live/club-intel")
+def api_coach_live_club_intel(
+    club_id: str,
+    league: str = "egy.1",
+    team_name: str = "",
+    formation: Optional[str] = None,
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    """Return a club's 3-phase tactical blueprint, squad, and live upcoming/recent matches."""
+    ctx.require("read:tactics")
+    store = get_coach_store()
+    club_raw = _resolve_or_sync_club(store, ctx.tenant_id, club_id, league_id=league)
+    club_enriched = _enrich_club_with_admin(store, ctx.tenant_id, club_raw)
+    tprofile = get_club_tactical_profile(club_enriched)
+    club_enriched["tactical_profile"] = tprofile
+
+    active_form = str(formation or tprofile.get("default_formation") or "4-2-3-1")
+    fit_players = [p for p in (club_enriched.get("players") or []) if p.get("is_eligible_starter", True)]
+    blueprint = build_three_phase_tactical_package(
+        club=club_enriched,
+        opponent={"club_id": "none", "name_ar": "", "name_en": "", "players": []},
+        fit_players=fit_players,
+        opp_players=[],
+        formation_code=active_form,
+        opponent_formation_code="4-4-2",
+        team_size=11,
+    )
+
+    comp_id = club_enriched.get("ts_365_id") or resolve_365_competitor_id(
+        club_id,
+        team_name or str(club_enriched.get("name_ar") or club_enriched.get("name_en") or ""),
+    )
+    schedule = fetch_club_live_schedule(int(comp_id)) if comp_id else {"upcoming_matches": [], "recent_results": []}
+
+    return {
+        "club": club_enriched,
+        "formation": active_form,
+        "tactical_profile": tprofile,
+        "blueprint": blueprint,
+        "upcoming_matches": schedule.get("upcoming_matches") or [],
+        "recent_results": schedule.get("recent_results") or [],
+    }
 
 
 @router.post("/admin/player-status")
@@ -672,6 +752,107 @@ def api_coach_print_matchday_sheet(
             stadium=str(club_enriched.get("stadium_ar") or ""),
         )
     return HTMLResponse(render_matchday_sheet_html(sheet))
+
+
+@router.get("/player-live-stats")
+def api_coach_player_live_stats(
+    name: str,
+    name_en: str = "",
+    club_name: str = "",
+    athlete_id: Optional[int] = None,
+    club_365_id: Optional[int] = None,
+    position: str = "",
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    ctx.require("read:tactics")
+    return fetch_multi_source_player_stats(
+        name=name,
+        name_en=name_en,
+        club_name=club_name,
+        athlete_id=athlete_id,
+        club_365_id=club_365_id,
+        position_hint=position,
+    )
+
+
+@router.post("/clubs/{club_id}/sync-stats")
+def api_coach_sync_club_stats(
+    club_id: str,
+    league: str = "egy.1",
+    limit: int = 16,
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    ctx.require("write:tactics")
+    store = get_coach_store()
+    club_raw = _resolve_or_sync_club(store, ctx.tenant_id, club_id, league_id=league)
+    batch = sync_club_live_stats_batch(club_raw, limit=max(5, min(22, int(limit))))
+    updated_club = {**club_raw, "players": batch["players"]}
+    try:
+        store.save_club_roster(ctx.tenant_id, club_id, updated_club)
+    except Exception:
+        pass
+    enriched = _enrich_club_with_admin(store, ctx.tenant_id, updated_club)
+    enriched["tactical_profile"] = get_club_tactical_profile(enriched)
+    return {"synced_count": batch["synced_count"], "club": enriched}
+
+
+@router.post("/match-simulate")
+def api_coach_match_simulate(
+    payload: dict[str, Any],
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    ctx.require("read:tactics")
+    store = get_coach_store()
+    club_id = str(payload.get("club_id") or "al_ahly")
+    opp_id = str(payload.get("opponent_id") or "none")
+    league = str(payload.get("league") or "egy.1")
+    club_raw = _resolve_or_sync_club(store, ctx.tenant_id, club_id, league_id=league)
+    opp_raw = _resolve_or_sync_club(store, ctx.tenant_id, opp_id, league_id=league)
+    club_enriched = _enrich_club_with_admin(store, ctx.tenant_id, club_raw)
+    opp_enriched = _enrich_club_with_admin(store, ctx.tenant_id, opp_raw) if opp_raw.get("club_id") != "none" else opp_raw
+
+    try:
+        standings = list((fetch_live_league_hub(league_id=league, force_refresh=False)).get("standings") or [])
+    except Exception:
+        standings = []
+
+    return simulate_tactical_match(
+        club=club_enriched,
+        opponent=opp_enriched,
+        formation_a=str(payload.get("formation_a") or "4-2-3-1"),
+        formation_b=str(payload.get("formation_b") or "4-4-2"),
+        nodes_a=list(payload.get("nodes_a") or []),
+        nodes_b=list(payload.get("nodes_b") or []),
+        line_height=str(payload.get("line_height") or "mid"),
+        pressing_style=str(payload.get("pressing_style") or "trigger"),
+        mode=str(payload.get("mode") or "full_match"),
+        standings=standings,
+        n_rollouts=int(payload.get("rollouts") or 5000),
+    )
+
+
+@router.post("/tactics/suggest-lineup")
+def api_coach_suggest_lineup(
+    payload: dict[str, Any],
+    ctx: TenantContext = Depends(get_tenant_context),
+) -> dict[str, Any]:
+    ctx.require("read:tactics")
+    store = get_coach_store()
+    club_id = str(payload.get("club_id") or "al_ahly")
+    opp_id = str(payload.get("opponent_id") or "none")
+    league = str(payload.get("league") or "egy.1")
+    club_raw = _resolve_or_sync_club(store, ctx.tenant_id, club_id, league_id=league)
+    opp_raw = _resolve_or_sync_club(store, ctx.tenant_id, opp_id, league_id=league)
+    club_enriched = _enrich_club_with_admin(store, ctx.tenant_id, club_raw)
+    opp_enriched = _enrich_club_with_admin(store, ctx.tenant_id, opp_raw) if opp_raw.get("club_id") != "none" else opp_raw
+    return suggest_tactical_lineup_swaps(
+        club=club_enriched,
+        formation_code=str(payload.get("formation_code") or "4-2-3-1"),
+        current_nodes=list(payload.get("nodes_a") or []),
+        opponent=opp_enriched,
+        line_height=str(payload.get("line_height") or "mid"),
+        pressing_style=str(payload.get("pressing_style") or "trigger"),
+    )
 
 
 @router.post("/set-pieces/optimize")
