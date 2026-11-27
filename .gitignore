@@ -50,9 +50,14 @@ npm-debug.log*
 out_hls/
 **/out_hls/
 
+# Vercel & Local Runtime State
+.vercel/
+**/.vercel/
+**/.data/
+.claude/
+
 # Local Data Directories (Videos & Heavy Telemetry)
 scout5/data/
 egy-tactical-scout/backend/data/
 egy-tactical-scout/backend/cache/
 coach_pro_videos/
-coach-pro-app/

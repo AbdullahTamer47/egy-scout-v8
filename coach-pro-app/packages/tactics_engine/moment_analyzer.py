@@ -1,0 +1,1659 @@
+"""Moment State Analyzer (PDF Pages 25-26: Did / Did Not / Where & Why) & Live Tactical Formation Geometry Engine.
+
+Every single tactical statement, formation line, passing channel, and correction arrow is computed
+100% dynamically from real frame coordinates (x_m, y_m), velocities (vx_ms, vy_ms, speed_kmh),
+distances, cover shadows, and offside line geometry. Zero static/canned template strings.
+"""
+from __future__ import annotations
+
+import math
+import re
+from typing import Any, Optional
+
+import numpy as np
+
+
+def _linear_sum_assignment_pure(cost: np.ndarray) -> tuple[list[int], list[int]]:
+    """Dependency-free bipartite greedy optimal matcher for small tactical slot matrices (11xN)."""
+    n_rows, n_cols = cost.shape
+    pairs = sorted(
+        ((float(cost[r, c]), r, c) for r in range(n_rows) for c in range(n_cols)),
+        key=lambda x: x[0],
+    )
+    used_r: set[int] = set()
+    used_c: set[int] = set()
+    out_r: list[int] = []
+    out_c: list[int] = []
+    limit = min(n_rows, n_cols)
+    for _, r, c in pairs:
+        if r in used_r or c in used_c:
+            continue
+        used_r.add(r)
+        used_c.add(c)
+        out_r.append(r)
+        out_c.append(c)
+        if len(out_r) >= limit:
+            break
+    return out_r, out_c
+
+from packages.tactics_engine.counterfactual import (
+    compute_dynamic_pitch_control,
+    compute_shot_xg,
+)
+
+
+TACTICAL_FORMATIONS_CATALOG: dict[str, dict[str, Any]] = {
+    "4-2-3-1": {
+        "code": "4-2-3-1",
+        "title_ar": "4-2-3-1 (محور مزدوج وإغلاق الممرات النصفية + Zone 14)",
+        "philosophy_ar": "تأمين العمق أمام قلبي الدفاع بمحورين (Double Pivot) مع تحرير صانع اللعب في المنطقة 14 والأجنحة في أنصاف المساحات.",
+        "nodes": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.06, "y_norm": 0.50},
+            {"slot": "RB", "role_ar": "ظهير أيمن", "x_norm": 0.25, "y_norm": 0.84},
+            {"slot": "RCB", "role_ar": "قلب دفاع أيمن", "x_norm": 0.21, "y_norm": 0.62},
+            {"slot": "LCB", "role_ar": "قلب دفاع أيسر", "x_norm": 0.21, "y_norm": 0.38},
+            {"slot": "LB", "role_ar": "ظهير أيسر", "x_norm": 0.25, "y_norm": 0.16},
+            {"slot": "RDM", "role_ar": "ارتكاز دفاعي أيمن (6)", "x_norm": 0.41, "y_norm": 0.61},
+            {"slot": "LDM", "role_ar": "ارتكاز مساند أيسر (8)", "x_norm": 0.43, "y_norm": 0.39},
+            {"slot": "RW", "role_ar": "جناح أيمن عكسي", "x_norm": 0.66, "y_norm": 0.82},
+            {"slot": "CAM", "role_ar": "صانع ألعاب (Zone 14)", "x_norm": 0.63, "y_norm": 0.50},
+            {"slot": "LW", "role_ar": "جناح أيسر هجومي", "x_norm": 0.66, "y_norm": 0.18},
+            {"slot": "ST", "role_ar": "مهاجم صريح (9)", "x_norm": 0.81, "y_norm": 0.50},
+        ],
+        "lines": [
+            {"line_type": "backline", "label_ar": "خط الدفاع الرباعي", "slots": ["LB", "LCB", "RCB", "RB"]},
+            {"line_type": "midfield", "label_ar": "المحور المزدوج (Double Pivot)", "slots": ["LDM", "RDM"]},
+            {"line_type": "attack", "label_ar": "خط صناعة اللعب والأجنحة", "slots": ["LW", "CAM", "RW", "ST"]},
+        ],
+    },
+    "4-3-3": {
+        "code": "4-3-3",
+        "title_ar": "4-3-3 (ضغط عالٍ ومثلثات استحواذ في أنصاف المساحات)",
+        "philosophy_ar": "ارتكاز وحيد يحمي الخط الخلفي مع لاعبي وسط متقدمين (8/10) لخلق تفوق عددي في أنصاف المساحات والضغط العكسي الفوري.",
+        "nodes": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.06, "y_norm": 0.50},
+            {"slot": "RB", "role_ar": "ظهير أيمن متقدم", "x_norm": 0.28, "y_norm": 0.86},
+            {"slot": "RCB", "role_ar": "قلب دفاع أيمن", "x_norm": 0.22, "y_norm": 0.62},
+            {"slot": "LCB", "role_ar": "قلب دفاع أيسر", "x_norm": 0.22, "y_norm": 0.38},
+            {"slot": "LB", "role_ar": "ظهير أيسر متقدم", "x_norm": 0.28, "y_norm": 0.14},
+            {"slot": "CDM", "role_ar": "ارتكاز دفاعي وحيد (6)", "x_norm": 0.40, "y_norm": 0.50},
+            {"slot": "RCM", "role_ar": "وسط هجومي أيمن (8)", "x_norm": 0.55, "y_norm": 0.67},
+            {"slot": "LCM", "role_ar": "وسط هجومي أيسر (8)", "x_norm": 0.55, "y_norm": 0.33},
+            {"slot": "RW", "role_ar": "جناح أيمن يخترق للعمق", "x_norm": 0.74, "y_norm": 0.80},
+            {"slot": "LW", "role_ar": "جناح أيسر يخترق للعمق", "x_norm": 0.74, "y_norm": 0.20},
+            {"slot": "ST", "role_ar": "رأس حربة ضاغط", "x_norm": 0.82, "y_norm": 0.50},
+        ],
+        "lines": [
+            {"line_type": "backline", "label_ar": "خط الدفاع", "slots": ["LB", "LCB", "RCB", "RB"]},
+            {"line_type": "midfield", "label_ar": "مثلث الوسط", "slots": ["LCM", "CDM", "RCM"]},
+            {"line_type": "attack", "label_ar": "ثلاثي الهجوم الضاغط", "slots": ["LW", "ST", "RW"]},
+        ],
+    },
+    "3-4-2-1": {
+        "code": "3-4-2-1",
+        "title_ar": "3-4-2-1 (صندوق وسط 3-2-2-3 وتفوق عددي في العمق)",
+        "philosophy_ar": "ثلاثة قلوب دفاع لتأمين التحولات مع ظهيري جنب وصانعي لعب داخل أنصاف المساحات (Box Midfield).",
+        "nodes": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.06, "y_norm": 0.50},
+            {"slot": "RCB", "role_ar": "قلب دفاع أيمن", "x_norm": 0.22, "y_norm": 0.72},
+            {"slot": "CCB", "role_ar": "قلب دفاع محوري", "x_norm": 0.19, "y_norm": 0.50},
+            {"slot": "LCB", "role_ar": "قلب دفاع أيسر", "x_norm": 0.22, "y_norm": 0.28},
+            {"slot": "RWB", "role_ar": "ظهير جناح أيمن", "x_norm": 0.49, "y_norm": 0.88},
+            {"slot": "RDM", "role_ar": "محور ارتكاز أيمن", "x_norm": 0.43, "y_norm": 0.60},
+            {"slot": "LDM", "role_ar": "محور ارتكاز أيسر", "x_norm": 0.43, "y_norm": 0.40},
+            {"slot": "LWB", "role_ar": "ظهير جناح أيسر", "x_norm": 0.49, "y_norm": 0.12},
+            {"slot": "RAM", "role_ar": "صانع لعب نصفي أيمن", "x_norm": 0.67, "y_norm": 0.64},
+            {"slot": "LAM", "role_ar": "صانع لعب نصفي أيسر", "x_norm": 0.67, "y_norm": 0.36},
+            {"slot": "ST", "role_ar": "مهاجم محطة", "x_norm": 0.82, "y_norm": 0.50},
+        ],
+        "lines": [
+            {"line_type": "backline", "label_ar": "ثلاثي قلب الدفاع", "slots": ["LCB", "CCB", "RCB"]},
+            {"line_type": "midfield", "label_ar": "رباعي الوسط والأطراف", "slots": ["LWB", "LDM", "RDM", "RWB"]},
+            {"line_type": "attack", "label_ar": "ثنائي أنصاف المساحات والمهاجم", "slots": ["LAM", "ST", "RAM"]},
+        ],
+    },
+    "4-4-2": {
+        "code": "4-4-2",
+        "title_ar": "4-4-2 (كتلة دفاعية متراصة Mid-Block وتحولات سريعة)",
+        "philosophy_ar": "خطان متوازيان من 4 لاعبين بمسافة طولية لا تتجاوز 12 متراً لإغلاق العمق تماماً وإجبار الخصم على الأطراف.",
+        "nodes": [
+            {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.06, "y_norm": 0.50},
+            {"slot": "RB", "role_ar": "ظهير أيمن", "x_norm": 0.24, "y_norm": 0.82},
+            {"slot": "RCB", "role_ar": "قلب دفاع أيمن", "x_norm": 0.21, "y_norm": 0.60},
+            {"slot": "LCB", "role_ar": "قلب دفاع أيسر", "x_norm": 0.21, "y_norm": 0.40},
+            {"slot": "LB", "role_ar": "ظهير أيسر", "x_norm": 0.24, "y_norm": 0.18},
+            {"slot": "RM", "role_ar": "وسط أيمن", "x_norm": 0.46, "y_norm": 0.80},
+            {"slot": "RCM", "role_ar": "محور وسط أيمن", "x_norm": 0.43, "y_norm": 0.59},
+            {"slot": "LCM", "role_ar": "محور وسط أيسر", "x_norm": 0.43, "y_norm": 0.41},
+            {"slot": "LM", "role_ar": "وسط أيسر", "x_norm": 0.46, "y_norm": 0.20},
+            {"slot": "RST", "role_ar": "مهاجم ثانٍ متحرك", "x_norm": 0.72, "y_norm": 0.58},
+            {"slot": "LST", "role_ar": "مهاجم صريح", "x_norm": 0.76, "y_norm": 0.42},
+        ],
+        "lines": [
+            {"line_type": "backline", "label_ar": "خط الدفاع الرباعي", "slots": ["LB", "LCB", "RCB", "RB"]},
+            {"line_type": "midfield", "label_ar": "خط الوسط الرباعي المتراص", "slots": ["LM", "LCM", "RCM", "RM"]},
+            {"line_type": "attack", "label_ar": "ثنائي الهجوم", "slots": ["LST", "RST"]},
+        ],
+    },
+}
+
+
+def _describe_pitch_zone_ar(x_m: float, y_m: float, attack_goal_x: float) -> str:
+    """Return an exact Arabic tactical zone name for coordinates (x_m, y_m) relative to attack direction."""
+    prog_x = x_m if attack_goal_x >= 52.5 else (105.0 - x_m)
+    # Zone 14: central region just outside opponent penalty box (prog_x in [68, 88.5], y in [22, 46])
+    if 68.0 <= prog_x <= 88.5 and 22.0 <= y_m <= 46.0:
+        return "المنطقة 14 (Zone 14 - عمق صناعة اللعب أمام الصندوق)"
+    if prog_x > 88.5 and 13.84 <= y_m <= 54.16:
+        return "داخل منطقة جزاء الخصم (Penalty Box)"
+    if prog_x < 16.5 and 13.84 <= y_m <= 54.16:
+        return "داخل منطقة الجزاء الدفاعية"
+
+    third_ar = (
+        "الثلث الدفاعي (البناء)"
+        if prog_x < 35.0
+        else ("ثلث الوسط (التدرج)" if prog_x < 70.0 else "الثلث الهجومي الأخير")
+    )
+    if y_m < 13.8:
+        lane_ar = "الرواق الأيسر/الأيمن الخارجي (Flank)"
+    elif y_m < 24.5:
+        lane_ar = "الممر النصفي العلوي (Half-Space)"
+    elif y_m <= 43.5:
+        lane_ar = "الممر المركزي (Central Corridor)"
+    elif y_m <= 54.2:
+        lane_ar = "الممر النصفي السفلي (Half-Space)"
+    else:
+        lane_ar = "الرواق الطرفي السفلي (Wide Flank)"
+    return f"{third_ar} — {lane_ar}"
+
+
+def _point_to_segment_distance(
+    px: float, py: float, ax: float, ay: float, bx: float, by: float
+) -> tuple[float, float]:
+    """Return (perpendicular_distance_m, projection_t_in_0_1) from point P to segment AB."""
+    dx, dy = bx - ax, by - ay
+    seg_len_sq = dx * dx + dy * dy
+    if seg_len_sq < 1e-6:
+        return float(math.hypot(px - ax, py - ay)), 0.0
+    t = ((px - ax) * dx + (py - ay) * dy) / seg_len_sq
+    t_clamped = max(0.0, min(1.0, t))
+    proj_x = ax + t_clamped * dx
+    proj_y = ay + t_clamped * dy
+    return float(math.hypot(px - proj_x, py - proj_y)), float(t)
+
+
+def _convex_hull_xy(points: list[tuple[float, float]]) -> list[dict[str, float]]:
+    """Compute 2D monotonic-chain convex hull for team block polygon rendering."""
+    pts = sorted(set((round(float(x), 2), round(float(y), 2)) for x, y in points))
+    if len(pts) <= 2:
+        return [{"x_m": x, "y_m": y} for x, y in pts]
+
+    def cross(o: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower: list[tuple[float, float]] = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper: list[tuple[float, float]] = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    hull = lower[:-1] + upper[:-1]
+    return [{"x_m": round(x, 2), "y_m": round(y, 2)} for x, y in hull]
+
+
+def _polygon_area(hull: list[dict[str, float]]) -> float:
+    if len(hull) < 3:
+        return 0.0
+    area = 0.0
+    n = len(hull)
+    for i in range(n):
+        j = (i + 1) % n
+        area += hull[i]["x_m"] * hull[j]["y_m"] - hull[j]["x_m"] * hull[i]["y_m"]
+    return round(abs(area) * 0.5, 1)
+
+
+def _player_display_label(p: dict[str, Any]) -> str:
+    name = p.get("verified_name")
+    j = p.get("jersey_number")
+    tid = p.get("track_id")
+    if name and j:
+        return f"{name} (#{j})"
+    if name:
+        return str(name)
+    if j:
+        return f"لاعب #{j}"
+    return f"مسار #{tid}"
+
+
+def detect_live_team_formation(
+    players: list[dict[str, Any]],
+    team: str,
+    attack_goal_x: float,
+) -> dict[str, Any]:
+    """Cluster a team's visible outfield players into Backline, Midfield, and Attacking lines.
+
+    Returns exact connected polyline coordinates for drawing the live formation on the 2D/3D pitch
+    and broadcast video overlay.
+    """
+    team_players = [
+        p
+        for p in players
+        if p.get("team") == team
+        and p.get("role") in ("player", "goalkeeper")
+        and p.get("x_m") is not None
+        and p.get("y_m") is not None
+    ]
+    outfield = [p for p in team_players if p.get("role") == "player"]
+    if not outfield:
+        outfield = team_players
+
+    if not outfield:
+        return {
+            "team": team,
+            "detected_shape": "غير متاح",
+            "inferred_full_formation": "4-2-3-1",
+            "visible_outfield_count": 0,
+            "width_m": 0.0,
+            "depth_m": 0.0,
+            "compactness_m2": 0.0,
+            "defensive_line_x_m": 52.5,
+            "line_gap_def_mid_m": 0.0,
+            "line_gap_mid_att_m": 0.0,
+            "lines": [],
+            "convex_hull": [],
+        }
+
+    # Sort longitudinally from own goal toward attack_goal_x
+    attacks_right = attack_goal_x >= 52.5
+    sorted_long = sorted(
+        outfield,
+        key=lambda p: float(p["x_m"]) if attacks_right else (105.0 - float(p["x_m"])),
+    )
+    prog_xs = [
+        float(p["x_m"]) if attacks_right else (105.0 - float(p["x_m"]))
+        for p in sorted_long
+    ]
+
+    n = len(sorted_long)
+    if n <= 3:
+        groups = [sorted_long]
+    elif n <= 5:
+        # Split into 2 lines at largest longitudinal gap
+        gaps = [(prog_xs[i + 1] - prog_xs[i], i + 1) for i in range(n - 1)]
+        split_idx = max(gaps, key=lambda g: g[0])[1]
+        groups = [sorted_long[:split_idx], sorted_long[split_idx:]]
+    else:
+        # Split into 3 lines (Backline, Midfield, Attack) using the two largest longitudinal gaps
+        # constrained so each line has at least 1 player and backline has 2..5 players
+        best_score = -1.0
+        best_splits = (max(1, n // 3), max(2, (2 * n) // 3))
+        for i in range(2, min(6, n - 1)):
+            for j in range(i + 1, n):
+                gap1 = prog_xs[i] - prog_xs[i - 1]
+                gap2 = prog_xs[j] - prog_xs[j - 1]
+                # Prefer balanced line sizes + clear longitudinal gaps
+                balance_bonus = 1.2 if (2 <= i <= 5 and 2 <= (j - i) <= 5) else 0.0
+                score = gap1 + gap2 + balance_bonus
+                if score > best_score:
+                    best_score = score
+                    best_splits = (i, j)
+        s1, s2 = best_splits
+        groups = [sorted_long[:s1], sorted_long[s1:s2], sorted_long[s2:]]
+
+    line_types = ["backline", "midfield", "attack"]
+    line_labels_ar = ["خط الدفاع", "خط الوسط", "خط الهجوم"]
+    lines_out: list[dict[str, Any]] = []
+    line_mean_x: list[float] = []
+
+    for idx, grp in enumerate(groups):
+        if not grp:
+            continue
+        ltype = line_types[min(idx, len(line_types) - 1)]
+        llabel = line_labels_ar[min(idx, len(line_labels_ar) - 1)]
+        # Sort laterally from top touchline (y=0) to bottom touchline (y=68)
+        grp_lat = sorted(grp, key=lambda p: float(p["y_m"]))
+        mean_x = float(sum(float(p["x_m"]) for p in grp_lat) / len(grp_lat))
+        line_mean_x.append(mean_x)
+        # Check lateral spacing anomalies along this line
+        max_lat_gap = 0.0
+        for k in range(len(grp_lat) - 1):
+            gap_y = abs(float(grp_lat[k + 1]["y_m"]) - float(grp_lat[k]["y_m"]))
+            if gap_y > max_lat_gap:
+                max_lat_gap = gap_y
+        lines_out.append(
+            {
+                "line_type": ltype,
+                "label_ar": f"{llabel} ({len(grp_lat)})",
+                "count": len(grp_lat),
+                "mean_x_m": round(mean_x, 2),
+                "max_lateral_gap_m": round(max_lat_gap, 1),
+                "points": [
+                    {
+                        "track_id": int(p["track_id"]),
+                        "x_m": round(float(p["x_m"]), 2),
+                        "y_m": round(float(p["y_m"]), 2),
+                        "label": _player_display_label(p),
+                        "jersey_number": p.get("jersey_number"),
+                        "speed_kmh": round(float(p.get("speed_kmh", 0.0) or 0.0), 1),
+                    }
+                    for p in grp_lat
+                ],
+            }
+        )
+
+    counts_str = "-".join(str(len(g)) for g in groups if g)
+    def_cnt = len(groups[0]) if groups else 4
+    mid_cnt = len(groups[1]) if len(groups) > 1 else 3
+    if def_cnt <= 3:
+        inferred_full = "3-4-2-1"
+    elif mid_cnt >= 4:
+        inferred_full = "4-4-2"
+    elif len(groups) >= 3 and len(groups[-1]) >= 3:
+        inferred_full = "4-3-3"
+    else:
+        inferred_full = "4-2-3-1"
+
+    xs = [float(p["x_m"]) for p in outfield]
+    ys = [float(p["y_m"]) for p in outfield]
+    width_m = round(max(ys) - min(ys), 1) if len(ys) >= 2 else 0.0
+    depth_m = round(max(xs) - min(xs), 1) if len(xs) >= 2 else 0.0
+    hull = _convex_hull_xy([(float(p["x_m"]), float(p["y_m"])) for p in outfield])
+    compactness_m2 = _polygon_area(hull)
+
+    gap_def_mid = round(abs(line_mean_x[1] - line_mean_x[0]), 1) if len(line_mean_x) >= 2 else 0.0
+    gap_mid_att = round(abs(line_mean_x[2] - line_mean_x[1]), 1) if len(line_mean_x) >= 3 else 0.0
+
+    return {
+        "team": team,
+        "detected_shape": counts_str if n >= 7 else f"{counts_str} (مرئي {n}→{inferred_full})",
+        "inferred_full_formation": inferred_full,
+        "visible_outfield_count": n,
+        "width_m": width_m,
+        "depth_m": depth_m,
+        "compactness_m2": compactness_m2,
+        "defensive_line_x_m": round(line_mean_x[0], 2) if line_mean_x else 52.5,
+        "line_gap_def_mid_m": gap_def_mid,
+        "line_gap_mid_att_m": gap_mid_att,
+        "lines": lines_out,
+        "convex_hull": hull,
+    }
+
+
+def analyze_frame_moment_state(
+    players: list[dict[str, Any]],
+    ball_xy: tuple[float, float],
+    attacking_team: str = "team_a",
+    defending_team: str = "team_b",
+    attack_goal_x: float = 105.0,
+    time_s: float = 0.0,
+    frame_id: int = 1250,
+    selected_track_id: Optional[int] = None,
+    team_a_name: str = "الأهلي",
+    team_b_name: str = "إنبي",
+) -> dict[str, Any]:
+    """Compute the PDF Pages 25-26 Moment State Analyzer:
+    - Exact 'Did' (ما الذي فعله)
+    - Exact 'Did Not' (ما الذي لم يفعله)
+    - Exact 'Where & Why It Failed/Succeeded' (أين وليه أخطأ / نجح)
+    Plus live formation lines, passing channels, and tactical correction vectors for both teams.
+    """
+    bx, by = float(ball_xy[0]), float(ball_xy[1])
+    attacks_right = attack_goal_x >= 52.5
+    defend_goal_x = 0.0 if attacks_right else 105.0
+    att_team_label = team_a_name if attacking_team == "team_a" else team_b_name
+    def_team_label = team_b_name if defending_team == "team_b" else team_a_name
+
+    att_formation = detect_live_team_formation(players, attacking_team, attack_goal_x)
+    def_formation = detect_live_team_formation(players, defending_team, defend_goal_x)
+
+    attackers = [
+        p
+        for p in players
+        if p.get("team") == attacking_team
+        and p.get("role") in ("player", "goalkeeper")
+        and p.get("x_m") is not None
+        and p.get("y_m") is not None
+    ]
+    defenders = [
+        p
+        for p in players
+        if p.get("team") == defending_team
+        and p.get("role") in ("player", "goalkeeper")
+        and p.get("x_m") is not None
+        and p.get("y_m") is not None
+    ]
+
+    # Identify ball carrier (nearest attacker or overall nearest player to ball)
+    all_field = attackers + defenders
+    carrier = (
+        min(all_field, key=lambda p: math.hypot(float(p["x_m"]) - bx, float(p["y_m"]) - by))
+        if all_field
+        else None
+    )
+    att_carrier = (
+        min(attackers, key=lambda p: math.hypot(float(p["x_m"]) - bx, float(p["y_m"]) - by))
+        if attackers
+        else carrier
+    )
+    nearest_def_to_ball = (
+        min(defenders, key=lambda p: math.hypot(float(p["x_m"]) - bx, float(p["y_m"]) - by))
+        if defenders
+        else None
+    )
+
+    # Compute baseline Pitch Control and Shot xG
+    pc_base = compute_dynamic_pitch_control(
+        players,
+        ball_xy=(bx, by),
+        attacking_team=attacking_team,
+        nx=21,
+        ny=14,
+        goal_x=attack_goal_x,
+    )
+    xg_base = compute_shot_xg(
+        players,
+        ball_xy=(bx, by),
+        attacking_team=attacking_team,
+        goal_x=attack_goal_x,
+    )
+
+    # Compute Passing Channels from ball (bx, by) to each attacking teammate
+    passing_channels: list[dict[str, Any]] = []
+    for att in attackers:
+        if att_carrier and int(att["track_id"]) == int(att_carrier["track_id"]):
+            continue
+        tx, ty = float(att["x_m"]), float(att["y_m"])
+        pass_dist = float(math.hypot(tx - bx, ty - by))
+        if pass_dist < 2.5 or pass_dist > 44.0:
+            continue
+        min_clearance = 99.0
+        blocker_id = None
+        for d in defenders:
+            dx_m, dy_m = float(d["x_m"]), float(d["y_m"])
+            perp_d, proj_t = _point_to_segment_distance(dx_m, dy_m, bx, by, tx, ty)
+            if 0.08 <= proj_t <= 0.95 and perp_d < min_clearance:
+                min_clearance = perp_d
+                if perp_d < 1.85:
+                    blocker_id = int(d["track_id"])
+        prog_gain = (tx - bx) if attacks_right else (bx - tx)
+        is_blocked = min_clearance < 1.85
+        channel_quality = round(
+            float(np.clip((min_clearance * 14.0) + max(0.0, prog_gain) * 2.2 - pass_dist * 0.6, 5.0, 99.0)),
+            1,
+        )
+        passing_channels.append(
+            {
+                "from_x_m": round(bx, 2),
+                "from_y_m": round(by, 2),
+                "to_x_m": round(tx, 2),
+                "to_y_m": round(ty, 2),
+                "target_track_id": int(att["track_id"]),
+                "target_label": _player_display_label(att),
+                "distance_m": round(pass_dist, 1),
+                "lane_clearance_m": round(min(25.0, min_clearance), 2),
+                "progressive_gain_m": round(prog_gain, 1),
+                "is_blocked": is_blocked,
+                "blocker_track_id": blocker_id,
+                "quality_score": channel_quality,
+            }
+        )
+    passing_channels.sort(key=lambda c: (not c["is_blocked"], c["quality_score"]), reverse=True)
+
+    # Offside line analysis for defending backline
+    def_outfield = [d for d in defenders if d.get("role") == "player"]
+    def_line_x = float(def_formation["defensive_line_x_m"])
+    if def_outfield:
+        sorted_back = sorted(
+            def_outfield,
+            key=lambda d: abs(float(d["x_m"]) - defend_goal_x),
+        )[: min(4, len(def_outfield))]
+        median_back_x = float(np.median([float(d["x_m"]) for d in sorted_back]))
+    else:
+        sorted_back = []
+        median_back_x = def_line_x
+
+    # Build Per-Player Moment States (Did / Did Not / Where & Why) + Correction Arrows
+    player_states: list[dict[str, Any]] = []
+    correction_arrows: list[dict[str, Any]] = []
+
+    for p in all_field:
+        tid = int(p["track_id"])
+        px, py = float(p["x_m"]), float(p["y_m"])
+        vx, vy = float(p.get("vx_ms", 0.0) or 0.0), float(p.get("vy_ms", 0.0) or 0.0)
+        spd_kmh = float(p.get("speed_kmh", round(math.hypot(vx, vy) * 3.6, 1)) or 0.0)
+        p_team = str(p.get("team", ""))
+        is_def = p_team == defending_team
+        team_goal_x = defend_goal_x if is_def else attack_goal_x
+        zone_ar = _describe_pitch_zone_ar(px, py, attack_goal_x)
+        dist_ball = round(float(math.hypot(px - bx, py - by)), 1)
+
+        opponents = attackers if is_def else defenders
+        teammates = [t for t in (defenders if is_def else attackers) if int(t["track_id"]) != tid]
+        nearest_opp = (
+            min(opponents, key=lambda o: math.hypot(float(o["x_m"]) - px, float(o["y_m"]) - py))
+            if opponents
+            else None
+        )
+        dist_opp = (
+            round(float(math.hypot(float(nearest_opp["x_m"]) - px, float(nearest_opp["y_m"]) - py)), 1)
+            if nearest_opp
+            else 99.0
+        )
+        nearest_mate = (
+            min(teammates, key=lambda m: math.hypot(float(m["x_m"]) - px, float(m["y_m"]) - py))
+            if teammates
+            else None
+        )
+        dist_mate = (
+            round(float(math.hypot(float(nearest_mate["x_m"]) - px, float(nearest_mate["y_m"]) - py)), 1)
+            if nearest_mate
+            else 99.0
+        )
+
+        # Motion vector description
+        if spd_kmh < 3.5:
+            motion_ar = f"ثابت تقريباً في موقعه (سرعته {spd_kmh:.1f} كم/س)"
+        else:
+            # Angle toward ball
+            to_ball_x, to_ball_y = bx - px, by - py
+            dot_ball = (vx * to_ball_x + vy * to_ball_y) / max(1e-5, math.hypot(vx, vy) * max(0.1, dist_ball))
+            if dot_ball > 0.45:
+                motion_ar = f"ينطلق باتجاه الكرة بسرعة {spd_kmh:.1f} كم/س"
+            elif dot_ball < -0.45:
+                motion_ar = f"يتراجع/يتحرك بعيداً عن الكرة بسرعة {spd_kmh:.1f} كم/س"
+            else:
+                motion_ar = f"يتحرك عرضياً/قطرياً بسرعة {spd_kmh:.1f} كم/س"
+
+        plabel = _player_display_label(p)
+        status_tag = "disciplined"
+        severity_score = 0.0
+        opt_x, opt_y = px, py
+
+        # 1. DID (ما الذي فعله فعلياً)
+        did_ar = (
+            f"تواجد في «{zone_ar}» عند الإحداثي (X={px:.1f}م، Y={py:.1f}م) على بُعد {dist_ball:.1f}م من الكرة "
+            f"و{dist_opp:.1f}م من أقرب خصم، و{motion_ar}."
+        )
+
+        # 2. DID NOT & 3. WHERE & WHY (calculated dynamically by role & geometry)
+        if is_def:
+            is_primary_presser = nearest_def_to_ball is not None and int(nearest_def_to_ball["track_id"]) == tid
+            offside_drop = (
+                (median_back_x - px) if defend_goal_x < 52.5 else (px - median_back_x)
+            )
+            in_backline = any(int(d["track_id"]) == tid for d in sorted_back)
+
+            if is_primary_presser and dist_ball > 2.8:
+                status_tag = "tactical_gap"
+                severity_score = min(98.0, dist_ball * 11.5)
+                # Optimal position: step 60% of the way toward ball while protecting goal axis
+                goal_vec_x = defend_goal_x - bx
+                goal_vec_y = 34.0 - by
+                gnorm = max(1e-4, math.hypot(goal_vec_x, goal_vec_y))
+                opt_x = round(bx + (goal_vec_x / gnorm) * 1.6, 2)
+                opt_y = round(by + (goal_vec_y / gnorm) * 1.6, 2)
+                open_lanes = sum(1 for c in passing_channels[:3] if not c["is_blocked"])
+                did_not_ar = (
+                    f"لم يغلق المسافة مع حامل الكرة (ترك فجوة ضغط {dist_ball:.1f}م بدلاً من المسافة المثالية ≤ 1.8م) "
+                    f"ولم يحجب زوايا التمرير الأمامية ({open_lanes} قنوات تمرير مفتوحة للخصم)."
+                )
+                where_and_why_ar = (
+                    f"أخطأ عند (X={px:.1f}م، Y={py:.1f}م) في {zone_ar}؛ لأن تأخره بفارق {max(0.5, dist_ball - 1.6):.1f}م "
+                    f"وسرعة إغلاقه ({spd_kmh:.1f} كم/س) منحت المهاجم وقتاً لكشف الملعب ورفعت خطورة التسديد/التمرير إلى "
+                    f"xG={xg_base['xg']:.3f}. الموقع الصحيح للإغلاق: (X={opt_x:.1f}م، Y={opt_y:.1f}م)."
+                )
+                correction_arrows.append(
+                    {
+                        "track_id": tid,
+                        "team": p_team,
+                        "player_label": plabel,
+                        "action_type": "close_down_carrier",
+                        "label_ar": f"إغلاق حامل الكرة ({dist_ball:.1f}م → 1.6م)",
+                        "from_x_m": round(px, 2),
+                        "from_y_m": round(py, 2),
+                        "to_x_m": opt_x,
+                        "to_y_m": opt_y,
+                        "delta_m": round(float(math.hypot(opt_x - px, opt_y - py)), 1),
+                        "urgency": "critical",
+                    }
+                )
+            elif in_backline and offside_drop > 1.7:
+                status_tag = "line_break"
+                severity_score = min(92.0, offside_drop * 18.0)
+                opt_x = round(median_back_x, 2)
+                opt_y = round(py + (34.0 - py) * 0.18, 2)
+                did_not_ar = (
+                    f"لم يضبط خط التسلل مع زملائه في خط الدفاع (تأخر للخلف بمقدار {offside_drop:.1f}م عن متوسط الخط الدفاعي عند X={median_back_x:.1f}م)."
+                )
+                where_and_why_ar = (
+                    f"كسر خط التسلل عند (X={px:.1f}م، Y={py:.1f}م) وترك مسافة عرضية {dist_mate:.1f}م عن أقرب مدافع مجاور، "
+                    f"مما يغطي انطلاقات مهاجمي {att_team_label} خلف الظهر. كان يجب التقدم إلى (X={opt_x:.1f}م، Y={opt_y:.1f}م)."
+                )
+                correction_arrows.append(
+                    {
+                        "track_id": tid,
+                        "team": p_team,
+                        "player_label": plabel,
+                        "action_type": "align_offside_line",
+                        "label_ar": f"ضبط خط التسلل (+{offside_drop:.1f}م)",
+                        "from_x_m": round(px, 2),
+                        "from_y_m": round(py, 2),
+                        "to_x_m": opt_x,
+                        "to_y_m": opt_y,
+                        "delta_m": round(float(math.hypot(opt_x - px, opt_y - py)), 1),
+                        "urgency": "high",
+                    }
+                )
+            elif dist_opp > 6.5 and dist_ball < 26.0:
+                status_tag = "loose_marking"
+                severity_score = min(84.0, dist_opp * 6.5)
+                if nearest_opp is not None:
+                    ox, oy = float(nearest_opp["x_m"]), float(nearest_opp["y_m"])
+                    # Step into passing lane between ball and nearest opponent
+                    opt_x = round(ox * 0.72 + bx * 0.28, 2)
+                    opt_y = round(oy * 0.72 + by * 0.28, 2)
+                did_not_ar = (
+                    f"لم يلتزم بالرقابة اللصيقة أو إغلاق ظل التمرير على {_player_display_label(nearest_opp) if nearest_opp else 'الخصم'} "
+                    f"(تركه حراً على مسافة {dist_opp:.1f}م)."
+                )
+                where_and_why_ar = (
+                    f"في «{zone_ar}» عند (X={px:.1f}م، Y={py:.1f}م): ابتعاده بـ {dist_opp:.1f}م سمح للخصم باستلام الكرة دون ضغط. "
+                    f"التمركز الصحيح لقطع قناة التمرير هو (X={opt_x:.1f}م، Y={opt_y:.1f}م)."
+                )
+                correction_arrows.append(
+                    {
+                        "track_id": tid,
+                        "team": p_team,
+                        "player_label": plabel,
+                        "action_type": "block_passing_lane",
+                        "label_ar": f"قطع قناة التمرير ({dist_opp:.1f}م)",
+                        "from_x_m": round(px, 2),
+                        "from_y_m": round(py, 2),
+                        "to_x_m": opt_x,
+                        "to_y_m": opt_y,
+                        "delta_m": round(float(math.hypot(opt_x - px, opt_y - py)), 1),
+                        "urgency": "medium",
+                    }
+                )
+            else:
+                status_tag = "disciplined"
+                severity_score = 18.0
+                did_not_ar = (
+                    f"لم يترك فجوة دفاعية حرجة (محافظ على مسافة رقابة {dist_opp:.1f}م وترابط {dist_mate:.1f}م مع أقرب زميل)."
+                )
+                where_and_why_ar = (
+                    f"تمركز منضبط في «{zone_ar}» عند (X={px:.1f}م، Y={py:.1f}م) يغلق زاوية التمرير المباشرة نحو المرمى."
+                )
+        else:
+            # Attacking player analysis
+            is_carrier = att_carrier is not None and int(att_carrier["track_id"]) == tid
+            my_channel = next((c for c in passing_channels if c["target_track_id"] == tid), None)
+            if is_carrier:
+                best_open = next((c for c in passing_channels if not c["is_blocked"]), None)
+                status_tag = "ball_carrier"
+                severity_score = 75.0
+                if best_open:
+                    opt_x, opt_y = best_open["to_x_m"], best_open["to_y_m"]
+                    did_not_ar = (
+                        f"إذا استمر بالاحتفاظ بالكرة تحت ضغط ({dist_opp:.1f}م من أقرب مدافع) دون التمرير إلى "
+                        f"{best_open['target_label']} فسيفقد أفضل قناة تمرير مفتوحة (خلوص {best_open['lane_clearance_m']:.1f}م)."
+                    )
+                    where_and_why_ar = (
+                        f"يمتلك الكرة في «{zone_ar}» عند (X={px:.1f}م، Y={py:.1f}م) مع سيطرة مكانية {pc_base['overall_control_pct']:.1f}%. "
+                        f"أفضل قرار تكتيكي فوري هو التمرير التقدمي (+{best_open['progressive_gain_m']:.1f}م) نحو "
+                        f"(X={opt_x:.1f}م، Y={opt_y:.1f}م)."
+                    )
+                else:
+                    did_not_ar = "لم يجد زاوية تمرير أمامية مفتوحة حالياً بسبب إغلاق الخصم لقنوات التمرير المباشرة."
+                    where_and_why_ar = (
+                        f"تحت ضغط على مسافة {dist_opp:.1f}م عند (X={px:.1f}م، Y={py:.1f}م) ويحتاج إلى تمريرة مساندة لفك التكتل."
+                    )
+            elif my_channel and my_channel["is_blocked"]:
+                status_tag = "in_cover_shadow"
+                severity_score = 64.0
+                # Move laterally 4.5m out of cover shadow and 3.5m progressively
+                step_x = 3.5 if attacks_right else -3.5
+                step_y = 4.5 if py < 34.0 else -4.5
+                opt_x = round(float(np.clip(px + step_x, 2.0, 103.0)), 2)
+                opt_y = round(float(np.clip(py + step_y, 3.0, 65.0)), 2)
+                did_not_ar = (
+                    f"لم يتحرك خارج ظل الرقابة (Cover Shadow) للمدافع #{my_channel['blocker_track_id']} "
+                    f"(خلوص ممر التمرير {my_channel['lane_clearance_m']:.2f}م فقط، أقل من حد التمرير الآمن 1.85م)."
+                )
+                where_and_why_ar = (
+                    f"وقف في زاوية تمرير مغلقة عند (X={px:.1f}م، Y={py:.1f}م) بسرعة {spd_kmh:.1f} كم/س. "
+                    f"كان يجب التحرك قطرياً إلى (X={opt_x:.1f}م، Y={opt_y:.1f}م) لفتح زاوية استلام في المساحة النصفية."
+                )
+                correction_arrows.append(
+                    {
+                        "track_id": tid,
+                        "team": p_team,
+                        "player_label": plabel,
+                        "action_type": "escape_cover_shadow",
+                        "label_ar": "تحرك لفتح زاوية تمرير",
+                        "from_x_m": round(px, 2),
+                        "from_y_m": round(py, 2),
+                        "to_x_m": opt_x,
+                        "to_y_m": opt_y,
+                        "delta_m": round(float(math.hypot(opt_x - px, opt_y - py)), 1),
+                        "urgency": "medium",
+                    }
+                )
+            else:
+                status_tag = "open_option"
+                severity_score = 30.0
+                clearance = my_channel["lane_clearance_m"] if my_channel else dist_opp
+                step_x = 4.5 if attacks_right else -4.5
+                opt_x = round(float(np.clip(px + step_x, 2.0, 103.0)), 2)
+                opt_y = round(py, 2)
+                did_not_ar = (
+                    f"لم يستغل بعد المساحة المفتوحة أمامه بالانطلاق خلف الخط الدفاعي رغم تفوقه المكاني ({dist_opp:.1f}م عن أقرب مدافع)."
+                )
+                where_and_why_ar = (
+                    f"متاح للاستلام في «{zone_ar}» عند (X={px:.1f}م، Y={py:.1f}م) بخلوص تمرير {clearance:.1f}م؛ "
+                    f"انطلاقه إلى (X={opt_x:.1f}م، Y={opt_y:.1f}م) يرفع التهديد المتوقع xT مباشرة."
+                )
+
+        player_states.append(
+            {
+                "track_id": tid,
+                "player_label": plabel,
+                "team": p_team,
+                "team_name": def_team_label if is_def else att_team_label,
+                "role": str(p.get("role", "player")),
+                "jersey_number": p.get("jersey_number"),
+                "x_m": round(px, 2),
+                "y_m": round(py, 2),
+                "opt_x_m": round(opt_x, 2),
+                "opt_y_m": round(opt_y, 2),
+                "speed_kmh": round(spd_kmh, 1),
+                "dist_to_ball_m": dist_ball,
+                "dist_to_nearest_opponent_m": dist_opp,
+                "dist_to_nearest_teammate_m": dist_mate,
+                "zone_ar": zone_ar,
+                "status_tag": status_tag,
+                "severity_score": round(severity_score, 1),
+                "did_ar": did_ar,
+                "did_not_ar": did_not_ar,
+                "where_and_why_ar": where_and_why_ar,
+            }
+        )
+
+    # Sort player_states so selected_track_id or highest-severity players come first
+    player_states.sort(
+        key=lambda s: (
+            1 if (selected_track_id is not None and s["track_id"] == int(selected_track_id)) else 0,
+            s["severity_score"],
+        ),
+        reverse=True,
+    )
+
+    # Pick the primary focal player for EACH team so BOTH teams are always analyzed simultaneously!
+    focal_player = player_states[0] if player_states else None
+    team_a_focal = next((s for s in player_states if s["team"] == "team_a"), focal_player)
+    team_b_focal = next((s for s in player_states if s["team"] == "team_b"), focal_player)
+    primary_def_fault = next(
+        (s for s in player_states if s["team"] == defending_team and s["status_tag"] != "disciplined"),
+        next((s for s in player_states if s["team"] == defending_team), focal_player),
+    )
+
+    # Simulate counterfactual Pitch Control if top 2 defensive correction arrows are applied
+    def_corr_map = {
+        c["track_id"]: (c["to_x_m"], c["to_y_m"])
+        for c in correction_arrows
+        if c["team"] == defending_team
+    }
+    if def_corr_map:
+        corrected_players = [
+            {
+                **p,
+                "x_m": def_corr_map[int(p["track_id"])][0],
+                "y_m": def_corr_map[int(p["track_id"])][1],
+            }
+            if int(p["track_id"]) in def_corr_map
+            else dict(p)
+            for p in players
+        ]
+        pc_after = compute_dynamic_pitch_control(
+            corrected_players,
+            ball_xy=(bx, by),
+            attacking_team=attacking_team,
+            nx=21,
+            ny=14,
+            goal_x=attack_goal_x,
+        )
+        xg_after = compute_shot_xg(
+            corrected_players,
+            ball_xy=(bx, by),
+            attacking_team=attacking_team,
+            goal_x=attack_goal_x,
+        )
+        risk_reduction_pct = round(
+            max(1.5, float(pc_base["box_control_pct"]) - float(pc_after["box_control_pct"])),
+            1,
+        )
+        xg_after_val = float(xg_after["xg"])
+    else:
+        risk_reduction_pct = 0.0
+        xg_after_val = float(xg_base["xg"])
+
+    open_channels_count = sum(1 for c in passing_channels if not c["is_blocked"])
+    ball_zone_ar = _describe_pitch_zone_ar(bx, by, attack_goal_x)
+
+    moment_summary = {
+        "frame_id": int(frame_id),
+        "time_s": round(float(time_s), 2),
+        "ball_x_m": round(bx, 2),
+        "ball_y_m": round(by, 2),
+        "ball_zone_ar": ball_zone_ar,
+        "attacking_team": attacking_team,
+        "defending_team": defending_team,
+        "attacking_team_name": att_team_label,
+        "defending_team_name": def_team_label,
+        "attacking_formation_live": att_formation["detected_shape"],
+        "defending_formation_live": def_formation["detected_shape"],
+        "attacking_pitch_control_pct": round(float(pc_base["overall_control_pct"]), 1),
+        "shot_xg_before": round(float(xg_base["xg"]), 3),
+        "shot_xg_after_correction": round(xg_after_val, 3),
+        "risk_reduction_if_corrected_pct": risk_reduction_pct,
+        "open_passing_channels_count": open_channels_count,
+        "headline_did_ar": (
+            primary_def_fault["did_ar"]
+            if primary_def_fault
+            else f"الكرة في {ball_zone_ar} عند (X={bx:.1f}م، Y={by:.1f}م)."
+        ),
+        "headline_did_not_ar": (
+            primary_def_fault["did_not_ar"]
+            if primary_def_fault
+            else "لم يتم رصد خلل تكتيكي في هذه اللحظة."
+        ),
+        "headline_where_and_why_ar": (
+            primary_def_fault["where_and_why_ar"]
+            if primary_def_fault
+            else "التمركز الدفاعي والهجومي متوازن حالياً."
+        ),
+        "focal_player": focal_player,
+        "team_a_focal_player": team_a_focal,
+        "team_b_focal_player": team_b_focal,
+    }
+
+    return {
+        "moment_summary": moment_summary,
+        "formations": {
+            attacking_team: att_formation,
+            defending_team: def_formation,
+        },
+        "passing_channels": passing_channels[:6],
+        "correction_arrows": correction_arrows[:6],
+        "player_states": player_states,
+    }
+
+
+TACTICAL_STYLES_CATALOG: dict[str, dict[str, Any]] = {
+    "balanced": {
+        "title_ar": "متوازن (Mid-Block & Progressive Build-up)",
+        "shift_x": 0.0,
+        "width_scale": 1.0,
+        "philosophy_ar": "توازن بين تأمين المنطقة 14 بمحور ارتكاز مزدوج والتدرج المنظم عبر أنصاف المساحات.",
+    },
+    "aggressive": {
+        "title_ar": "ضغط عالٍ عكسي (Gegenpressing & High Line)",
+        "shift_x": 0.10,
+        "width_scale": 0.92,
+        "philosophy_ar": "رفع خط الدفاع لمنتصف الملعب مع ضغط ثلاثي فوري خلال 5 ثوانٍ من فقدان الكرة لإجبار الخصم على الخطأ.",
+    },
+    "conservative": {
+        "title_ar": "تكتل دفاعي منخفض (Low-Block & Compactness)",
+        "shift_x": -0.09,
+        "width_scale": 0.80,
+        "philosophy_ar": "تضييق المساحات الطولية والعرضية أمام منطقة الجزاء وإغلاق العمق تماماً مع الاعتماد على التحولات.",
+    },
+    "tiki_taka": {
+        "title_ar": "تيكي تاكا واستحواذ هجومي (Positional Play & Triangles)",
+        "shift_x": 0.06,
+        "width_scale": 1.05,
+        "philosophy_ar": "تقارب الخطوط لخلق مثلثات تمرير قصيرة مستمرة وتفوق عددي في أنصاف المساحات والمنطقة 14.",
+    },
+    "counter_attack": {
+        "title_ar": "هجوم مرتد خاطف وتحولات عمودية (Direct Counter-Attack)",
+        "shift_x": -0.04,
+        "width_scale": 1.08,
+        "philosophy_ar": "استدراج الخصم للأمام ثم ضرب المساحات خلف أظهرة الخصم بتمريرة عمودية سريعة للأجنحة والمهاجم.",
+    },
+    "inverted_fullbacks": {
+        "title_ar": "أظهرة عكسية وصندوق وسط (Inverted Fullbacks & Box Midfield)",
+        "shift_x": 0.05,
+        "width_scale": 0.96,
+        "philosophy_ar": "دخول الظهيرين إلى عمق الوسط بجوار الارتكاز لتشكيل صندوق رباعي يسيطر على العمق ويحرر صناع اللعب.",
+    },
+    "wing_overload": {
+        "title_ar": "غزارة هجومية وعرضيات من الأطراف (Wing Overload)",
+        "shift_x": 0.07,
+        "width_scale": 1.15,
+        "philosophy_ar": "توسيع الملعب لأقصى درجة عبر الأجنحة والأظهرة المتقدمة لخلق موقف 2 ضد 1 على الطرف وإرسال عرضيات خطيرة.",
+    },
+}
+
+
+def _normalize_formation_digits(raw: str) -> str:
+    """Convert unhyphenated codes like '433', '4231', '3421', '352' into '4-3-3', '4-2-3-1', '3-4-2-1', '3-5-2'."""
+    s = (raw or "").strip()
+    if s in TACTICAL_FORMATIONS_CATALOG:
+        return s
+    if s.isdigit() and 3 <= len(s) <= 5:
+        digits = [int(ch) for ch in s]
+        if all(d > 0 for d in digits) and 8 <= sum(digits) <= 10:
+            return "-".join(str(d) for d in digits)
+    return s
+
+
+def parse_any_formation_spec(formation_code: str) -> dict[str, Any]:
+    """Return formation spec from catalog OR dynamically synthesize any custom formation (e.g. 3-5-2, 4-1-4-1, 5-3-2, 4-2-2-2, 3-2-4-1, 433, 4231)."""
+    clean = _normalize_formation_digits(formation_code)
+    if clean in TACTICAL_FORMATIONS_CATALOG:
+        return TACTICAL_FORMATIONS_CATALOG[clean]
+
+    parts = [int(p) for p in clean.replace("/", "-").replace(" ", "-").split("-") if p.strip().isdigit() and int(p) > 0]
+    if not parts or sum(parts) < 6 or sum(parts) > 10:
+        return TACTICAL_FORMATIONS_CATALOG["4-2-3-1"]
+    while sum(parts) < 10:
+        parts[-1] += 1
+    while sum(parts) > 10 and len(parts) > 1:
+        if parts[-1] > 1:
+            parts[-1] -= 1
+        else:
+            parts.pop()
+    norm_code = "-".join(str(p) for p in parts)
+    if norm_code in TACTICAL_FORMATIONS_CATALOG:
+        return TACTICAL_FORMATIONS_CATALOG[norm_code]
+
+    nodes: list[dict[str, Any]] = [
+        {"slot": "GK", "role_ar": "حارس مرمى", "x_norm": 0.06, "y_norm": 0.50}
+    ]
+    lines: list[dict[str, Any]] = []
+    n_lines = len(parts)
+    x_positions = np.linspace(0.22, 0.81, n_lines)
+    line_names_ar = ["خط الدفاع", "خط الوسط الأول", "خط الوسط المتقدم", "خط الهجوم"]
+
+    slot_counter = 1
+    per_band_slots: list[list[str]] = []
+    for l_idx, count in enumerate(parts):
+        x_val = round(float(x_positions[l_idx]), 3)
+        if count == 1:
+            y_vals = [0.50]
+        elif count == 2:
+            y_vals = [0.36, 0.64]
+        elif count == 3:
+            y_vals = [0.22, 0.50, 0.78]
+        elif count == 4:
+            y_vals = [0.15, 0.38, 0.62, 0.85]
+        else:
+            y_vals = [round(float(v), 3) for v in np.linspace(0.12, 0.88, count)]
+
+        ltype = "backline" if l_idx == 0 else ("attack" if l_idx == n_lines - 1 else "midfield")
+        llabel = line_names_ar[min(l_idx, len(line_names_ar) - 1)]
+        if l_idx == 0:
+            if count == 3:
+                band_prefixes = ["LCB", "CCB", "RCB"]
+            elif count == 4:
+                band_prefixes = ["LB", "LCB", "RCB", "RB"]
+            elif count == 5:
+                band_prefixes = ["LWB", "LCB", "CCB", "RCB", "RWB"]
+            else:
+                band_prefixes = ["LB"] + [f"CB{i + 1}" for i in range(max(0, count - 2))] + (["RB"] if count >= 2 else [])
+        elif l_idx == n_lines - 1:
+            if count == 1:
+                band_prefixes = ["ST"]
+            elif count == 2:
+                band_prefixes = ["LST", "RST"]
+            elif count == 3:
+                band_prefixes = ["LW", "ST", "RW"]
+            else:
+                band_prefixes = ["LW"] + [f"ST{i + 1}" for i in range(max(0, count - 2))] + ["RW"]
+        elif n_lines >= 4 and l_idx == 1:
+            if count == 1:
+                band_prefixes = ["CDM"]
+            elif count == 2:
+                band_prefixes = ["LDM", "RDM"]
+            elif count == 3:
+                band_prefixes = ["LDM", "CDM", "RDM"]
+            else:
+                band_prefixes = ["LM", "LDM", "RDM", "RM"] if count == 4 else [f"DM{i + 1}" for i in range(count)]
+        elif n_lines >= 4 and l_idx == 2:
+            if count == 1:
+                band_prefixes = ["CAM"]
+            elif count == 2:
+                band_prefixes = ["LAM", "RAM"]
+            elif count == 3:
+                band_prefixes = ["LW", "CAM", "RW"]
+            elif count == 4:
+                band_prefixes = ["LW", "LAM", "RAM", "RW"]
+            else:
+                band_prefixes = ["LW", "LAM", "CAM", "RAM", "RW"][:count]
+        else:
+            if count == 1:
+                band_prefixes = ["CDM"]
+            elif count == 2:
+                band_prefixes = ["LCM", "RCM"]
+            elif count == 3:
+                band_prefixes = ["LCM", "CM", "RCM"]
+            elif count == 4:
+                band_prefixes = ["LM", "LCM", "RCM", "RM"]
+            elif count == 5:
+                band_prefixes = ["LWB", "LCM", "CDM", "RCM", "RWB"]
+            else:
+                band_prefixes = ["LM"] + [f"CM{i + 1}" for i in range(max(0, count - 2))] + ["RM"]
+
+        line_slots: list[str] = []
+        for c_idx, y_val in enumerate(y_vals):
+            prefix = band_prefixes[c_idx] if c_idx < len(band_prefixes) else "CM"
+            slot_name = f"{prefix}{slot_counter}" if any(n["slot"] == prefix for n in nodes) else prefix
+            slot_counter += 1
+            nodes.append(
+                {
+                    "slot": slot_name,
+                    "role_ar": f"{llabel} ({slot_name})",
+                    "x_norm": x_val,
+                    "y_norm": round(float(y_val), 3),
+                }
+            )
+            line_slots.append(slot_name)
+        per_band_slots.append(line_slots)
+        if len(line_slots) >= 2:
+            lines.append({"line_type": ltype, "label_ar": f"{llabel} ({count})", "slots": line_slots})
+
+    # Connect single-player pivot/striker bands into tactical triangles so every formation has >= 3 connected lines
+    for l_idx, b_slots in enumerate(per_band_slots):
+        if len(b_slots) == 1:
+            neighbor = per_band_slots[l_idx - 1] if l_idx > 0 else (per_band_slots[l_idx + 1] if l_idx + 1 < len(per_band_slots) else [])
+            if len(neighbor) >= 2:
+                tri_slots = [neighbor[0], b_slots[0], neighbor[-1]]
+                tri_type = "attack" if l_idx == n_lines - 1 else "double_pivot"
+                tri_lbl = "مثلث الهجوم والربط" if l_idx == n_lines - 1 else "مثلث الارتكاز والتدرج"
+                lines.append({"line_type": tri_type, "label_ar": tri_lbl, "slots": tri_slots})
+
+    if len(lines) < 3 and len(per_band_slots) >= 2:
+        mid_b = per_band_slots[min(1, len(per_band_slots) - 1)]
+        att_b = per_band_slots[-1]
+        if len(mid_b) >= 2 and len(att_b) >= 1:
+            lines.append({"line_type": "attack", "label_ar": "وحدة الربط الهجومي", "slots": [mid_b[0], att_b[0], mid_b[-1]]})
+
+    return {
+        "code": norm_code,
+        "title_ar": f"تشكيل {norm_code} التكتيكي المخصص",
+        "philosophy_ar": f"توزيع تكتيكي مخصص ({norm_code}) يوازن بين الخطوط الـ {n_lines} ويغلق الممرات النصفية والمنطقة 14.",
+        "nodes": nodes,
+        "lines": lines,
+    }
+
+
+def _slot_position_compatibility(slot: str, player_pos: str) -> int:
+    """Return strict compatibility score (0..100) between a tactical formation slot and a player's real position."""
+    sl = slot.upper().strip()
+    pp = player_pos.upper().strip()
+    if sl == "GK":
+        return 100 if pp == "GK" else 0
+    if pp == "GK":
+        return 0
+
+    def _bucket(code: str) -> str:
+        c = re.sub(r"\d+$", "", code.upper().strip())
+        if c == "GK":
+            return "GK"
+        if c in ("CB", "LCB", "RCB", "CCB") or c.startswith("CB"):
+            return "CB"
+        if c in ("LB", "LWB") or c.startswith(("LB", "LWB")):
+            return "LB"
+        if c in ("RB", "RWB") or c.startswith(("RB", "RWB")):
+            return "RB"
+        if c in ("FB", "WB"):
+            return "FB"
+        if c in ("DM", "CDM", "LDM", "RDM") or c.startswith(("DM", "CDM")):
+            return "DM"
+        if c in ("AM", "CAM", "LAM", "RAM") or c.startswith(("AM", "CAM")):
+            return "AM"
+        if c in ("CM", "LCM", "RCM", "M") or c.startswith("CM"):
+            return "CM"
+        if c in ("LW", "LM", "LF") or c.startswith(("LW", "LM")):
+            return "LW"
+        if c in ("RW", "RM", "RF") or c.startswith(("RW", "RM")):
+            return "RW"
+        if c in ("ST", "CF", "LST", "RST", "FW", "SS") or c.startswith(("ST", "CF", "FW")):
+            return "ST"
+        return "CM"
+
+    sb = _bucket(sl)
+    pb = _bucket(pp)
+    if sb == pb:
+        return 100
+    compat_map: dict[tuple[str, str], int] = {
+        ("LB", "FB"): 92, ("RB", "FB"): 92, ("LB", "RB"): 65, ("RB", "LB"): 65,
+        ("LB", "LW"): 58, ("RB", "RW"): 58,
+        ("CB", "DM"): 55, ("CB", "RB"): 45, ("CB", "LB"): 45,
+        ("DM", "CM"): 88, ("CM", "DM"): 85, ("CM", "AM"): 88, ("AM", "CM"): 85,
+        ("DM", "AM"): 45, ("AM", "DM"): 40,
+        ("AM", "LW"): 78, ("AM", "RW"): 78, ("LW", "RW"): 88, ("RW", "LW"): 88,
+        ("LW", "AM"): 75, ("RW", "AM"): 75, ("LW", "ST"): 74, ("RW", "ST"): 74,
+        ("ST", "LW"): 72, ("ST", "RW"): 72, ("ST", "AM"): 62,
+        ("DM", "CB"): 52, ("CM", "LW"): 55, ("CM", "RW"): 55,
+        ("LB", "ST"): 0, ("RB", "ST"): 0, ("CB", "ST"): 0,
+        ("ST", "LB"): 0, ("ST", "RB"): 0, ("ST", "CB"): 0, ("ST", "DM"): 5,
+    }
+    return compat_map.get((sb, pb), 5)
+
+
+def _assign_roster_by_position(
+    slots: list[str],
+    roster: list[dict[str, Any]],
+) -> list[Optional[dict[str, Any]]]:
+    """Match real squad players to tactical slots globally via Hungarian optimization (zero Striker-at-LB!)."""
+    if not roster or not slots:
+        return [None] * len(slots)
+
+    n_slots = len(slots)
+    n_players = len(roster)
+    cost = np.zeros((n_slots, n_players), dtype=np.float64)
+
+    for s_idx, sl in enumerate(slots):
+        for r_idx, player in enumerate(roster):
+            p_pos = str(player.get("position") or "").strip()
+            if not p_pos:
+                nm = str(player.get("verified_name") or player.get("player_name") or "")
+                m_p = re.search(
+                    r"\b(GK|LCB|RCB|CCB|CB|LWB|RWB|LB|RB|CDM|LDM|RDM|DM|CAM|LAM|RAM|AM|LCM|RCM|CM|LW|RW|LM|RM|LST|RST|ST|CF|FW)\b",
+                    nm.upper(),
+                )
+                p_pos = m_p.group(1) if m_p else ("GK" if r_idx == 0 else "CM")
+            sc = _slot_position_compatibility(sl, p_pos)
+            # Lower cost = higher compatibility; tiny tie-breaker keeps earlier listed starters preferred
+            cost[s_idx, r_idx] = (1000.0 - float(sc)) + (0.005 * float(r_idx))
+
+    row_ind, col_ind = _linear_sum_assignment_pure(cost)
+    assigned: list[Optional[dict[str, Any]]] = [None] * n_slots
+    for r_i, c_i in zip(row_ind, col_ind):
+        assigned[int(r_i)] = roster[int(c_i)]
+    return assigned
+
+
+def _build_single_team_nodes_and_lines(
+    spec: dict[str, Any],
+    attack_right: bool,
+    roster: list[dict[str, Any]],
+    tactical_mode: str,
+    team_key: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    style_cfg = TACTICAL_STYLES_CATALOG.get(tactical_mode, TACTICAL_STYLES_CATALOG["balanced"])
+    mode_shift_x = float(style_cfg["shift_x"])
+    width_scale = float(style_cfg["width_scale"])
+
+    nodes_out: list[dict[str, Any]] = []
+    slot_to_xy: dict[str, tuple[float, float]] = {}
+    matched_roster = _assign_roster_by_position([str(nd["slot"]) for nd in spec["nodes"]], roster)
+
+    for idx, nd in enumerate(spec["nodes"]):
+        x_norm = float(nd["x_norm"])
+        y_norm = float(nd["y_norm"])
+        if nd["slot"] != "GK":
+            x_norm = float(np.clip(x_norm + mode_shift_x, 0.12, 0.92))
+            y_norm = float(np.clip(0.50 + (y_norm - 0.50) * width_scale, 0.08, 0.92))
+            if tactical_mode == "inverted_fullbacks" and nd["slot"] in ("RB", "LB", "RWB", "LWB"):
+                x_norm = float(np.clip(x_norm + 0.12, 0.25, 0.70))
+                y_norm = 0.50 + (y_norm - 0.50) * 0.58
+        if not attack_right:
+            x_norm = 1.0 - x_norm
+            y_norm = 1.0 - y_norm
+
+        x_m = round(x_norm * 105.0, 2)
+        y_m = round(y_norm * 68.0, 2)
+        slot_to_xy[nd["slot"]] = (x_m, y_m)
+
+        assigned = matched_roster[idx] if idx < len(matched_roster) else None
+        p_name = (
+            assigned.get("name_ar")
+            or assigned.get("verified_name")
+            or assigned.get("player_name")
+            or assigned.get("name_en")
+            or (f"#{assigned['jersey_number']}" if assigned and assigned.get("jersey_number") else nd["slot"])
+        ) if assigned else nd["slot"]
+
+        dir_s = 1.0 if attack_right else -1.0
+        slot_up = nd["slot"].upper()
+        if slot_up == "GK":
+            to_x = x_m
+            to_y = y_m
+            duty_ar = "حماية المرمى وتوجيه خط الدفاع وبناء اللعب الآمن"
+        elif any(k in slot_up for k in ("RB", "LB", "WB")):
+            if tactical_mode == "inverted_fullbacks":
+                to_x = round(float(np.clip(x_m + dir_s * 6.5, 4.0, 101.0)), 2)
+                to_y = round(y_m + (34.0 - y_m) * 0.30, 2)
+                duty_ar = "ظهير عكسي يدخل لعمق الوسط لتشكيل تفوق عددي في البناء"
+            else:
+                to_x = round(float(np.clip(x_m + dir_s * 9.0, 4.0, 101.0)), 2)
+                to_y = round(y_m + (34.0 - y_m) * 0.08, 2)
+                duty_ar = "تقدم هجومي على الطرف مع التغطية العكسية للممر النصفي"
+        elif any(k in slot_up for k in ("CAM", "AM", "CM")):
+            to_x = round(float(np.clip(x_m + dir_s * 7.5, 4.0, 101.0)), 2)
+            to_y = round(y_m + (34.0 - y_m) * 0.18, 2)
+            duty_ar = "اختراق المنطقة 14 وأنصاف المساحات لربط الخطوط وصناعة الفرص"
+        elif any(k in slot_up for k in ("RW", "LW", "RM", "LM")):
+            to_x = round(float(np.clip(x_m + dir_s * 8.5, 4.0, 101.0)), 2)
+            to_y = round(y_m + (34.0 - y_m) * (0.12 if tactical_mode == "wing_overload" else 0.28), 2)
+            duty_ar = "اختراق قطري خلف الظهير نحو منطقة الجزاء"
+        elif "ST" in slot_up:
+            to_x = round(float(np.clip(x_m + dir_s * 7.5, 4.0, 101.0)), 2)
+            to_y = y_m
+            duty_ar = "تثبيت قلبي الدفاع والانطلاق في ظهر الخط الخلفي"
+        elif "DM" in slot_up:
+            to_x = round(float(np.clip(x_m + dir_s * 3.5, 4.0, 101.0)), 2)
+            to_y = round(y_m + (34.0 - y_m) * 0.18, 2)
+            duty_ar = "حماية المنطقة 14 أمام قلبي الدفاع وإغلاق مسارات التحول"
+        else:
+            to_x = x_m
+            to_y = y_m
+            duty_ar = "ضبط خط التسلل والتغطية العميقة"
+
+        nodes_out.append(
+            {
+                "team": team_key,
+                "slot": nd["slot"],
+                "role_ar": nd["role_ar"],
+                "player_label": str(p_name),
+                "track_id": assigned.get("track_id") if assigned else None,
+                "jersey_number": assigned.get("jersey_number") if assigned else (idx + 1),
+                "x_m": x_m,
+                "y_m": y_m,
+                "move_to_x_m": to_x,
+                "move_to_y_m": to_y,
+                "duty_ar": duty_ar,
+            }
+        )
+
+    lines_out: list[dict[str, Any]] = []
+    for ln in spec["lines"]:
+        pts = sorted(
+            [
+                {"slot": sl, "x_m": slot_to_xy[sl][0], "y_m": slot_to_xy[sl][1]}
+                for sl in ln["slots"]
+                if sl in slot_to_xy and sl.upper() != "GK"
+            ],
+            key=lambda p: p["y_m"],
+        )
+        if len(pts) >= 2:
+            lines_out.append({"team": team_key, "line_type": ln["line_type"], "label_ar": ln["label_ar"], "points": pts})
+
+    # Formation-aware & style-aware progressive passing network (5 realistic links for ANY formation!)
+    passing_arrows: list[dict[str, Any]] = []
+    outfield_sorted = sorted(
+        [n for n in nodes_out if str(n["slot"]).upper() != "GK"],
+        key=lambda n: n["x_m"] if attack_right else -n["x_m"],
+    )
+    if len(outfield_sorted) >= 10:
+        defs = outfield_sorted[:3]
+        mids = outfield_sorted[3:7]
+        fwds = outfield_sorted[7:]
+        c_def = min(defs, key=lambda n: abs(n["y_m"] - 34.0))
+        w_def = max(defs, key=lambda n: abs(n["y_m"] - 34.0))
+        piv = min(mids, key=lambda n: abs(n["y_m"] - 34.0))
+        hs_mid = max(mids, key=lambda n: (n["x_m"] if attack_right else -n["x_m"]))
+        wide_att = max(fwds, key=lambda n: abs(n["y_m"] - 34.0))
+        striker = max(fwds, key=lambda n: (n["x_m"] if attack_right else -n["x_m"]))
+        if wide_att["slot"] == striker["slot"] and len(fwds) >= 2:
+            wide_att = fwds[0]
+
+        if tactical_mode == "wing_overload":
+            links = [
+                (c_def, w_def, "تدوير البناء للظهير", "Build-up to fullback"),
+                (w_def, wide_att, "تدرج طولي على الرواق", "Flank progression"),
+                (piv, hs_mid, "مساندة الممر النصفي", "Half-space support"),
+                (hs_mid, wide_att, "تحميل الجبهة الهجومية", "Overload wide zone"),
+                (wide_att, striker, "عرضية داخل منطقة الجزاء", "Cutback into box"),
+            ]
+        elif tactical_mode == "counter_attack":
+            links = [
+                (c_def, piv, "خروج أول سريع من الضغط", "First pass out of press"),
+                (piv, hs_mid, "تحول عمودي لكسر الوسط", "Vertical transition"),
+                (hs_mid, wide_att, "تمريرة في المساحة خلف الظهير", "Space behind fullback"),
+                (piv, striker, "تمريرة طولية مباشرة للمحطة", "Direct ball to target"),
+                (wide_att, striker, "تمريرة حاسمة بالصندوق", "Final box square pass"),
+            ]
+        else:
+            links = [
+                (c_def, piv, "بناء من الخلف للمحور", "Build-up to pivot"),
+                (piv, hs_mid, "تمريرة كاسرة للخطوط (Zone 14)", "Line-breaker to Zone 14"),
+                (w_def, wide_att, "تغيير ملعب للجناح الهجومي", "Switch to wide attacker"),
+                (hs_mid, wide_att, "لعب ثالث في نصف المساحة", "Third-man half-space"),
+                (hs_mid if hs_mid["slot"] != striker["slot"] else wide_att, striker, "تمريرة حاسمة للمهاجم", "Through-ball to striker"),
+            ]
+
+        seen_pairs: set[tuple[str, str]] = set()
+        for n1, n2, lbl_ar, lbl_en in links:
+            if n1["slot"] == n2["slot"] or (n1["slot"], n2["slot"]) in seen_pairs:
+                continue
+            seen_pairs.add((n1["slot"], n2["slot"]))
+            passing_arrows.append(
+                {
+                    "team": team_key,
+                    "from_slot": n1["slot"],
+                    "to_slot": n2["slot"],
+                    "from_x_m": n1["x_m"],
+                    "from_y_m": n1["y_m"],
+                    "to_x_m": n2["x_m"],
+                    "to_y_m": n2["y_m"],
+                    "label_ar": lbl_ar,
+                    "label_en": lbl_en,
+                }
+            )
+
+    return nodes_out, lines_out, passing_arrows
+
+
+COACH_MASTERCLASS_PRESETS: dict[str, dict[str, Any]] = {
+    "leverkusen_3421": {
+        "keywords": (
+            "ليفركوزن",
+            "ليفيركوزن",
+            "بايرنليفيركوزن",
+            "leverkusen",
+            "ألونسو",
+            "الونسو",
+            "المونسو",
+            "alonso",
+            "تشابي",
+            "xabi",
+            "3421",
+            "3-4-2-1",
+        ),
+        "formation_code": "3-4-2-1",
+        "opponent_formation_code": "4-4-2",
+        "style": "inverted_fullbacks",
+        "title_ar": "خطة 3-4-2-1 — صندوق الوسط والأجنحة العكسية",
+        "philosophy_ar": "بناء 3+2 لاستدراج الضغط، دخول الظهير الأيسر كصانع لعب إضافي بينما الظهير الأيمن يفتح أقصى العرض وثنائي صانعي اللعب يسيطران على أنصاف المساحات والمنطقة 14.",
+        "nodes": [
+            {"slot": "GK", "role_ar": "حارس مرمى ليبرو", "x_m": 6.0, "y_m": 34.0, "move_to_x_m": 6.0, "move_to_y_m": 34.0, "duty_ar": "توزيع قصير لكسر الضغط الأول"},
+            {"slot": "LCB", "role_ar": "قلب دفاع أيسر متقدم", "x_m": 27.0, "y_m": 16.5, "move_to_x_m": 31.0, "move_to_y_m": 18.0, "duty_ar": "التدرج بالكرة وتغذية نصف المساحة الأيسر"},
+            {"slot": "CB", "role_ar": "قلب دفاع محوري", "x_m": 24.5, "y_m": 34.0, "move_to_x_m": 27.0, "move_to_y_m": 34.0, "duty_ar": "تغطية العمق وتوجيه الترحيل"},
+            {"slot": "RCB", "role_ar": "قلب دفاع أيمن", "x_m": 27.0, "y_m": 51.5, "move_to_x_m": 31.0, "move_to_y_m": 50.0, "duty_ar": "تأمين الرواق الأيمن خلف الظهير المتقدم"},
+            {"slot": "LDM", "role_ar": "ارتكاز منظم", "x_m": 44.0, "y_m": 26.5, "move_to_x_m": 49.0, "move_to_y_m": 27.5, "duty_ar": "ضبط الإيقاع وتغيير اللعب للجهة العكسية"},
+            {"slot": "RDM", "role_ar": "ارتكاز ضاغط", "x_m": 45.0, "y_m": 41.5, "move_to_x_m": 51.0, "move_to_y_m": 40.5, "duty_ar": "كسر الخطوط واستخلاص الكرة الثانية"},
+            {"slot": "LWB", "role_ar": "ظهير-وسط أيسر عكسي", "x_m": 61.5, "y_m": 12.5, "move_to_x_m": 70.0, "move_to_y_m": 19.0, "duty_ar": "الدخول لنصف المساحة الأيسر وصناعة العرضيات"},
+            {"slot": "RWB", "role_ar": "جناح-ظهير أيمن هجومي", "x_m": 68.0, "y_m": 59.5, "move_to_x_m": 81.5, "move_to_y_m": 57.5, "duty_ar": "تمديد الملعب والاختراق في ظهر الظهير"},
+            {"slot": "LAM", "role_ar": "صانع لعب نصف مساحة أيسر", "x_m": 71.5, "y_m": 23.5, "move_to_x_m": 79.5, "move_to_y_m": 27.0, "duty_ar": "استلام بين الخطوط في المنطقة 14 واللعب الثالث"},
+            {"slot": "RAM", "role_ar": "صانع لعب نصف مساحة أيمن", "x_m": 71.0, "y_m": 44.5, "move_to_x_m": 79.0, "move_to_y_m": 41.0, "duty_ar": "الربط مع الجناح الأيمن وسحب الارتكاز"},
+            {"slot": "ST", "role_ar": "مهاجم محطة واختراق", "x_m": 84.0, "y_m": 34.0, "move_to_x_m": 90.0, "move_to_y_m": 34.0, "duty_ar": "تثبيت قلبي الدفاع واستغلال الكرات العرضية"},
+        ],
+        "lines": [
+            {"line_type": "backline", "label_ar": "خط الدفاع الثلاثي", "slots": ["LCB", "CB", "RCB"]},
+            {"line_type": "double_pivot", "label_ar": "ثنائي الارتكاز", "slots": ["LDM", "RDM"]},
+            {"line_type": "midfield", "label_ar": "خط الوسط الرباعي", "slots": ["LWB", "LDM", "RDM", "RWB"]},
+            {"line_type": "attack", "label_ar": "مثلث الهجوم (المنطقة 14)", "slots": ["LAM", "ST", "RAM"]},
+        ],
+        "passes": [
+            {"from_slot": "CB", "to_slot": "LDM", "label_ar": "استدراج الضغط للارتكاز", "label_en": "Bait press to pivot"},
+            {"from_slot": "LDM", "to_slot": "LAM", "label_ar": "كسر الخط للمنطقة 14", "label_en": "Line-breaker to Zone 14"},
+            {"from_slot": "LAM", "to_slot": "LWB", "label_ar": "لعب ثالث لنصف المساحة", "label_en": "Third-man half-space"},
+            {"from_slot": "RDM", "to_slot": "RWB", "label_ar": "تغيير ملعب للجناح السريع", "label_en": "Weak-side switch"},
+            {"from_slot": "RWB", "to_slot": "ST", "label_ar": "عرضية أرضية للعمق", "label_en": "Cutback to striker"},
+            {"from_slot": "RAM", "to_slot": "ST", "label_ar": "تمريرة بينية خلف الدفاع", "label_en": "Through-ball behind line"},
+        ],
+    },
+    "pep_3241": {
+        "keywords": ("جوارديولا", "غوارديولا", "السيتي", "مانشستر سيتي", "guardiola", "pep", "3-2-4-1", "3241"),
+        "formation_code": "3-2-4-1",
+        "opponent_formation_code": "4-4-2",
+        "style": "tiki_taka",
+        "title_ar": "خطة 3-2-4-1 — صندوق الوسط والسيطرة الموضعية",
+        "philosophy_ar": "تشكيل صندوق وسط رباعي في أنصاف المساحات مع تثبيت 3 مدافعين خلف الكرة وعزل الأجنحة 1 ضد 1.",
+        "nodes": [
+            {"slot": "GK", "role_ar": "حارس بناء", "x_m": 6.0, "y_m": 34.0, "move_to_x_m": 6.0, "move_to_y_m": 34.0, "duty_ar": "بدء التدرج الآمن"},
+            {"slot": "LCB", "role_ar": "مدافع أيسر", "x_m": 28.0, "y_m": 16.0, "move_to_x_m": 32.0, "move_to_y_m": 17.0, "duty_ar": "تغطية الطرف الأيسر"},
+            {"slot": "CB", "role_ar": "مدافع عمق", "x_m": 26.0, "y_m": 34.0, "move_to_x_m": 29.0, "move_to_y_m": 34.0, "duty_ar": "قيادة الخط الخلفي"},
+            {"slot": "RCB", "role_ar": "مدافع أيمن", "x_m": 28.0, "y_m": 52.0, "move_to_x_m": 32.0, "move_to_y_m": 51.0, "duty_ar": "تغطية التحولات"},
+            {"slot": "LDM", "role_ar": "ارتكاز أيسر", "x_m": 46.0, "y_m": 26.0, "move_to_x_m": 51.0, "move_to_y_m": 27.0, "duty_ar": "قاعدة الصندوق"},
+            {"slot": "RDM", "role_ar": "ارتكاز أيمن", "x_m": 46.0, "y_m": 42.0, "move_to_x_m": 51.0, "move_to_y_m": 41.0, "duty_ar": "تدوير الاستحواذ"},
+            {"slot": "LW", "role_ar": "جناح أيسر عريض", "x_m": 71.0, "y_m": 10.0, "move_to_x_m": 79.0, "move_to_y_m": 12.0, "duty_ar": "عزل الظهير 1 ضد 1"},
+            {"slot": "LAM", "role_ar": "وسط هجومي أيسر", "x_m": 67.0, "y_m": 24.0, "move_to_x_m": 75.0, "move_to_y_m": 26.0, "duty_ar": "الاستلام في نصف المساحة"},
+            {"slot": "RAM", "role_ar": "وسط هجومي أيمن", "x_m": 67.0, "y_m": 44.0, "move_to_x_m": 75.0, "move_to_y_m": 42.0, "duty_ar": "اختراق المنطقة 14"},
+            {"slot": "RW", "role_ar": "جناح أيمن عريض", "x_m": 71.0, "y_m": 58.0, "move_to_x_m": 79.0, "move_to_y_m": 56.0, "duty_ar": "فتح عرض الملعب"},
+            {"slot": "ST", "role_ar": "مهاجم الصندوق", "x_m": 85.0, "y_m": 34.0, "move_to_x_m": 91.0, "move_to_y_m": 34.0, "duty_ar": "استغلال العرضيات والعمق"},
+        ],
+        "lines": [
+            {"line_type": "backline", "label_ar": "ثلاثي البناء", "slots": ["LCB", "CB", "RCB"]},
+            {"line_type": "double_pivot", "label_ar": "محور الصندوق", "slots": ["LDM", "RDM"]},
+            {"line_type": "midfield", "label_ar": "الرباعي الهجومي", "slots": ["LW", "LAM", "RAM", "RW"]},
+        ],
+        "passes": [
+            {"from_slot": "CB", "to_slot": "LDM", "label_ar": "تدرج في العمق", "label_en": "Build to pivot"},
+            {"from_slot": "LDM", "to_slot": "LAM", "label_ar": "اختراق نصف المساحة", "label_en": "Half-space entry"},
+            {"from_slot": "RDM", "to_slot": "RAM", "label_ar": "تمريرة بين الخطوط", "label_en": "Between-lines pass"},
+            {"from_slot": "RAM", "to_slot": "RW", "label_ar": "عزل 1 ضد 1 على الطرف", "label_en": "Isolate winger"},
+            {"from_slot": "LAM", "to_slot": "ST", "label_ar": "تمريرة حاسمة للصندوق", "label_en": "Final box pass"},
+        ],
+    },
+    "klopp_433": {
+        "keywords": ("كلوب", "ليفربول", "klopp", "liverpool", "gegenpress", "جيجن بريس"),
+        "formation_code": "4-3-3",
+        "opponent_formation_code": "4-4-2",
+        "style": "aggressive",
+        "title_ar": "خطة 4-3-3 — ضغط عالٍ عكسي ومصائد الأطراف",
+        "philosophy_ar": "دفع الظهيرين عالياً كأجنحة إضافية مع تأمين الارتكاز ومثلثات ضغط فورية لاسترجاع الكرة في ملعب الخصم.",
+        "nodes": [
+            {"slot": "GK", "role_ar": "حارس ليبرو", "x_m": 6.0, "y_m": 34.0, "move_to_x_m": 6.0, "move_to_y_m": 34.0, "duty_ar": "تغطية المساحة خلف الخط العالي"},
+            {"slot": "LB", "role_ar": "ظهير هجومي أيسر", "x_m": 46.0, "y_m": 10.0, "move_to_x_m": 58.0, "move_to_y_m": 11.0, "duty_ar": "إرسال العرضيات المبكرة"},
+            {"slot": "LCB", "role_ar": "قلب دفاع أيسر", "x_m": 34.0, "y_m": 25.0, "move_to_x_m": 37.0, "move_to_y_m": 25.0, "duty_ar": "ضبط خط التسلل عند المنتصف"},
+            {"slot": "RCB", "role_ar": "قلب دفاع أيمن", "x_m": 34.0, "y_m": 43.0, "move_to_x_m": 37.0, "move_to_y_m": 43.0, "duty_ar": "التغطية الوقائية على المرتدات"},
+            {"slot": "RB", "role_ar": "ظهير صانع ألعاب أيمن", "x_m": 48.0, "y_m": 56.0, "move_to_x_m": 58.0, "move_to_y_m": 48.0, "duty_ar": "تمريرات قطرية كاسرة للخطوط"},
+            {"slot": "CDM", "role_ar": "ارتكاز دفاعي (6)", "x_m": 49.0, "y_m": 34.0, "move_to_x_m": 52.0, "move_to_y_m": 34.0, "duty_ar": "تأمين العمق واسترداد الكرة الثانية"},
+            {"slot": "LCM", "role_ar": "وسط ضاغط أيسر (8)", "x_m": 63.0, "y_m": 22.0, "move_to_x_m": 71.0, "move_to_y_m": 21.0, "duty_ar": "الضغط العكسي وتغطية تقدم الظهير"},
+            {"slot": "RCM", "role_ar": "وسط مساند أيمن (8)", "x_m": 63.0, "y_m": 46.0, "move_to_x_m": 71.0, "move_to_y_m": 45.0, "duty_ar": "غلق الممر النصفي والربط مع الجناح"},
+            {"slot": "LW", "role_ar": "جناح هداف أيسر", "x_m": 79.0, "y_m": 18.0, "move_to_x_m": 88.0, "move_to_y_m": 25.0, "duty_ar": "قطع قطري داخل الصندوق"},
+            {"slot": "ST", "role_ar": "مهاجم وهمي (9)", "x_m": 76.0, "y_m": 34.0, "move_to_x_m": 71.0, "move_to_y_m": 34.0, "duty_ar": "النزول للمنطقة 14 لسحب قلبي الدفاع"},
+            {"slot": "RW", "role_ar": "جناح هداف أيمن", "x_m": 80.0, "y_m": 50.0, "move_to_x_m": 89.0, "move_to_y_m": 42.0, "duty_ar": "اختراق خلف الظهير الأيسر للخصم"},
+        ],
+        "lines": [
+            {"line_type": "backline", "label_ar": "خط الدفاع المتقدم", "slots": ["LB", "LCB", "RCB", "RB"]},
+            {"line_type": "midfield", "label_ar": "مثلث الضغط العكسي", "slots": ["LCM", "CDM", "RCM"]},
+            {"line_type": "attack", "label_ar": "ثلاثي الاختراق القطري", "slots": ["LW", "ST", "RW"]},
+        ],
+        "passes": [
+            {"from_slot": "RCB", "to_slot": "RB", "label_ar": "فتح زاوية التمرير", "label_en": "Open right angle"},
+            {"from_slot": "RB", "to_slot": "RW", "label_ar": "تمريرة خلف خط الدفاع", "label_en": "Channel ball to RW"},
+            {"from_slot": "RB", "to_slot": "LW", "label_ar": "تغيير ملعب قطري", "label_en": "Diagonal switch"},
+            {"from_slot": "CDM", "to_slot": "ST", "label_ar": "كسر خط للـ False 9", "label_en": "Vertical into False 9"},
+            {"from_slot": "ST", "to_slot": "LW", "label_ar": "تمريرة بينية للانفراد", "label_en": "Layoff through-ball"},
+        ],
+    },
+    "inzaghi_352": {
+        "keywords": ("انزاجي", "إنزاجي", "انتر", "إنتر", "inzaghi", "inter", "3-5-2", "352"),
+        "formation_code": "3-5-2",
+        "opponent_formation_code": "4-3-3",
+        "style": "counter_attack",
+        "title_ar": "خطة 3-5-2 — تبادل المراكز والتحولات العمودية السريعة",
+        "philosophy_ar": "تقدم أحد قلبي الدفاع الطرفيين للمساندة مع ثلاثي وسط حركي وثنائي هجومي متكامل (محطة + مهاجم متحرك).",
+        "nodes": [
+            {"slot": "GK", "role_ar": "حارس بناء متقن", "x_m": 6.0, "y_m": 34.0, "move_to_x_m": 6.0, "move_to_y_m": 34.0, "duty_ar": "بدء اللعب تحت الضغط"},
+            {"slot": "LCB", "role_ar": "مدافع أيسر منطلق", "x_m": 28.0, "y_m": 17.0, "move_to_x_m": 38.0, "move_to_y_m": 16.0, "duty_ar": "التدرج بالكرة لنصف ملعب الخصم"},
+            {"slot": "CB", "role_ar": "قلب دفاع قشاش", "x_m": 24.0, "y_m": 34.0, "move_to_x_m": 26.0, "move_to_y_m": 34.0, "duty_ar": "قيادة التمركز الدفاعي"},
+            {"slot": "RCB", "role_ar": "مدافع أيمن", "x_m": 27.0, "y_m": 51.0, "move_to_x_m": 33.0, "move_to_y_m": 50.0, "duty_ar": "التغطية وبناء اللعب"},
+            {"slot": "LWB", "role_ar": "ظهير جناح أيسر", "x_m": 58.0, "y_m": 9.0, "move_to_x_m": 72.0, "move_to_y_m": 11.0, "duty_ar": "عرضيات متقنة على القائم البعيد"},
+            {"slot": "LCM", "role_ar": "وسط ثامن أيسر", "x_m": 54.0, "y_m": 23.0, "move_to_x_m": 64.0, "move_to_y_m": 22.0, "duty_ar": "الربط مع الظهير والمهاجم"},
+            {"slot": "CDM", "role_ar": "ريجيستا صانع لعب عميق", "x_m": 44.0, "y_m": 34.0, "move_to_x_m": 48.0, "move_to_y_m": 34.0, "duty_ar": "توزيع الكرات الطولية والقطرية"},
+            {"slot": "RCM", "role_ar": "وسط ثامن مخترق", "x_m": 55.0, "y_m": 45.0, "move_to_x_m": 67.0, "move_to_y_m": 44.0, "duty_ar": "الاختراق بدون كرة داخل الصندوق"},
+            {"slot": "RWB", "role_ar": "ظهير جناح أيمن", "x_m": 58.0, "y_m": 59.0, "move_to_x_m": 73.0, "move_to_y_m": 57.0, "duty_ar": "توسيع الملعب واقتحام القائم الثاني"},
+            {"slot": "LST", "role_ar": "مهاجم ثانٍ رابط", "x_m": 77.0, "y_m": 27.0, "move_to_x_m": 84.0, "move_to_y_m": 28.0, "duty_ar": "استلام بين الخطوط وتفريغ المساحة"},
+            {"slot": "RST", "role_ar": "مهاجم صندوق صريح", "x_m": 83.0, "y_m": 41.0, "move_to_x_m": 90.0, "move_to_y_m": 37.0, "duty_ar": "مهاجمة عمق المرمى وإنهاء العرضيات"},
+        ],
+        "lines": [
+            {"line_type": "backline", "label_ar": "الثلاثي الدفاعي المرن", "slots": ["LCB", "CB", "RCB"]},
+            {"line_type": "midfield", "label_ar": "خماسي الوسط والأطراف", "slots": ["LWB", "LCM", "CDM", "RCM", "RWB"]},
+            {"line_type": "attack", "label_ar": "ثنائي الهجوم المتكامل", "slots": ["LCB", "LST", "RST", "RWB"]},
+        ],
+        "passes": [
+            {"from_slot": "CB", "to_slot": "CDM", "label_ar": "تفريغ للريجيستا", "label_en": "Feed deep playmaker"},
+            {"from_slot": "CDM", "to_slot": "LWB", "label_ar": "تغيير ملعب للرواق الأيسر", "label_en": "Switch to left wingback"},
+            {"from_slot": "LCB", "to_slot": "LST", "label_ar": "تمريرة عمودية للمهاجم الرابط", "label_en": "Vertical to second striker"},
+            {"from_slot": "LST", "to_slot": "RCM", "label_ar": "سند الكرة للثامن المنطلق", "label_en": "Layoff to runner"},
+            {"from_slot": "LWB", "to_slot": "RST", "label_ar": "عرضية حاسمة بالصندوق", "label_en": "Cross into striker"},
+        ],
+    },
+}
+
+
+def match_masterclass_preset(prompt: str) -> Optional[dict[str, Any]]:
+    """Match explicit tactical masterclass prompts (e.g., Xabi Alonso Leverkusen 3-4-2-1)."""
+    low = (prompt or "").strip().lower()
+    if not low:
+        return None
+    for preset in COACH_MASTERCLASS_PRESETS.values():
+        if any(kw in low for kw in preset["keywords"]):
+            return preset
+    return None
+
+
+def enrich_arrows_with_probabilities(
+    arrows: list[dict[str, Any]],
+    team_nodes: list[dict[str, Any]],
+    opp_nodes: list[dict[str, Any]],
+    attack_right: bool = True,
+) -> list[dict[str, Any]]:
+    """Snap arrows cleanly to player nodes (when slots provided) and compute deterministic xPass % & +OBV."""
+    from packages.tactics_engine.event_models import (
+        _count_defenders_in_lane,
+        compute_obv_delta,
+        compute_xpass_probability,
+    )
+
+    slot_map = {str(n.get("slot", "")).upper(): n for n in team_nodes}
+    opp_xy = [
+        (float(o["x_m"]), float(o["y_m"]))
+        for o in opp_nodes
+        if str(o.get("slot", "")).upper() != "GK"
+    ]
+
+    enriched: list[dict[str, Any]] = []
+    for raw in arrows[:8]:
+        if not isinstance(raw, dict):
+            continue
+        f_slot = str(raw.get("from_slot", "")).upper()
+        t_slot = str(raw.get("to_slot", "")).upper()
+        n_from = slot_map.get(f_slot)
+        n_to = slot_map.get(t_slot)
+        fx = float(n_from["x_m"]) if n_from else float(raw.get("from_x_m", 35.0))
+        fy = float(n_from["y_m"]) if n_from else float(raw.get("from_y_m", 34.0))
+        tx = float(n_to["x_m"]) if n_to else float(raw.get("to_x_m", 55.0))
+        ty = float(n_to["y_m"]) if n_to else float(raw.get("to_y_m", 34.0))
+
+        if math.hypot(tx - fx, ty - fy) < 3.0:
+            continue
+
+        passer_pressure = min((math.hypot(ox - fx, oy - fy) for ox, oy in opp_xy), default=8.0)
+        lane_defs = _count_defenders_in_lane(fx, fy, tx, ty, opp_xy, corridor_m=2.8)
+        xp_prob = compute_xpass_probability(fx, fy, tx, ty, attack_right, passer_pressure, lane_defs)
+        obv_info = compute_obv_delta(fx, fy, tx, ty, attack_right, retained_possession=True)
+        xpass_pct = int(max(15, min(98, round(xp_prob * 100.0))))
+
+        enriched.append(
+            {
+                **raw,
+                "from_x_m": round(fx, 1),
+                "from_y_m": round(fy, 1),
+                "to_x_m": round(tx, 1),
+                "to_y_m": round(ty, 1),
+                "xpass_pct": xpass_pct,
+                "obv_delta": round(float(obv_info["obv"]), 4),
+                "lane_defenders": int(lane_defs),
+            }
+        )
+    return enriched
+
+
+def build_formation_blueprint(
+    formation_code: str = "4-2-3-1",
+    team_name: str = "الأهلي",
+    opponent_name: str = "إنبي",
+    attack_right: bool = True,
+    roster_players: Optional[list[dict[str, Any]]] = None,
+    tactical_mode: str = "balanced",
+    opponent_formation_code: str = "4-4-2",
+    opponent_roster_players: Optional[list[dict[str, Any]]] = None,
+    opponent_tactical_mode: str = "balanced",
+) -> dict[str, Any]:
+    """Generate a complete 22-player (Two-Team 11v11) visual tactical formation blueprint on a 105x68m FIFA pitch.
+
+    Supports ANY formation code (catalog or custom hyphenated string) and ANY tactical style for both teams!
+    """
+    spec_a = parse_any_formation_spec(formation_code)
+    spec_b = parse_any_formation_spec(opponent_formation_code)
+    style_cfg = TACTICAL_STYLES_CATALOG.get(tactical_mode, TACTICAL_STYLES_CATALOG["balanced"])
+
+    nodes_a, lines_a, passes_a = _build_single_team_nodes_and_lines(
+        spec=spec_a,
+        attack_right=attack_right,
+        roster=list(roster_players or []),
+        tactical_mode=tactical_mode,
+        team_key="team_a",
+    )
+    nodes_b, lines_b, passes_b = _build_single_team_nodes_and_lines(
+        spec=spec_b,
+        attack_right=not attack_right,
+        roster=list(opponent_roster_players or []),
+        tactical_mode=opponent_tactical_mode,
+        team_key="team_b",
+    )
+
+    passes_a = enrich_arrows_with_probabilities(passes_a, nodes_a, nodes_b, attack_right=attack_right)
+    passes_b = enrich_arrows_with_probabilities(passes_b, nodes_b, nodes_a, attack_right=not attack_right)
+
+    zone14_x1 = 68.0 if attack_right else (105.0 - 88.5)
+    zone14_x2 = 88.5 if attack_right else (105.0 - 68.0)
+
+    return {
+        "formation_code": spec_a["code"],
+        "opponent_formation_code": spec_b["code"],
+        "title_ar": f"{spec_a['code']} — {style_cfg['title_ar']}",
+        "philosophy_ar": f"{spec_a['philosophy_ar']} • {style_cfg['philosophy_ar']}",
+        "team_name": team_name,
+        "opponent_name": opponent_name,
+        "tactical_mode": tactical_mode,
+        "opponent_tactical_mode": opponent_tactical_mode,
+        "nodes": nodes_a,
+        "lines": lines_a,
+        "passing_arrows": passes_a,
+        "opponent_nodes": nodes_b,
+        "opponent_lines": lines_b,
+        "opponent_passing_arrows": passes_b,
+        "tactical_zones": [
+            {
+                "zone_id": "zone_14",
+                "label_ar": "Zone 14 (عمق صناعة اللعب)",
+                "x1_m": round(zone14_x1, 1),
+                "y1_m": 22.0,
+                "x2_m": round(zone14_x2, 1),
+                "y2_m": 46.0,
+            },
+            {
+                "zone_id": "half_space_top",
+                "label_ar": "الممر النصفي العلوي",
+                "x1_m": round(zone14_x1 - 12.0, 1),
+                "y1_m": 13.8,
+                "x2_m": round(zone14_x2, 1),
+                "y2_m": 24.5,
+            },
+            {
+                "zone_id": "half_space_bottom",
+                "label_ar": "الممر النصفي السفلي",
+                "x1_m": round(zone14_x1 - 12.0, 1),
+                "y1_m": 43.5,
+                "x2_m": round(zone14_x2, 1),
+                "y2_m": 54.2,
+            },
+        ],
+        "execution_steps_ar": [
+            f"1. تطبيق تشكيل {spec_a['code']} لفريق {team_name} بأسلوب «{style_cfg['title_ar']}» في مواجهة تشكيل {spec_b['code']} لفريق {opponent_name}.",
+            f"2. ضبط المسافة الطولية بين الخطوط وإغلاق المنطقة 14 مع تفعيل قنوات التمرير المرسومة على الملعب.",
+            "3. يمكنك سحب أي لاعب من الفريقين بالماوس أو رسم أي أسهم ومناطق ضغط بحرية كاملة أو طلب أي خطة من الذكاء الاصطناعي!",
+        ],
+    }

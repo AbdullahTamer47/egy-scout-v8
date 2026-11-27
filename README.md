@@ -11,7 +11,19 @@
 
 ## 🌟 Overview
 
-**EGY-SCOUT V8** is an end-to-end, enterprise-grade AI tactical analytics and talent scouting monorepo tailored for the **Egyptian Premier League (EPL)** and regional competitions. Designed to bridge the gap between computer vision engineering and tactical coaching staff, EGY-SCOUT delivers real-time 60FPS broadcast overlays, calibrated pitch control heatmaps, 3D ball trajectory vectors, counterfactual ("What-If") tactical simulation, and zero-bias scouting metrics.
+**EGY-SCOUT V8** is an end-to-end AI tactical analytics, coaching, and talent scouting platform tailored for the **Egyptian Premier League (2026/27)** alongside Europe's Big 5 leagues (`Premier League`, `LaLiga`, `Bundesliga`, `Serie A`, `Ligue 1`), `UEFA CL`, and `CAF CL`.
+
+### 1. EGY-SCOUT Coach Pro — Standalone Mobile-First App (`coach-pro-app/`)
+- **Live Production URL:** https://egy-scout-coach-pro.vercel.app
+- Independent mobile-optimized Next.js + FastAPI serverless deployment:
+  - Live auto-synced standings, schedules, and squads across Egypt & Europe's Big 5 with official modern HD logos.
+  - AI-powered 3-phase tactical workspace (`In Possession`, `Attacking`, `Defense & Recovery`) with pure tactical formations (`3-4-2-1`, `3-2-4-1`, `4-3-3`, `3-5-2`, `4-2-3-1`), smooth multi-phase animation, `5×5..11×11` boards, editable positions/roles, touch pitch controls, training session planner, and matchday squad administration.
+
+### 2. Full Video Analysis Studio — Alpha / Beta (`apps/`, `packages/`, `services/`)
+- Broadcast match video upload & CV analysis studio (Alpha / Beta under active development) featuring player & ball tracking, live `2D` tactical radar twin, passing lane `xPass%`, pressing momentum charts, AR telestrator tools (`Spotlight`, `3D Arrow`, `Zone`, `Ghost`), and automated moment tagging.
+
+### 3. Explainer Video Studio Pipeline (`scripts/video_studio/`)
+- Automated live-UI capture (`capture_live_clips.mjs`), ElevenLabs `eleven_v4` voiceover synthesis (`generate_vo.py`), and `1920×1080` 30fps Lovio-style stage composition (`scene_stage.html`, `render_videos.mjs`).
 
 ---
 
@@ -19,21 +31,24 @@
 
 ```
 manger/
+├── coach-pro-app/               # Standalone mobile-first Coach Pro app (deployed on Vercel)
 ├── apps/
-│   ├── api/                     # FastAPI ASGI microservice (RBAC, telemetry streams, player crops, DRM)
-│   └── web/                     # Next.js 16 App Router UI (Broadcast Studio, QA Sheet, Fair Scouting)
+│   ├── api/                     # FastAPI ASGI service (Coach Pro API, telemetry streams, RBAC)
+│   └── web/                     # Full Next.js 16 workspace (/ Video Studio Beta + /coach)
 ├── packages/
-│   ├── shared_contracts/        # Apache Parquet schemas, R2 storage, lineup parser, DB models
-│   ├── tactics_engine/          # Pitch control Voronoi/Spearman, counterfactual simulator, playbook
-│   ├── scouting_core/           # Zero-bias scouting engine (StatsBomb benchmark vs. raw tracks)
-│   └── innovation_lab/          # 2D Kinematic sandbox & set-piece optimizer
+│   ├── coach_engine/            # Live Football Data Hub (Big 5 + Egypt), AI Assistant, Training & Admin
+│   ├── shared_contracts/        # Config, schemas, lineup parser, storage connectors
+│   ├── tactics_engine/          # 3-phase tactical blueprints, counterfactual simulator, xPass/OBV
+│   ├── scouting_core/           # Zero-bias scouting metrics & benchmark evaluation
+│   └── innovation_lab/          # Kinematic sandbox & set-piece optimizer
 ├── services/
-│   ├── cv_worker/               # Multi-stage CV worker (Referee shield, Jersey OCR, Ball tracker, Re-ID)
-│   └── orchestrator/            # 18-chunk map-reduce pipeline & cross-chunk stitcher
-├── notebooks/                   # Kaggle / Google Colab L4 & T4 zero-budget inference workflows
-├── tests/                       # Complete automated unit and integration test suite
-├── tools/                       # Benchmark evaluator & Phase 0 annotator
-└── docs/                        # Master plan v8, pitch deck, and architecture specifications
+│   ├── cv_worker/               # CV tracking worker (Jersey OCR, ball tracker, calibration, Re-ID)
+│   └── orchestrator/            # Map-reduce video analysis pipeline
+├── scripts/
+│   └── video_studio/            # Automated live capture, VO generation & 1080p video renderer
+├── notebooks/                   # Colab/Kaggle inference notebooks
+├── tests/                       # Automated unit and integration test suite
+└── docs/                        # Architecture briefs and roadmaps
 ```
 
 ---
