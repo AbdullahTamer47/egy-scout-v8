@@ -3,9 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 const CHROME_PATH = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
-const ASSETS_ROOT =
-  "C:\\Users\\Abdullah_Yassen\\.gemini\\antigravity\\brain\\63f869d2-f74e-4708-9f2a-2f435628b8c8\\scratch\\video_assets";
-const CLIPS_ROOT = path.join(ASSETS_ROOT, "clips_v3");
+const ASSETS_ROOT = "D:\\egy-scout-data\\video_studio_tmp";
+const CLIPS_ROOT = path.join(ASSETS_ROOT, "clips_v4");
+const LOGOS_DIR = path.join(ASSETS_ROOT, "logos");
 const OUT_DIR = "D:\\manger\\coach_pro_videos";
 const STAGE_URL = "file:///D:/manger/scripts/video_studio/scene_stage.html";
 const FPS = 30;
@@ -39,20 +39,30 @@ function getClipFrames(clipKey) {
   return clipIndexCache.get(clipKey);
 }
 
-// Keep a tiny rolling base64 cache so RAM stays lean
 const uriCache = new Map();
 function loadFrameUri(filePath) {
   if (!filePath) return "";
   if (!uriCache.has(filePath)) {
-    if (uriCache.size > 200) uriCache.clear();
+    if (uriCache.size > 220) uriCache.clear();
     const buf = fs.readFileSync(filePath);
     uriCache.set(filePath, `data:image/jpeg;base64,${buf.toString("base64")}`);
   }
   return uriCache.get(filePath);
 }
 
+function loadLogoUris(logos) {
+  const map = {};
+  for (const item of logos || []) {
+    const p = path.join(LOGOS_DIR, item.file);
+    if (fs.existsSync(p)) {
+      map[item.id] = `data:image/png;base64,${fs.readFileSync(p).toString("base64")}`;
+    }
+  }
+  return map;
+}
+
 async function openChromeCdp(port) {
-  const userDataDir = path.join(ASSETS_ROOT, `chrome_render_v3_${port}`);
+  const userDataDir = path.join(ASSETS_ROOT, `chrome_render_v4_${port}`);
   fs.mkdirSync(userDataDir, { recursive: true });
   const proc = spawn(
     CHROME_PATH,
@@ -121,11 +131,12 @@ async function openChromeCdp(port) {
 }
 
 async function renderOneVideo(lang, cdpPort) {
-  const manifestPath = path.join(ASSETS_ROOT, `manifest_v3_${lang}.json`);
+  const manifestPath = path.join(ASSETS_ROOT, `manifest_v4_${lang}.json`);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
   const scenes = manifest.scenes;
   const totalDur = manifest.total_duration_s;
   const totalFrames = Math.ceil(totalDur * FPS);
+  const logoUris = loadLogoUris(manifest.logos);
   const outMp4 = path.join(OUT_DIR, `EGY_SCOUT_Coach_Pro_${lang.toUpperCase()}.mp4`);
 
   console.log(
@@ -181,12 +192,16 @@ async function renderOneVideo(lang, cdpPort) {
       const frames = getClipFrames(sc.clip);
       let liveFrameDataUri = "";
       if (frames.length > 0) {
-        // Fit the entire live UI action cleanly inside the scene's vocal beat duration
-        const effTime = sc.template === "lovio_multi_leagues"
-          ? Math.max(0, localTime - 1.55) / Math.max(0.5, sc.duration_s - 1.55)
-          : sc.template === "lovio_prompt_live"
-          ? Math.max(0, localTime - 1.15) / Math.max(0.5, sc.duration_s - 1.15)
-          : localTime / Math.max(0.5, sc.duration_s);
+        const effTime =
+          sc.template === "lovio_multi_leagues"
+            ? Math.max(0, localTime - 2.0) / Math.max(0.5, sc.duration_s - 2.0)
+            : sc.template === "lovio_prompt_live"
+            ? Math.max(0, localTime - 1.25) / Math.max(0.5, sc.duration_s - 1.25)
+            : sc.template === "lovio_phases_live"
+            ? Math.max(0, localTime - 0.95) / Math.max(0.5, sc.duration_s - 0.95)
+            : sc.template === "lovio_alpha_live"
+            ? Math.max(0, localTime - 1.05) / Math.max(0.5, sc.duration_s - 1.05)
+            : localTime / Math.max(0.5, sc.duration_s);
         const fIdx = Math.min(frames.length - 1, Math.floor(Math.max(0, Math.min(0.999, effTime)) * frames.length));
         liveFrameDataUri = loadFrameUri(frames[fIdx]);
       }
@@ -194,10 +209,9 @@ async function renderOneVideo(lang, cdpPort) {
       await send("Runtime.evaluate", {
         expression: `window.renderFrame(${JSON.stringify({
           lang,
-          sceneIdx: curIdx,
-          totalScenes: scenes.length,
           scene: sc,
-          crests: manifest.crests || [],
+          logos: manifest.logos || [],
+          logoUris: sc.template === "lovio_multi_leagues" ? logoUris : {},
           localTime,
           globalProgress: t / totalDur,
           liveFrameDataUri,
@@ -211,7 +225,7 @@ async function renderOneVideo(lang, cdpPort) {
         await new Promise((res) => ff.stdin.once("drain", res));
       }
 
-      if (f % 150 === 0 || f === totalFrames - 1) {
+      if (f % 180 === 0 || f === totalFrames - 1) {
         console.log(`[${lang.toUpperCase()}] frame ${f + 1}/${totalFrames} (${sc.id})`);
       }
     }
@@ -229,7 +243,7 @@ async function renderOneVideo(lang, cdpPort) {
 }
 
 async function main() {
-  await Promise.all([renderOneVideo("ar", 9340), renderOneVideo("en", 9341)]);
+  await Promise.all([renderOneVideo("ar", 9350), renderOneVideo("en", 9351)]);
 }
 
 main().catch((e) => {

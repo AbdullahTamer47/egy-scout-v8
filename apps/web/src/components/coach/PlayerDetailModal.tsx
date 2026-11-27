@@ -39,7 +39,7 @@ export default function PlayerDetailModal({ lang, player, club, onClose, onAskAi
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white border border-[#D8E3EB] shadow-2xl text-[#0B1F3A]"
+        className="w-full max-w-lg max-h-[90dvh] overflow-y-auto rounded-2xl bg-white border border-[#D8E3EB] shadow-2xl text-[#0B1F3A]"
       >
         {/* Clean Light Executive Header Banner */}
         <div
@@ -209,7 +209,7 @@ export default function PlayerDetailModal({ lang, player, club, onClose, onAskAi
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold transition shadow-xs"
             >
               <Bot className="w-4 h-4" />
-              <span>{isAr ? "اسأل المساعد الذكي عن توظيف اللاعب" : "Ask AI Copilot about this player"}</span>
+              <span>{isAr ? "اسأل الذكاء الاصطناعي (AI) عن توظيف اللاعب" : "Ask AI about this player"}</span>
             </button>
           )}
         </div>

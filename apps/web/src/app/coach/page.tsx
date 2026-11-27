@@ -339,7 +339,7 @@ export default function CoachProPage() {
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#0D717A] hover:bg-[#0B5E66] text-white text-xs font-extrabold shadow-xs"
               >
                 <Bot className="w-4 h-4" />
-                <span>{isAr ? "المساعد الذكي (AI)" : "AI Copilot"}</span>
+                <span>{isAr ? "المساعد الذكي (AI)" : "AI Assistant"}</span>
               </button>
               <button
                 type="button"
@@ -364,8 +364,8 @@ export default function CoachProPage() {
               onChange={(e) => setQuickPrompt(e.target.value)}
               placeholder={
                 isAr
-                  ? `أمر سريع للذكاء الاصطناعي: "ارسم خطة 3-4-2-1 ألونسو"، "صمم حصة MD-2"، أو "جهز كشف المباراة"...`
-                  : "Quick AI Command..."
+                  ? `أمر سريع بالـ AI: "ارسم خطة 3-4-2-1"، "صمم حصة MD-2"، أو "جهز كشف المباراة"...`
+                  : `Quick AI command: "Draw 3-4-2-1", "Build MD-2 session", or "Prepare matchday sheet"...`
               }
               className="flex-1 rounded-xl bg-[#F2F6F8] border border-[#D8E3EB] focus:border-[#0FB5AE] focus:bg-white px-3.5 py-1.5 text-xs text-[#0B1F3A] placeholder:text-[#5C6A7C] outline-none"
             />
@@ -490,14 +490,14 @@ export default function CoachProPage() {
       </div>
 
       {/* Mobile Bottom Nav */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-slate-200 shadow-lg grid grid-cols-6 py-1.5 px-1">
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-[#D8E3EB] shadow-lg grid grid-cols-6 py-1 px-1 pb-[max(0.25rem,env(safe-area-inset-bottom))]">
         {navTabs.map((item) => (
           <button
             key={item.id}
             type="button"
             onClick={() => setTab(item.id)}
-            className={`flex flex-col items-center justify-center gap-0.5 py-1 rounded-lg text-[9.5px] font-bold ${
-              tab === item.id ? "text-emerald-700" : "text-slate-500"
+            className={`min-h-[44px] flex flex-col items-center justify-center gap-0.5 py-1 rounded-xl text-[9.5px] font-extrabold transition ${
+              tab === item.id ? "bg-[#E6F8F7] text-[#0D717A]" : "text-[#5C6A7C]"
             }`}
           >
             {item.icon}

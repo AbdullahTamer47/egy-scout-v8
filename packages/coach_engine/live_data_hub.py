@@ -35,6 +35,7 @@ SUPPORTED_LEAGUES: dict[str, dict[str, str]] = {
         "tsdb_id": "4829",
         "espn_slug": "egy.1",
         "country_flag": "🇪🇬",
+        "logo_url": "https://imagecache.365scores.com/image/upload/f_png,w_96,h_96,c_limit,q_auto:eco,dpr_2,d_Competitions:default.png/v1/Competitions/552",
     },
     "eng.1": {
         "id": "eng.1",
@@ -43,6 +44,7 @@ SUPPORTED_LEAGUES: dict[str, dict[str, str]] = {
         "provider": "espn",
         "espn_slug": "eng.1",
         "country_flag": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+        "logo_url": "https://a.espncdn.com/i/leaguelogos/soccer/500/23.png",
     },
     "esp.1": {
         "id": "esp.1",
@@ -51,6 +53,7 @@ SUPPORTED_LEAGUES: dict[str, dict[str, str]] = {
         "provider": "espn",
         "espn_slug": "esp.1",
         "country_flag": "🇪🇸",
+        "logo_url": "https://a.espncdn.com/i/leaguelogos/soccer/500/15.png",
     },
     "ger.1": {
         "id": "ger.1",
@@ -59,6 +62,7 @@ SUPPORTED_LEAGUES: dict[str, dict[str, str]] = {
         "provider": "espn",
         "espn_slug": "ger.1",
         "country_flag": "🇩🇪",
+        "logo_url": "https://a.espncdn.com/i/leaguelogos/soccer/500/10.png",
     },
     "ita.1": {
         "id": "ita.1",
@@ -67,6 +71,16 @@ SUPPORTED_LEAGUES: dict[str, dict[str, str]] = {
         "provider": "espn",
         "espn_slug": "ita.1",
         "country_flag": "🇮🇹",
+        "logo_url": "https://a.espncdn.com/i/leaguelogos/soccer/500/12.png",
+    },
+    "fra.1": {
+        "id": "fra.1",
+        "name_ar": "الدوري الفرنسي (Ligue 1)",
+        "name_en": "French Ligue 1",
+        "provider": "espn",
+        "espn_slug": "fra.1",
+        "country_flag": "🇫🇷",
+        "logo_url": "https://a.espncdn.com/i/leaguelogos/soccer/500/9.png",
     },
     "uefa.champions": {
         "id": "uefa.champions",
@@ -75,6 +89,7 @@ SUPPORTED_LEAGUES: dict[str, dict[str, str]] = {
         "provider": "espn",
         "espn_slug": "uefa.champions",
         "country_flag": "🇪🇺",
+        "logo_url": "https://a.espncdn.com/i/leaguelogos/soccer/500/2.png",
     },
     "caf.champions": {
         "id": "caf.champions",
@@ -83,6 +98,7 @@ SUPPORTED_LEAGUES: dict[str, dict[str, str]] = {
         "provider": "espn",
         "espn_slug": "caf.champions",
         "country_flag": "🌍",
+        "logo_url": "https://a.espncdn.com/i/leaguelogos/soccer/500/67.png",
     },
 }
 

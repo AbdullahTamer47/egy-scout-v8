@@ -70,10 +70,10 @@ const PHASE_META: Array<{ id: TacticalPhaseId; ar: string; en: string; color: st
   { id: "defense", ar: "3. قطع الكرة والدفاع", en: "3. Defense & Recovery", color: "#DC2626" },
 ];
 const PRESET_BUTTONS = [
-  { label: "ألونسو 3-4-2-1", prompt: "تشابي ألونسو 3-4-2-1" },
-  { label: "جوارديولا 3-2-4-1", prompt: "جوارديولا 3-2-4-1" },
-  { label: "كلوب 4-3-3", prompt: "كلوب 4-3-3" },
-  { label: "إنزاجي 3-5-2", prompt: "إنزاجي 3-5-2" },
+  { label: "3-4-2-1", prompt: "3-4-2-1" },
+  { label: "3-2-4-1", prompt: "3-2-4-1" },
+  { label: "4-3-3", prompt: "4-3-3" },
+  { label: "3-5-2", prompt: "3-5-2" },
 ];
 
 type SelectedElement =
@@ -539,7 +539,7 @@ export default function CoachTacticsStudio({
     if (displayMode !== "team_a") drawPlayers(nodesB, "team_b", opponent.kit_hex || "#0284C7");
   }, [currentPhase, morphDisplay, displayMode, showChannelsGrid, selectedEl, linkPending, club.kit_hex, opponent.kit_hex, liveFreehand, drawColor]);
 
-  const toMetersFromEvent = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const toMetersFromEvent = (e: React.MouseEvent<HTMLCanvasElement> | React.PointerEvent<HTMLCanvasElement>) => {
     const cvs = cvsRef.current!;
     const rect = cvs.getBoundingClientRect();
     const cx = ((e.clientX - rect.left) / rect.width) * cvs.width;
@@ -581,7 +581,7 @@ export default function CoachTacticsStudio({
     return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
   };
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement> | React.PointerEvent<HTMLCanvasElement>) => {
     if (!currentPhase) return;
     const { x_m, y_m } = toMetersFromEvent(e);
     const hitN = hitPlayer(x_m, y_m);
@@ -668,7 +668,7 @@ export default function CoachTacticsStudio({
     draftBoxRef.current = { sx: x_m, sy: y_m, cx: x_m, cy: y_m };
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement> | React.PointerEvent<HTMLCanvasElement>) => {
     const { x_m, y_m } = toMetersFromEvent(e);
     if (freehandDraftRef.current) {
       const pts = freehandDraftRef.current;
@@ -1121,14 +1121,14 @@ export default function CoachTacticsStudio({
                 setPlayingKeyframes(false);
                 setIsMorphing((v) => !v);
               }}
-              className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-xl font-extrabold border transition ${
+              className={`inline-flex items-center gap-1 px-3 py-1.5 min-h-[36px] rounded-xl font-extrabold border transition ${
                 isMorphing
                   ? "bg-[#E0A526] text-[#0B1F3A] border-[#E0A526] shadow-xs"
                   : "bg-amber-50 text-amber-900 border-[#E0A526]/40 hover:bg-amber-100"
               }`}
             >
               {isMorphing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-              <span>{isMorphing ? (isAr ? "إيقاف التحوّل" : "Stop Morph") : isAr ? "عرض تحوّل الحالات الـ 3" : "Animate 3 Phases"}</span>
+              <span>{isMorphing ? (isAr ? "إيقاف التحول" : "Stop Morph") : isAr ? "عرض تحول الحالات الـ 3" : "Animate 3 Phases"}</span>
             </button>
           </div>
 
@@ -1282,10 +1282,11 @@ export default function CoachTacticsStudio({
             ref={cvsRef}
             width={960}
             height={590}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            className="w-full rounded-2xl border border-emerald-700/30 bg-[#15803D] cursor-crosshair shadow-sm"
+            onPointerDown={handleMouseDown}
+            onPointerMove={handleMouseMove}
+            onPointerUp={handleMouseUp}
+            onPointerCancel={handleMouseUp}
+            className="w-full rounded-2xl border border-emerald-700/30 bg-[#15803D] cursor-crosshair shadow-sm touch-none"
           />
 
           <div className="text-[11px] text-slate-600 px-1 flex flex-wrap items-center justify-between">

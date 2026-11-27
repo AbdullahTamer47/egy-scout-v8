@@ -12,13 +12,14 @@ interface Props {
 }
 
 const LEAGUE_PILLS = [
-  { id: "egy.1", ar: "الدوري المصري", en: "Egypt EPL" },
-  { id: "eng.1", ar: "الإنجليزي", en: "Premier League" },
-  { id: "esp.1", ar: "الإسباني", en: "LaLiga" },
-  { id: "ger.1", ar: "الألماني", en: "Bundesliga" },
-  { id: "ita.1", ar: "الإيطالي", en: "Serie A" },
-  { id: "uefa.champions", ar: "أبطال أوروبا", en: "UEFA CL" },
-  { id: "caf.champions", ar: "أبطال إفريقيا", en: "CAF CL" },
+  { id: "egy.1", ar: "الدوري المصري", en: "Egypt EPL", logo: "https://imagecache.365scores.com/image/upload/f_png,w_96,h_96,c_limit,q_auto:eco,dpr_2,d_Competitions:default.png/v1/Competitions/552" },
+  { id: "eng.1", ar: "الإنجليزي", en: "Premier League", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/23.png" },
+  { id: "esp.1", ar: "الإسباني", en: "LaLiga", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/15.png" },
+  { id: "ger.1", ar: "الألماني", en: "Bundesliga", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/10.png" },
+  { id: "ita.1", ar: "الإيطالي", en: "Serie A", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/12.png" },
+  { id: "fra.1", ar: "الفرنسي", en: "Ligue 1", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/9.png" },
+  { id: "uefa.champions", ar: "أبطال أوروبا", en: "UEFA CL", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/2.png" },
+  { id: "caf.champions", ar: "أبطال إفريقيا", en: "CAF CL", logo: "https://a.espncdn.com/i/leaguelogos/soccer/500/67.png" },
 ];
 
 export default function LiveFootballHubPanel({ lang, initialHub, onClubSynced }: Props) {
@@ -110,19 +111,25 @@ export default function LiveFootballHubPanel({ lang, initialHub, onClubSynced }:
           </button>
         </div>
 
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {LEAGUE_PILLS.map((lg) => (
             <button
               key={lg.id}
               type="button"
               onClick={() => loadLeague(lg.id, false)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] rounded-xl text-xs font-extrabold whitespace-nowrap shrink-0 transition ${
                 activeLeague === lg.id
-                  ? "bg-emerald-600 text-white shadow-2xs"
-                  : "bg-slate-50 border border-slate-200 text-slate-700 hover:border-slate-300"
+                  ? "bg-[#0D717A] text-white shadow-2xs"
+                  : "bg-[#F2F6F8] border border-[#D8E3EB] text-[#0B1F3A] hover:border-[#0FB5AE]"
               }`}
             >
-              {isAr ? lg.ar : lg.en}
+              <img
+                src={lg.logo}
+                alt={lg.en}
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                className="w-4 h-4 object-contain shrink-0 rounded-sm bg-white/90 p-0.5"
+              />
+              <span>{isAr ? lg.ar : lg.en}</span>
             </button>
           ))}
         </div>

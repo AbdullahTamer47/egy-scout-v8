@@ -94,7 +94,7 @@ export default function CoachAICopilot({
   };
 
   const quickChips = [
-    `ارسم خطة 3-4-2-1 ألونسو لـ ${club.name_ar} ضد ${opponent.name_ar}`,
+    `ارسم خطة 3-4-2-1 لـ ${club.name_ar} ضد ${opponent.name_ar}`,
     `صمم وحدة تدريبية MD-2 للضغط العالي والتحولات`,
     `جهز كشف المباراة الرسمي واستبعد المصابين والموقوفين`,
     `حلل نقاط قوة وضعف ${opponent.name_ar} بالبيانات الحية`,
@@ -108,7 +108,7 @@ export default function CoachAICopilot({
     <div dir={isAr ? "rtl" : "ltr"} className="fixed inset-0 z-50 flex justify-end bg-slate-900/35 backdrop-blur-[2px]" onClick={onToggleOpen}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full sm:w-[460px] h-full bg-white border-s border-slate-200 shadow-2xl shadow-slate-900/20 flex flex-col overflow-hidden text-slate-900"
+        className="w-full sm:w-[460px] h-[100dvh] bg-white border-s border-slate-200 shadow-2xl shadow-slate-900/20 flex flex-col overflow-hidden text-slate-900"
       >
         <div className="px-4 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -117,7 +117,7 @@ export default function CoachAICopilot({
             </div>
             <div className="min-w-0">
               <div className="text-xs font-extrabold text-slate-900 truncate">
-                {isAr ? `مساعد كابتن ${profile.coach_name} الذكي` : `Coach ${profile.coach_name} AI Copilot`}
+                {isAr ? `مساعد كابتن ${profile.coach_name} بالـ AI` : `Coach ${profile.coach_name} AI Assistant`}
               </div>
               <div className="text-[10px] font-bold text-emerald-700 truncate">
                 {club.name_ar} × {opponent.name_ar}
@@ -128,7 +128,7 @@ export default function CoachAICopilot({
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              aria-label="Groq AI Model"
+              aria-label="AI Model"
               className="rounded-lg bg-white border border-slate-200 px-2 py-1 text-[10px] font-bold text-slate-700 max-w-[130px]"
             >
               {models.map((m) => (
@@ -140,7 +140,7 @@ export default function CoachAICopilot({
             <button
               type="button"
               onClick={onToggleOpen}
-              aria-label="Close AI Copilot"
+              aria-label="Close AI Assistant"
               className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-600"
             >
               <X className="w-4 h-4" />

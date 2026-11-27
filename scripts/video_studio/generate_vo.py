@@ -1,12 +1,13 @@
-"""Generate tight ~60s ElevenLabs v4 voiceovers (AR priority + EN) with 1.08x pace & ZERO AI SFX.
+"""Generate tight ~58-62s ElevenLabs eleven_v4 voiceovers (AR priority + EN) with 1.08x pace & ZERO AI SFX.
 
 Rules verified:
-  - Target duration: ~60 seconds (~58-62s)
-  - Model: eleven_v4 (no unsupported speed/style params in JSON; subtle atempo=1.08 in FFmpeg)
-  - Terminology: say "بالـ AI" / "with AI" (NEVER say "AI Copilot" / "كوبايلوت")
-  - Multi-league: explicitly cover multiple local, African, and European leagues
-  - Honest data: ZERO fabricated/exaggerated stat metrics
-  - Video Analysis Studio: showcase Alpha/Beta live features and clearly call it Alpha/Beta under active dev
+  - Temp/VO outputs live strictly on D:\\egy-scout-data\\video_studio_tmp (never C:)
+  - Model: eleven_v4 (no unsupported speed/style params in JSON; atempo=1.08 in FFmpeg)
+  - Terminology: say "الذكاء الاصطناعي (AI)" / "بالـ AI" / "powered by AI" (NEVER say "AI Copilot" / "كوبايلوت")
+  - Formations: tactical numbers only (NEVER mention coach names)
+  - Multi-league: explicitly cover Egypt + Europe's Big 5 (Premier League, LaLiga, Bundesliga, Serie A, Ligue 1)
+  - Logos: use the 15 verified real official HD PNG logos from D:\\egy-scout-data\\video_studio_tmp\\logos
+  - Video Analysis Studio: clearly explain what the Full Alpha/Beta studio does and its features at the end
   - Secret safety: read ELEVENLABS_API_KEY strictly from env
 """
 from __future__ import annotations
@@ -21,24 +22,31 @@ import av
 import httpx
 import imageio_ffmpeg
 
-ASSETS_ROOT = Path(
-    r"C:\Users\Abdullah_Yassen\.gemini\antigravity\brain\63f869d2-f74e-4708-9f2a-2f435628b8c8\scratch\video_assets"
-)
+ASSETS_ROOT = Path(r"D:\egy-scout-data\video_studio_tmp")
+LOGOS_DIR = ASSETS_ROOT / "logos"
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 MODEL_ID = "eleven_v4"
-TEMPO = 1.08  # Slightly faster crisp SaaS delivery while preserving pitch cleanly
+TEMPO = 1.08
 
-AR_VOICE_ID = "IKne3meq5aSn9XLyUdCD"  # Charlie - Deep, Confident, Energetic (eleven_v4 compatible)
-EN_VOICE_ID = "TX3LPaxmHKxFdv7VOQHJ"  # Liam - Energetic, Social Media Creator (eleven_v4 compatible)
+AR_VOICE_ID = "IKne3meq5aSn9XLyUdCD"  # Charlie - Deep, Confident, Energetic
+EN_VOICE_ID = "TX3LPaxmHKxFdv7VOQHJ"  # Liam - Energetic, Social Media Creator
 
-# Dynamic club crest icons for animated multi-league crest orbit (live synced crests or fallback clean initials)
-CLUB_CRESTS_PREVIEW = [
-    {"label": "الأهلي", "short": "ASC", "hex": "#DC2626"},
-    {"label": "الزمالك", "short": "ZSC", "hex": "#0F172A"},
-    {"label": "بيراميدز", "short": "PFC", "hex": "#2563EB"},
-    {"label": "EPL", "short": "EPL", "hex": "#3B0764"},
-    {"label": "LaLiga", "short": "LLG", "hex": "#EA580C"},
-    {"label": "CAF CL", "short": "CAF", "hex": "#0D9488"},
+LOGO_SHOWCASE = [
+    {"id": "lg_egy", "file": "lg_egy.png", "label": "الدوري المصري", "label_en": "Egypt EPL"},
+    {"id": "lg_eng", "file": "lg_eng.png", "label": "الإنجليزي", "label_en": "Premier League"},
+    {"id": "lg_esp", "file": "lg_esp.png", "label": "الإسباني", "label_en": "LaLiga"},
+    {"id": "lg_ger", "file": "lg_ger.png", "label": "الألماني", "label_en": "Bundesliga"},
+    {"id": "lg_ita", "file": "lg_ita.png", "label": "الإيطالي", "label_en": "Serie A"},
+    {"id": "lg_fra", "file": "lg_fra.png", "label": "الفرنسي", "label_en": "Ligue 1"},
+    {"id": "club_al_ahly", "file": "club_al_ahly.png", "label": "الأهلي", "label_en": "Al Ahly"},
+    {"id": "club_zamalek", "file": "club_zamalek.png", "label": "الزمالك", "label_en": "Zamalek"},
+    {"id": "club_pyramids", "file": "club_pyramids.png", "label": "بيراميدز", "label_en": "Pyramids"},
+    {"id": "club_arsenal", "file": "club_arsenal.png", "label": "Arsenal", "label_en": "Arsenal"},
+    {"id": "club_realmadrid", "file": "club_realmadrid.png", "label": "Real Madrid", "label_en": "Real Madrid"},
+    {"id": "club_barcelona", "file": "club_barcelona.png", "label": "Barcelona", "label_en": "Barcelona"},
+    {"id": "club_bayern", "file": "club_bayern.png", "label": "Bayern", "label_en": "Bayern"},
+    {"id": "club_psg", "file": "club_psg.png", "label": "PSG", "label_en": "PSG"},
+    {"id": "club_inter", "file": "club_inter.png", "label": "Inter", "label_en": "Inter"},
 ]
 
 SCENES = {
@@ -46,170 +54,128 @@ SCENES = {
         {
             "id": "b01_logo_intro",
             "template": "lovio_logo_reveal",
-            "headline": "EGY-SCOUT",
-            "sub": "Coach Pro",
+            "flash": "EGY-SCOUT Coach Pro",
+            "pill": "مدعوم بالـ AI بالكامل · bedigital",
             "clip": "",
-            "gap_after": 0.12,
-            "vo": "من بي ديجيتال.. إي چي سكاوت كوتش برو.",
+            "gap_after": 0.14,
+            "vo": "من بي ديجيتال.. إي چي سكاوت كوتش برو، مدعوم بالـ AI.",
         },
         {
-            "id": "b02_leagues_live",
+            "id": "b02_leagues_big5",
             "template": "lovio_multi_leagues",
-            "headline": "دوريات متعددة",
-            "highlight": "ببيانات حية",
-            "sub": "الدوري المصري، الإنجليزي، الإسباني، الألماني، الإيطالي وأبطال إفريقيا",
+            "flash": "مصر والدوريات الخمسة الكبرى",
+            "pill": "تحديث حي بالـ AI لـ 6 دوريات كبرى",
             "clip": "ar_leagues",
             "gap_after": 0.14,
-            "vo": "بيانات حية بتتحدث تلقائياً لعدة دوريات محلية وأوروبية وإفريقية.",
+            "vo": "تحديث حي ومباشر للدوري المصري والدوريات الخمسة الكبرى: الإنجليزي والإسباني والألماني والإيطالي والفرنسي.",
         },
         {
-            "id": "b03_command_modal",
-            "template": "lovio_device_live",
-            "headline": "تشكيل متزامن",
-            "highlight": "وملفات حقيقية",
-            "sub": "تغيير الخطة وفتح تفاصيل أي لاعب بضغطة واحدة",
-            "clip": "ar_command",
-            "gap_after": 0.14,
-            "vo": "من لوحة القيادة، تغيّر تشكيلك فيتحدث كل البرنامج، وتفتح تفاصيل أي لاعب بضغطة.",
-        },
-        {
-            "id": "b04_ai_3421",
+            "id": "b03_ai_3421",
             "template": "lovio_prompt_live",
-            "headline": "ارسم خطتك",
-            "highlight": "بالـ AI لايف",
-            "sub": "شاهد رسم خطة 3-4-2-1 بالباصات والمراكز مباشرة",
-            "prompt": "ارسم خطة 3-4-2-1 ألونسو",
+            "flash": "الـ AI يرسم الخطة لايف",
+            "prompt": "ارسم خطة 3-4-2-1",
             "clip": "ar_ai_3421",
-            "crop": {"scale": 1.12, "ox": "45%", "oy": "50%"},
-            "gap_after": 0.12,
-            "vo": "اطلب من البرنامج بالـ AI يرسم لك خطة تلاتة أربعة اتنين واحد.. يرسمها قدامك لايف بالباصات والمراكز.",
+            "gap_after": 0.14,
+            "vo": "الـ AI داخل في كل خطوة: اطلب منه يرسم لك خطة تلاتة أربعة اتنين واحد، ويرسمها فوراً بالباصات والمراكز.",
         },
         {
-            "id": "b05_3phases_live",
-            "template": "lovio_bento_phases",
-            "headline": "تلات حالات",
-            "highlight": "تتحول قدامك",
-            "sub": "تحول فعلي في تمركز اللاعبين وأسهم التمرير والضغط",
+            "id": "b04_3phases_live",
+            "template": "lovio_phases_live",
+            "flash": "الاستحواذ · الهجوم · الدفاع",
             "phases": ["1. الاستحواذ والبناء", "2. الهجوم والاختراق", "3. قطع الكرة والدفاع"],
             "clip": "ar_3phases",
             "gap_after": 0.14,
-            "vo": "وشوف الفريق بيتحول لايف في التلات حالات: الاستحواذ والبناء، والهجوم والاختراق، وقطع الكرة والدفاع.",
+            "vo": "وشوف اللعيبة بتتحرك لايف قدامك وهي بتبدل بين الاستحواذ، والهجوم، وقطع الكرة والدفاع.",
         },
         {
-            "id": "b06_formats_edit",
-            "template": "lovio_device_live",
-            "headline": "من 5 إلى 11",
-            "highlight": "بمرونة كاملة",
-            "sub": "تعديل المراكز والأسماء، شبكة المساحات، وحدات التدريب وكشف المباراة",
-            "clip": "ar_formats_edit",
+            "id": "b05_formats_tools",
+            "template": "lovio_formats_live",
+            "badges": ["سبورات 5×5 → 11×11", "تعديل المراكز والأسماء", "التدريب وكشف المباراة"],
+            "clip": "ar_formats_more",
             "gap_after": 0.16,
-            "vo": "تعدّل مراكز وأسماء اللاعيبة بحرية، وتتنقل بين سبورات خمسة لحد حداشر، مع التدريب وكشف المباراة.",
+            "vo": "وكمان تتحكم في سبورات من خمسة لحد حداشر، وتعدّل مراكز وأسماء اللعيبة، مع برامج التدريب وكشف المباراة.",
         },
         {
-            "id": "b07_video_alpha",
+            "id": "b06_video_alpha",
             "template": "lovio_alpha_live",
-            "headline": "استوديو تحليل الفيديو",
-            "highlight": "نسخة ألفا وبيتا",
-            "sub": "تتبع اللاعبين والكرة · رادار ثنائي الأبعاد · مؤشر التمرير والضغط · وسم اللقطات",
-            "badge": "Alpha / Beta · قيد التطوير",
+            "flash": "النسخة الكاملة · Alpha / Beta (قيد التطوير)",
+            "features": ["تتبع اللاعبين والكرة بالـ AI", "رادار تكتيكي 2D", "تحليل التمرير والضغط", "وسم اللقطات تلقائياً"],
             "clip": "shared_video_alpha",
             "gap_after": 0.16,
-            "vo": "وعندك النسخة الكاملة لتحليل الفيديو.. تتبع لاعيبة ورادار ومؤشر ضغط وتمرير ووسم لقطات؛ نسخة ألفا وبيتا لسه شغالين على تطويرها.",
+            "vo": "أما النسخة الكاملة لتحليل الفيديو فهي نسخة ألفا وبيتا لسه شغالين عليها: فكرتها ترفع فيديو الماتش والـ AI يتتبع اللعيبة والكرة، يرسم رادار تو دي، يحسب ممرات التمرير والضغط، ويطلع لك اللقطات تلقائياً.",
         },
         {
-            "id": "b08_outro",
+            "id": "b07_outro",
             "template": "lovio_end_card",
             "headline": "EGY-SCOUT Coach Pro",
-            "highlight": "شغلك التكتيكي في مكان واحد.",
-            "sub": "bedigital · 2026/27",
+            "pill": "منصة ذكاء تكتيكي بالـ AI · bedigital",
             "clip": "",
             "gap_after": 0.35,
-            "vo": "إي چي سكاوت كوتش برو.. شغلك التكتيكي في مكان واحد.",
+            "vo": "إي چي سكاوت كوتش برو من بي ديجيتال.. منصة ذكاء تكتيكي متكاملة.",
         },
     ],
     "en": [
         {
             "id": "b01_logo_intro",
             "template": "lovio_logo_reveal",
-            "headline": "EGY-SCOUT",
-            "sub": "Coach Pro",
+            "flash": "EGY-SCOUT Coach Pro",
+            "pill": "Powered by AI · bedigital",
             "clip": "",
-            "gap_after": 0.12,
-            "vo": "By bedigital. Meet EGY-SCOUT Coach Pro.",
+            "gap_after": 0.14,
+            "vo": "By bedigital. Meet EGY-SCOUT Coach Pro, powered by AI.",
         },
         {
-            "id": "b02_leagues_live",
+            "id": "b02_leagues_big5",
             "template": "lovio_multi_leagues",
-            "headline": "Multiple Leagues",
-            "highlight": "Auto-Synced Live",
-            "sub": "Egypt, Premier League, LaLiga, Bundesliga, Serie A & CAF Champions",
+            "flash": "Egypt & Europe's Big 5",
+            "pill": "Live auto-synced football data",
             "clip": "en_leagues",
             "gap_after": 0.14,
-            "vo": "Live auto-updated data across Egyptian, African, and top European leagues.",
+            "vo": "Live auto-synced coverage for Egypt and Europe's Big Five: Premier League, LaLiga, Bundesliga, Serie A, and Ligue 1.",
         },
         {
-            "id": "b03_command_modal",
-            "template": "lovio_device_live",
-            "headline": "Synced Tactics",
-            "highlight": "& Real Profiles",
-            "sub": "Switch formations once and open any player's card live",
-            "clip": "en_command",
-            "gap_after": 0.14,
-            "vo": "Switch formations once in Command Center to update every view, and open any player's live profile.",
-        },
-        {
-            "id": "b04_ai_3421",
+            "id": "b03_ai_3421",
             "template": "lovio_prompt_live",
-            "headline": "Draw Live",
-            "highlight": "Powered by AI",
-            "sub": "Watch AI plot 3-4-2-1 with exact roles and pass lanes",
-            "prompt": "Draw 3-4-2-1 Alonso plan",
+            "flash": "AI Draws Tactics Live",
+            "prompt": "Draw 3-4-2-1",
             "clip": "en_ai_3421",
-            "crop": {"scale": 1.12, "ox": "55%", "oy": "50%"},
-            "gap_after": 0.12,
-            "vo": "Ask the app with AI to build a 3-4-2-1 shape, and watch it draw live with accurate passes and roles.",
+            "gap_after": 0.14,
+            "vo": "AI runs at the core: ask it to draw a 3-4-2-1 shape, and watch passing lanes and player roles render live.",
         },
         {
-            "id": "b05_3phases_live",
-            "template": "lovio_bento_phases",
-            "headline": "Three Phases",
-            "highlight": "Animating Live",
-            "sub": "Watch player positioning and arrows shift phase by phase",
+            "id": "b04_3phases_live",
+            "template": "lovio_phases_live",
+            "flash": "Possession · Attack · Defense",
             "phases": ["1. In Possession", "2. Attacking", "3. Defense & Recovery"],
             "clip": "en_3phases",
             "gap_after": 0.14,
-            "vo": "See the team shift live across possession, attacking penetration, and defensive recovery.",
+            "vo": "Watch every player glide smoothly across possession, attacking transitions, and defensive recovery.",
         },
         {
-            "id": "b06_formats_edit",
-            "template": "lovio_device_live",
-            "headline": "5v5 to 11v11",
-            "highlight": "Fully Editable",
-            "sub": "Edit positions and names live, 5-channel grid, training & matchday sheet",
-            "clip": "en_formats_edit",
+            "id": "b05_formats_tools",
+            "template": "lovio_formats_live",
+            "badges": ["5v5 → 11v11 Boards", "Editable Roles & Names", "Training & Matchday XI"],
+            "clip": "en_formats_more",
             "gap_after": 0.16,
-            "vo": "Freely edit player positions and names, switch from 5v5 up to 11v11 boards, run training drills, and print matchday sheets.",
+            "vo": "Switch boards from 5v5 to 11v11, edit player positions and names, manage training drills, and build matchday squads.",
         },
         {
-            "id": "b07_video_alpha",
+            "id": "b06_video_alpha",
             "template": "lovio_alpha_live",
-            "headline": "Full Video Studio",
-            "highlight": "Alpha / Beta",
-            "sub": "Player tracking · 2D radar twin · Passing lanes & xPass · Momentum & clip tags",
-            "badge": "Alpha / Beta · Under Active Development",
+            "flash": "Full Video Studio · Alpha / Beta (In Development)",
+            "features": ["AI Player & Ball Tracking", "Live 2D Tactical Radar", "Passing & Pressing Score", "Auto Moment Tagging"],
             "clip": "shared_video_alpha",
             "gap_after": 0.16,
-            "vo": "Plus our experimental Video Analysis Studio with player tracking, 2D radar, passing lanes, momentum charts, and clip tagging — an Alpha-Beta release still in active development.",
+            "vo": "And our Full Video Analysis Studio is an Alpha-Beta release still in active development: upload match footage and AI tracks players and the ball, generates a live 2D radar, scores passing and pressing momentum, and tags key moments.",
         },
         {
-            "id": "b08_outro",
+            "id": "b07_outro",
             "template": "lovio_end_card",
             "headline": "EGY-SCOUT Coach Pro",
-            "highlight": "Your tactical workspace, live.",
-            "sub": "bedigital · 2026/27",
+            "pill": "Live AI Coaching Workspace · bedigital",
             "clip": "",
             "gap_after": 0.35,
-            "vo": "EGY-SCOUT Coach Pro. Your entire tactical workspace, live.",
+            "vo": "EGY-SCOUT Coach Pro by bedigital. Live AI coaching.",
         },
     ],
 }
@@ -248,7 +214,6 @@ def synthesize_tts(api_key: str, voice_id: str, text: str, out_mp3: Path) -> Non
 
 
 def process_clip(mp3_path: Path, out_wav: Path, pad_tail: float) -> tuple[float, float]:
-    """Trim dead air AND apply subtle crisp tempo boost (atempo=1.08), returning (aud_dur, seg_dur)."""
     trim_wav = out_wav.with_name(out_wav.stem + "_pre.wav")
     subprocess.run(
         [
@@ -310,7 +275,7 @@ def process_clip(mp3_path: Path, out_wav: Path, pad_tail: float) -> tuple[float,
 
 def build_language_vo(api_key: str, lang: str) -> dict:
     voice_id = AR_VOICE_ID if lang == "ar" else EN_VOICE_ID
-    vo_dir = ASSETS_ROOT / f"vo_v3_{lang}"
+    vo_dir = ASSETS_ROOT / f"vo_v4_{lang}"
     vo_dir.mkdir(parents=True, exist_ok=True)
 
     timeline = []
@@ -347,8 +312,8 @@ def build_language_vo(api_key: str, lang: str) -> dict:
 
     concat_txt = vo_dir / "concat.txt"
     concat_txt.write_text("\n".join(f"file '{p.as_posix()}'" for p in wav_parts), encoding="utf-8")
-    raw_full = vo_dir / f"full_v3_{lang}_raw.wav"
-    master_m4a = ASSETS_ROOT / f"vo_v3_{lang}_master.m4a"
+    raw_full = vo_dir / f"full_v4_{lang}_raw.wav"
+    master_m4a = ASSETS_ROOT / f"vo_v4_{lang}_master.m4a"
     subprocess.run(
         [FFMPEG, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_txt), "-c:a", "pcm_s16le", str(raw_full)],
         check=True,
@@ -378,6 +343,9 @@ def build_language_vo(api_key: str, lang: str) -> dict:
         last = timeline[-1]
         last["duration_s"] = round(max(last["duration_s"], total_dur - last["start_s"]), 3)
 
+    logos_verified = [
+        item for item in LOGO_SHOWCASE if (LOGOS_DIR / item["file"]).is_file()
+    ]
     manifest = {
         "lang": lang,
         "model_id": MODEL_ID,
@@ -385,12 +353,13 @@ def build_language_vo(api_key: str, lang: str) -> dict:
         "voice_id": voice_id,
         "total_duration_s": round(total_dur, 3),
         "audio_file": str(master_m4a),
-        "crests": CLUB_CRESTS_PREVIEW,
+        "logos_dir": str(LOGOS_DIR),
+        "logos": logos_verified,
         "scenes": timeline,
     }
-    manifest_path = ASSETS_ROOT / f"manifest_v3_{lang}.json"
+    manifest_path = ASSETS_ROOT / f"manifest_v4_{lang}.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[{lang.upper()}] Built v3 {MODEL_ID} ({TEMPO}x) VO: {master_m4a} ({total_dur:.2f}s / {len(timeline)} beats)")
+    print(f"[{lang.upper()}] Built v4 {MODEL_ID} ({TEMPO}x) VO: {master_m4a} ({total_dur:.2f}s / {len(timeline)} beats)")
     return manifest
 
 

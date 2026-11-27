@@ -518,7 +518,7 @@ def run_coach_copilot_chat(
     ai_matchday_sheet: Optional[dict[str, Any]] = None
     structured_cards: list[dict[str, Any]] = []
     follow_ups = [
-        f"ارسم خطة 3-4-2-1 ألونسو لـ {club.get('name_ar')} ضد {opponent.get('name_ar')}",
+        f"ارسم خطة 3-4-2-1 لـ {club.get('name_ar')} ضد {opponent.get('name_ar')}",
         f"صمم وحدة تدريبية MD-2 لمواجهة {opponent.get('name_ar')}",
         "جهز كشف المباراة الرسمي مع استبعاد المصابين والموقوفين",
         f"اكتب خطاب غرفة الملابس قبل مواجهة {opponent.get('name_ar')}",
