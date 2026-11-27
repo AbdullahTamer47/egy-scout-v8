@@ -26,18 +26,19 @@ function findFfmpeg() {
 const FFMPEG = findFfmpeg();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Preload screenshots as base64 data URIs for instant zero-flicker frame injection
 const screenCache = new Map();
 function getScreenUri(filename) {
+  if (!filename) return "";
   if (!screenCache.has(filename)) {
-    const buf = fs.readFileSync(path.join(SCREENS_DIR, filename));
+    const fullPath = path.join(SCREENS_DIR, filename);
+    const buf = fs.readFileSync(fullPath);
     screenCache.set(filename, `data:image/png;base64,${buf.toString("base64")}`);
   }
   return screenCache.get(filename);
 }
 
 async function openChromeCdp(port) {
-  const userDataDir = path.join(ASSETS_ROOT, `chrome_render_${port}`);
+  const userDataDir = path.join(ASSETS_ROOT, `chrome_render_v2_${port}`);
   fs.mkdirSync(userDataDir, { recursive: true });
   const proc = spawn(
     CHROME_PATH,
@@ -100,19 +101,22 @@ async function openChromeCdp(port) {
     mobile: false,
   });
   await send("Page.navigate", { url: STAGE_URL });
-  await sleep(1800);
+  await sleep(1600);
+  await send("Runtime.evaluate", { expression: "document.fonts.ready", awaitPromise: true });
   return { proc, ws, send };
 }
 
 async function renderOneVideo(lang, cdpPort) {
-  const manifestPath = path.join(ASSETS_ROOT, `manifest_${lang}.json`);
+  const manifestPath = path.join(ASSETS_ROOT, `manifest_v2_${lang}.json`);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
   const scenes = manifest.scenes;
   const totalDur = manifest.total_duration_s;
   const totalFrames = Math.ceil(totalDur * FPS);
   const outMp4 = path.join(OUT_DIR, `EGY_SCOUT_Coach_Pro_${lang.toUpperCase()}.mp4`);
 
-  console.log(`[${lang.toUpperCase()}] Rendering ${totalFrames} frames (${totalDur.toFixed(2)}s @ ${FPS}fps) -> ${outMp4}`);
+  console.log(
+    `[${lang.toUpperCase()}] Rendering ${totalFrames} frames (${totalDur.toFixed(2)}s @ ${FPS}fps) -> ${outMp4}`
+  );
 
   const { proc, ws, send } = await openChromeCdp(cdpPort);
 
@@ -153,18 +157,6 @@ async function renderOneVideo(lang, cdpPort) {
 
   try {
     let curIdx = 0;
-    const compoundScreens = {
-      ar: {
-        s6_training_director: "ar_05_director.png",
-        s7_admin_live: "ar_07_live_hub.png",
-        s8_ai_and_beta: "shared_09_beta_studio.png",
-      },
-      en: {
-        s5_training_director: "en_05_director.png",
-        s6_admin_live: "en_07_live_hub.png",
-        s7_ai_beta: "shared_09_beta_studio.png",
-      },
-    };
     for (let f = 0; f < totalFrames; f++) {
       const t = f / FPS;
       while (curIdx < scenes.length - 1 && t >= scenes[curIdx].start_s + scenes[curIdx].duration_s) {
@@ -172,9 +164,7 @@ async function renderOneVideo(lang, cdpPort) {
       }
       const sc = scenes[curIdx];
       const localTime = Math.max(0, t - sc.start_s);
-      const altScr = compoundScreens[lang]?.[sc.id];
-      const activeScreen = altScr && localTime >= sc.duration_s * 0.52 ? altScr : sc.screen;
-      const imgUri = getScreenUri(activeScreen);
+      const screenDataUris = (sc.screens || []).map((fn) => getScreenUri(fn));
 
       await send("Runtime.evaluate", {
         expression: `window.renderFrame(${JSON.stringify({
@@ -184,7 +174,7 @@ async function renderOneVideo(lang, cdpPort) {
           scene: sc,
           localTime,
           globalProgress: t / totalDur,
-          imgDataUri: imgUri,
+          screenDataUris,
         })})`,
         awaitPromise: true,
       });
@@ -196,7 +186,7 @@ async function renderOneVideo(lang, cdpPort) {
       }
 
       if (f % 150 === 0 || f === totalFrames - 1) {
-        console.log(`[${lang.toUpperCase()}] frame ${f + 1}/${totalFrames} (scene ${sc.id})`);
+        console.log(`[${lang.toUpperCase()}] frame ${f + 1}/${totalFrames} (${sc.id} / ${sc.template})`);
       }
     }
 
@@ -213,9 +203,8 @@ async function renderOneVideo(lang, cdpPort) {
 }
 
 async function main() {
-  // Arabic video first (Priority #1), then English video (#2)
-  await renderOneVideo("ar", 9340);
-  await renderOneVideo("en", 9341);
+  // Render Arabic (#1 priority) and English (#2) simultaneously in isolated CDP browsers
+  await Promise.all([renderOneVideo("ar", 9340), renderOneVideo("en", 9341)]);
 }
 
 main().catch((e) => {

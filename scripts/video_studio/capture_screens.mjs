@@ -122,22 +122,44 @@ async function main() {
       await sleep(600);
     }
 
-    // 1. Command Center
+    // 1. Command Center + Player Detail Modal
     await clickByText(evalJs, "لوحة القيادة");
     await sleep(1600);
     await snap("ar_01_dashboard.png");
+    const clickedStarterAr = await evalJs(`(() => {
+      const btns = [...document.querySelectorAll("button")].filter(b => !b.disabled && b.querySelector("span"));
+      const target = btns.find(b => /^(ST|AM|RW|LW|CM)$/.test((b.querySelector("span")?.textContent || "").trim()));
+      if (target) { target.click(); return true; }
+      return false;
+    })()`);
+    if (clickedStarterAr) {
+      await sleep(650);
+      await snap("ar_01b_player_modal.png");
+      await evalJs(`document.querySelector('[aria-label="Close"]')?.click()`);
+      await sleep(400);
+    }
 
     // 2. Tactics 11v11
     await clickByText(evalJs, "الخطط والتكتيك");
     await sleep(1400);
     await snap("ar_02_tactics_11v11.png");
 
-    // 3. Tactics 7v7 + Attacking phase
+    // 3. Tactics 7v7 + Attacking phase & 5v5 Defense + 5-Channel Grid
     await clickByText(evalJs, "7×7");
     await sleep(1100);
     await clickByText(evalJs, "2. في حالة الهجوم");
     await sleep(700);
     await snap("ar_03_tactics_7v7_attack.png");
+
+    await clickByText(evalJs, "5×5");
+    await sleep(1000);
+    await clickByText(evalJs, "3. قطع الكرة والدفاع");
+    await sleep(600);
+    await clickByText(evalJs, "شبكة المساحات");
+    await sleep(500);
+    await snap("ar_03b_tactics_5v5.png");
+    await clickByText(evalJs, "شبكة المساحات");
+    await sleep(300);
     await clickByText(evalJs, "11×11");
     await sleep(900);
     await clickByText(evalJs, "1. في حالة الاستحواذ");
@@ -178,6 +200,18 @@ async function main() {
     await clickByText(evalJs, "Command");
     await sleep(1400);
     await snap("en_01_dashboard.png");
+    const clickedStarterEn = await evalJs(`(() => {
+      const btns = [...document.querySelectorAll("button")].filter(b => !b.disabled && b.querySelector("span"));
+      const target = btns.find(b => /^(ST|AM|RW|LW|CM)$/.test((b.querySelector("span")?.textContent || "").trim()));
+      if (target) { target.click(); return true; }
+      return false;
+    })()`);
+    if (clickedStarterEn) {
+      await sleep(650);
+      await snap("en_01b_player_modal.png");
+      await evalJs(`document.querySelector('[aria-label="Close"]')?.click()`);
+      await sleep(400);
+    }
 
     await clickByText(evalJs, "Tactics");
     await sleep(1300);
@@ -188,6 +222,16 @@ async function main() {
     await clickByText(evalJs, "2. Attacking");
     await sleep(600);
     await snap("en_03_tactics_7v7.png");
+
+    await clickByText(evalJs, "5×5");
+    await sleep(1000);
+    await clickByText(evalJs, "3. Defense & Recovery");
+    await sleep(600);
+    await clickByText(evalJs, "5-Channels Grid");
+    await sleep(500);
+    await snap("en_03b_tactics_5v5.png");
+    await clickByText(evalJs, "5-Channels Grid");
+    await sleep(300);
     await clickByText(evalJs, "11×11");
     await sleep(700);
 
